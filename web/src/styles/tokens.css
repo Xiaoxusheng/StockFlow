@@ -1,0 +1,70 @@
+/**
+ * StockFlow Design Token（frontend.md §2.1）
+ * 业务层唯一样式变量来源；antd Token 通过 ConfigProvider 映射（App.tsx）。
+ * 禁止页面绕过 Token 直接写死样式值。
+ */
+
+:root {
+  /* 表面与背景 */
+  --sf-bg: #f5f6f8;
+  --sf-surface: #ffffff;
+  --sf-surface-elevated: #ffffff;
+
+  /* 边框 */
+  --sf-border: #e1e4e8;
+  --sf-border-subtle: #eef0f2;
+
+  /* 文字 */
+  --sf-text: rgba(31, 35, 41, 0.92);
+  --sf-text-secondary: rgba(31, 35, 41, 0.65);
+  --sf-text-muted: rgba(31, 35, 41, 0.45);
+
+  /* 主色与状态色 */
+  --sf-primary: #1674ff;
+  --sf-success: #389e0d;
+  --sf-warning: #d48806;
+  --sf-danger: #cf1322;
+
+  /* 圆角 */
+  --sf-radius-sm: 4px;
+  --sf-radius-md: 6px;
+  --sf-radius-lg: 8px;
+
+  /* 阴影 */
+  --sf-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --sf-shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08);
+
+  /* 间距 */
+  --sf-space-1: 4px;
+  --sf-space-2: 8px;
+  --sf-space-3: 12px;
+  --sf-space-4: 16px;
+  --sf-space-5: 20px;
+  --sf-space-6: 24px;
+
+  /* 布局 */
+  --sf-header-height: 48px;
+  --sf-sider-width: 216px;
+  --sf-sider-collapsed-width: 48px;
+}
+
+[data-theme='dark'] {
+  --sf-bg: #11151a;
+  --sf-surface: #181d24;
+  --sf-surface-elevated: #1f252e;
+
+  --sf-border: #2b323c;
+  --sf-border-subtle: #222832;
+
+  --sf-text: rgba(230, 236, 244, 0.92);
+  --sf-text-secondary: rgba(230, 236, 244, 0.65);
+  --sf-text-muted: rgba(230, 236, 244, 0.45);
+
+  --sf-primary: #3c8dff;
+  --sf-success: #6abf3f;
+  --sf-warning: #e8b339;
+  --sf-danger: #e8564f;
+
+  --sf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --sf-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+}

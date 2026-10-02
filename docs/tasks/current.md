@@ -8,17 +8,17 @@
 
 | Task | 内容 | 状态 |
 |---|---|---|
-| T1 | 仓库初始化（git/.gitignore/AGENTS.md/计划/状态文件） | ✅ |
-| T2 | 前端脚手架 web/ | ⏳ |
-| T3 | Design Token + Light/Dark 主题 + 格式化 | ⏳ |
-| T4 | API 层与类型（信封/分页/错误映射/Token 注入） | ⏳ |
-| T5 | 认证（登录页/auth store/守卫/DEV 旁路） | ⏳ |
-| T6 | PC Layout（Sidebar/Header/面包屑） | ⏳ |
-| T7 | 统一组件（SfTable/SfToolbar/SfSearchForm/SfPageHeader/SfStatusTag） | ⏳ |
-| T8 | 路由表 + 403/404/500 + 模块占位页 | ⏳ |
-| T9 | Dashboard 四层结构 | ⏳ |
-| T10 | 库存中心示范页（实时库存/库存流水/库存预警） | ⏳ |
-| T11 | 验证（build/截图）+ changelog | ⏳ |
+| T1 | 仓库初始化（git/.gitignore/AGENTS.md/计划/状态文件） | ✅ 362c1bb |
+| T2 | 前端脚手架 web/ | ✅ |
+| T3 | Design Token + Light/Dark 主题 + 格式化 | ✅ |
+| T4 | API 层与类型（信封/分页/错误映射/Token 注入） | ✅ |
+| T5 | 认证（登录页/auth store/守卫/DEV 旁路） | ✅ |
+| T6 | PC Layout（Sidebar/Header/面包屑） | ✅ |
+| T7 | 统一组件（SfTable/SfToolbar/SfSearchForm/SfPageHeader/SfStatusTag） | ✅ |
+| T8 | 路由表 + 403/404/500 + 模块占位页 | ✅ |
+| T9 | Dashboard 四层结构 | ✅ |
+| T10 | 库存中心示范页（实时库存/库存流水/库存预警） | ✅ |
+| T11 | 验证（build/lint/浏览器实测 Light+Dark+1440+768） | ✅ |
 
 ## 下一步（按 frontend.md §29 顺序）
 

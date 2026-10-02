@@ -1,0 +1,44 @@
+@import './tokens.css';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* 数字统一使用等宽数字，保证表格纵向对齐 */
+.sf-num {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 页面容器：紧凑企业级密度（frontend.md §3） */
+.sf-page {
+  padding: var(--sf-space-5) var(--sf-space-6);
+}
+
+/* 滚动条（含 Dark 模式适配） */
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--sf-border);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--sf-text-muted);
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
