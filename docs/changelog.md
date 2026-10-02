@@ -68,3 +68,34 @@
 - 验证：`tsc -b` + `vite build` + ESLint 零错误；浏览器实测 1440/768 宽度、Light/Dark、错误态/空态/404（发现并修复 antd 6 空 Flex 无盒模型导致的工具栏布局问题、窄屏侧边栏折叠与用户名换行）。
 - 影响范围：前端工程基线就绪，后续 F6–F13 按"usePagedList + SfTable + SfStatusTag + api 模块"模式接入；后端未就绪期间数据页显示真实错误态为预期行为。
 
+
+## [2026-10-02] 数据库：M1 迁移全集 + 生产安全初始化（后端阶段 3，T1/schema 冻结点）
+
+- `db/migrations/` 五组成对迁移（000001–000005，up/down 对称可回滚，PostgreSQL 15 方言，golang-migrate）：auth 域（users/roles/permissions/departments + user_roles/role_permissions/user_warehouses，users 软删部分唯一索引）、审计（operation_logs/login_logs，纯日志无 updated_by/deleted_at）、masterdata（product_categories/units/products/skus/barcodes/suppliers/customers，business-flow §1.1–§1.5 全量字段）、warehouse（warehouses/zones/shelves/bins 四级结构域内 FK）、inventory（batches/serial_numbers/inventory/inventory_locks/inventory_ledgers/inventory_adjustments），共 26 表，严格按 backend-m1-plan §6 冻结契约（system_configs/dictionaries/notifications 按 §9 裁决不建，随 M2+ 域迁移交付）。
+- 库存硬约束落库：inventory 六列恒等式 + 非负由 `chk_inventory_identity` CHECK 强制（inventory-rules §2）；五维唯一索引 `uk_inventory_location (warehouse_id, bin_id, sku_id, batch_id)`（batch_id NOT NULL DEFAULT 0=非批次，serial 经 serial_numbers 一物一行）；流水幂等键部分唯一索引；流水 append-only 无更新字段；数量/金额一律 numeric(18,4)；本域无跨域外键（plan §6.4）。
+- `db/grants/app_grants.sql`：审计数据账号分层（database.md §7.2）——业务运行账号对 inventory_ledgers/operation_logs/login_logs 仅 SELECT+INSERT，无 UPDATE/DELETE/TRUNCATE。
+- `db/seed/dev_seed.sql` + `make seed-demo`（database.md §8.2）：演示数据与生产初始化完全分离——Makefile 要求 `SF_ENV=dev`，SQL 内 `is_dev` 门禁双保险，幂等可重跑；覆盖仓库四级结构/商品/SKU/条码/供应商/客户/批次/期初库存/序列号演示数据。
+- `internal/database/seed.go`：生产安全初始化 `BootstrapIfEmpty`——仅 users 空库执行、事务 + pg_advisory_xact_lock 防并发首启、全量 ON CONFLICT 幂等不覆盖；种子：16 内置角色（permission.md §1，is_system 禁删）、102 个权限点（plan §5.4.1 冻结的 80 个动作点 + 22 个 MENU 菜单，MENU/BUTTON/API 三级）、四角色权限映射（plan §7.1）、默认管理员（bcrypt cost 12、must_change_password=TRUE，密码经 SF_ADMIN_INITIAL_PASSWORD 注入，缺失/弱密码启动失败且绝不写日志）、默认仓库示例；`cmd/server/main.go` 调用位接线（auth/warehouse 的冻结 stub 签名未动）。
+- 结构自查测试（不依赖 PG/Redis/网络）：迁移成对与名称对称、down 与 up 建表逆序对称、26 表契约、通用字段与软删除范围（§3/§5.1）、恒等式 CHECK/五维唯一/部分唯一索引、timestamptz 方言、命名规约（uk_/idx_/chk_/fk_）、grants/seed 文件存在性与门禁；种子侧冻结清单逐字核对、菜单父先子后、角色映射规则、密码策略与 nil-db 快速失败、bcrypt 往返。
+- 已知限制：本环境无 PostgreSQL，迁移未真实执行升/降级验证（database.md §9 的 `migrate up + down 1` 双向验证须在具备 PG 的环境补做）；运行期行为（advisory lock/ON CONFLICT/部分唯一索引推断）依赖 PG 15 语义，未经真库回归。
+
+## [2026-10-02] 前端：六组并行页面集成收口（基础资料/仓库中心/系统管理/库存扩展/作业与采购骨架）
+
+- 六组并行开发的 20 个页面 + 6 个 api 模块统一接入路由（web/src/router/index.tsx）：
+  - 基础资料（/products /skus /categories /units /suppliers /customers，六页 CRUD 对齐 backend-m1-plan §5.4）；
+  - 仓库中心（/warehouses /zones /shelves /bins /warehouse-map，四级结构 + 库位地图网格，对齐迁移 000004；zones/shelves 按契约无删除、走启停）；
+  - 系统管理（/system/users /system/roles /system/permissions /system/departments，用户含启停/重置密码/解锁/分配角色，角色含权限树绑定，部门树形 CRUD）；
+  - 库存中心扩展（/inventory/locks /inventory/adjustments，api/inventory.ts 增 locks/adjustments 两端点，值域对齐迁移 000005 + inventory-rules §4）；
+  - 仓储作业骨架（/inbound /outbound，api/inbound.ts、api/outbound.ts，对齐 business-flow §3/§7）；
+  - 采购订单骨架（/purchases，api/purchase.ts，对齐 business-flow §2）。
+- IMPLEMENTED_PATHS 同步增补 20 条路径，占位路由自动收敛；config/menu.tsx **零改动**（各菜单 path 与页面路由天然对齐，权限点沿用菜单树既有值）。
+- 契约修正确认（api/auth.ts）：profile→GET /api/auth/me、changePassword→PUT /api/auth/password，新增 POST /api/auth/refresh、GET /api/auth/sessions、DELETE /api/auth/sessions/{id}；grep 确认全项目 authApi 调用方仅 PcLayout（logout）与 LoginPage（login），修正无破坏。
+- 跨文件一致性检查（集成阶段实际执行）：20 页面均 default export；页面调用的全部 api 方法与模块定义逐一比对通过；toStatusKey 在 api/masterdata.ts 与 api/warehouse.ts 重复导出但无同文件双导入（语义按模块各自约定，保留）；rbac.ts 复用 user.ts 的 CommonStatus 无重复定义；SfStatusTag 三参兜底（status+label+semantic）签名与库存锁定/调整页用法匹配；types/status.ts 已注册库位六态（idle/partially_occupied/full/locked/frozen/abnormal），库位地图语义映射可用；api/types/config 层无反向依赖 views，无循环依赖。
+- 验证：`npx tsc --noEmit -p tsconfig.app.json` 全项目 EXIT=0（strict 通过）；`npx eslint src/router/index.tsx` EXIT=0。按要求未运行全局构建（`npm run build` 留门禁阶段统一执行）。
+- 影响范围：仅路由接线与文档，未改动各页面/组件/api 模块实现。
+- 遗留对齐清单（后端 M1/M2 落地时处理）：
+  - 后端各域（masterdata/warehouse/auth/inventory/作业单据）仍为 stub，页面请求呈统一错误态为预期行为；
+  - 列表筛选参数名（keyword/status/categoryId、warehouseId/zoneId/shelfId、departmentId/type 等）与启停端点（PUT /api/{warehouses|zones|shelves|bins|users|roles|departments}/{id}/status、PUT /api/users/{id}/reset-password 等）为前端先行提案，后端实现时对齐；
+  - GET /api/warehouses/{id}/map 响应结构与 bin 占用状态值域、create/update 响应体、/api/auth/refresh 与 sessions 返回体、SKU spec_attrs 键结构均为前端先行契约，待冻结；
+  - types/status.ts 未收录 active/released/consumed/executed/partially_received 等键，页面已按 SfStatusTag 三参兜底（不阻塞），建议后端枚举冻结后统一补注册；
+  - 选项下拉 pageSize=200 一次取全（商品/分类/单位/仓库/库区/货架/角色）在后端就绪后需确认分页上限或提供轻量选项端点。

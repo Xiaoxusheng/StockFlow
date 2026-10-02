@@ -1,0 +1,335 @@
+import { useState } from 'react'
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import type { ColumnsType } from 'antd/es/table'
+import {
+  RESOURCE_STATUS_OPTIONS,
+  shelfApi,
+  toStatusKey,
+  warehouseApi,
+  zoneApi,
+  type ResourceStatus,
+  type ShelfItem,
+  type ShelfPayload,
+  type ShelfQuery,
+} from '@/api/warehouse'
+import { resolveErrorMessage } from '@/api/client'
+import { usePagedList } from '@/hooks/usePagedList'
+import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
+import { SfTable } from '@/components/table/SfTable'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { formatDateTime, formatNumber } from '@/utils/format'
+
+const SEARCH_FIELDS: SearchField[] = [
+  { name: 'keyword', label: '关键词', control: 'input', placeholder: '货架编码' },
+  { name: 'warehouseId', label: '所属仓库', control: 'select' },
+  { name: 'status', label: '状态', control: 'select', options: RESOURCE_STATUS_OPTIONS },
+]
+
+const COLUMNS: ColumnsType<ShelfItem> = [
+  {
+    title: '所属仓库',
+    dataIndex: 'warehouseName',
+    width: 110,
+    ellipsis: true,
+    render: (v?: string) => v ?? '-',
+  },
+  { title: '库区', dataIndex: 'zoneCode', width: 90, render: (v?: string) => v ?? '-' },
+  { title: '货架编码', dataIndex: 'code', width: 110, fixed: 'left' },
+  {
+    title: '层数',
+    dataIndex: 'layers',
+    width: 70,
+    align: 'right',
+    render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
+  },
+  {
+    title: '列数',
+    dataIndex: 'columns',
+    width: 70,
+    align: 'right',
+    render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
+  },
+  {
+    title: '容量',
+    dataIndex: 'capacity',
+    width: 100,
+    align: 'right',
+    render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
+  },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    width: 90,
+    render: (v: string) => <SfStatusTag status={toStatusKey(v)} />,
+  },
+  {
+    title: '更新时间',
+    dataIndex: 'updatedAt',
+    width: 160,
+    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+  },
+]
+
+interface ShelfFormValues {
+  warehouseId: number | string
+  zoneId: number | string
+  code: string
+  layers?: number
+  columns?: number
+  capacity?: number
+}
+
+/** 货架管理（frontend.md §27 货架；M1 契约：/api/shelves CRUD + 启停，无删除——shelves 停用即下线） */
+export default function ShelfListPage() {
+  const [params, setParams] = useState<ShelfQuery>({})
+  const list = usePagedList<ShelfItem, ShelfQuery>({
+    queryKey: ['warehouse', 'shelves'],
+    fetch: (q) => shelfApi.list(q),
+    params,
+  })
+
+  // 仓库选项（搜索与表单共用）
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['warehouse', 'warehouses', 'options'],
+    queryFn: () => warehouseApi.list({ page: 1, pageSize: 200 }),
+  })
+  const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
+    label: `${item.name}（${item.code}）`,
+    value: item.id,
+  }))
+  const searchFields: SearchField[] = SEARCH_FIELDS.map((field) =>
+    field.name === 'warehouseId'
+      ? { ...field, options: warehouseOptions.map((o) => ({ label: o.label, value: String(o.value) })) }
+      : field,
+  )
+
+  const [form] = Form.useForm<ShelfFormValues>()
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [editing, setEditing] = useState<ShelfItem | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [formError, setFormError] = useState<unknown>(null)
+  const [actionError, setActionError] = useState<unknown>(null)
+  const [togglingId, setTogglingId] = useState<number | string | null>(null)
+
+  // 表单内级联：选中仓库后加载其库区选项
+  const formWarehouseId = Form.useWatch('warehouseId', form)
+  const zoneOptionsQuery = useQuery({
+    queryKey: ['warehouse', 'zones', 'options', formWarehouseId],
+    queryFn: () => zoneApi.list({ warehouseId: formWarehouseId, page: 1, pageSize: 200 }),
+    enabled: formWarehouseId !== undefined && formWarehouseId !== null,
+  })
+  const zoneOptions = (zoneOptionsQuery.data?.items ?? []).map((item) => ({
+    label: `${item.name}（${item.code}）`,
+    value: item.id,
+  }))
+
+  const handleSearch = (values: Record<string, unknown>) => {
+    setParams(values as ShelfQuery)
+    list.resetToFirstPage()
+  }
+
+  const openCreate = () => {
+    setEditing(null)
+    setFormError(null)
+    form.resetFields()
+    setDrawerOpen(true)
+  }
+
+  const openEdit = (record: ShelfItem) => {
+    setEditing(record)
+    setFormError(null)
+    form.resetFields()
+    form.setFieldsValue({
+      warehouseId: record.warehouseId,
+      zoneId: record.zoneId,
+      code: record.code,
+      layers: record.layers,
+      columns: record.columns,
+      capacity: record.capacity,
+    })
+    setDrawerOpen(true)
+  }
+
+  const handleSubmit = async () => {
+    const values = await form.validateFields().catch(() => null)
+    if (!values) return
+    setSubmitting(true)
+    setFormError(null)
+    try {
+      if (editing) {
+        const payload: ShelfPayload = {
+          ...values,
+          warehouseId: editing.warehouseId ?? values.warehouseId,
+          zoneId: editing.zoneId ?? values.zoneId,
+        }
+        await shelfApi.update(editing.id, payload)
+      } else {
+        await shelfApi.create(values)
+      }
+      setDrawerOpen(false)
+      await list.refetch()
+    } catch (err) {
+      setFormError(err)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleToggleStatus = async (record: ShelfItem) => {
+    const next: ResourceStatus = record.status?.toUpperCase() === 'ENABLED' ? 'DISABLED' : 'ENABLED'
+    setTogglingId(record.id)
+    setActionError(null)
+    try {
+      await shelfApi.setStatus(record.id, next)
+      await list.refetch()
+    } catch (err) {
+      setActionError(err)
+    } finally {
+      setTogglingId(null)
+    }
+  }
+
+  const columns: ColumnsType<ShelfItem> = [
+    ...COLUMNS,
+    {
+      title: '操作',
+      key: 'actions',
+      width: 90,
+      fixed: 'right',
+      render: (_, record) => {
+        const enabled = record.status?.toUpperCase() === 'ENABLED'
+        return (
+          <Space size={0}>
+            <Button type="link" size="small" style={{ paddingInline: 4 }} onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+            <Popconfirm
+              title={enabled ? '确认停用该货架？' : '确认启用该货架？'}
+              description={enabled ? '下属库位将级联停用' : undefined}
+              onConfirm={() => void handleToggleStatus(record)}
+            >
+              <Button type="link" size="small" style={{ paddingInline: 4 }} loading={togglingId === record.id}>
+                {enabled ? '停用' : '启用'}
+              </Button>
+            </Popconfirm>
+          </Space>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div className="sf-page">
+      <SfPageHeader
+        title="货架管理"
+        subtitle="库区 → 货架：层 × 列构成库位骨架"
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            新建货架
+          </Button>
+        }
+      />
+      <Card size="small">
+        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        {actionError !== null && (
+          <Alert
+            type="error"
+            showIcon
+            closable
+            style={{ marginBottom: 12 }}
+            message={resolveErrorMessage(actionError)}
+            onClose={() => setActionError(null)}
+          />
+        )}
+        <SfTable<ShelfItem>
+          storageKey="warehouse-shelves"
+          rowKey="id"
+          columns={columns}
+          dataSource={list.items}
+          loading={list.isFetching}
+          error={list.error}
+          onRetry={list.refetch}
+          onRefresh={list.refetch}
+          pagination={list.pagination}
+          total={list.total}
+          onPageChange={list.onPageChange}
+          emptyText="当前筛选条件下没有货架"
+          scrollX={940}
+        />
+      </Card>
+
+      <Drawer
+        title={editing ? '编辑货架' : '新建货架'}
+        width={440}
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        extra={
+          <Space>
+            <Button onClick={() => setDrawerOpen(false)}>取消</Button>
+            <Button type="primary" loading={submitting} onClick={() => void handleSubmit()}>
+              保存
+            </Button>
+          </Space>
+        }
+      >
+        {formError !== null && (
+          <Alert
+            type="error"
+            showIcon
+            closable
+            style={{ marginBottom: 16 }}
+            message={resolveErrorMessage(formError)}
+            onClose={() => setFormError(null)}
+          />
+        )}
+        <Form form={form} layout="vertical">
+          <Form.Item
+            name="warehouseId"
+            label="所属仓库"
+            rules={[{ required: true, message: '请选择所属仓库' }]}
+          >
+            <Select
+              options={warehouseOptions}
+              loading={warehouseOptionsQuery.isFetching}
+              showSearch
+              optionFilterProp="label"
+              placeholder="请选择所属仓库"
+              disabled={editing !== null}
+              onChange={() => form.setFieldValue('zoneId', undefined)}
+            />
+          </Form.Item>
+          <Form.Item
+            name="zoneId"
+            label="所属库区"
+            rules={[{ required: true, message: '请选择所属库区' }]}
+            extra={editing ? '所属仓库/库区创建后不可修改' : undefined}
+          >
+            <Select
+              options={zoneOptions}
+              loading={zoneOptionsQuery.isFetching}
+              showSearch
+              optionFilterProp="label"
+              placeholder="请先选择仓库，再选择库区"
+              disabled={editing !== null}
+            />
+          </Form.Item>
+          <Form.Item name="code" label="货架编码" rules={[{ required: true, message: '请输入货架编码' }]}>
+            <Input placeholder="如 A-STORE-S01" maxLength={64} />
+          </Form.Item>
+          <Form.Item name="layers" label="层数">
+            <InputNumber style={{ width: '100%' }} min={1} precision={0} />
+          </Form.Item>
+          <Form.Item name="columns" label="列数">
+            <InputNumber style={{ width: '100%' }} min={1} precision={0} />
+          </Form.Item>
+          <Form.Item name="capacity" label="容量">
+            <InputNumber style={{ width: '100%' }} min={0} precision={2} />
+          </Form.Item>
+        </Form>
+      </Drawer>
+    </div>
+  )
+}

@@ -1,0 +1,271 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Button, Card, Form, Input, Modal, Popconfirm, TreeSelect, message } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { ColumnsType } from 'antd/es/table'
+import { resolveErrorMessage } from '@/api/client'
+import { rbacApi, type DepartmentNode } from '@/api/rbac'
+import type { CommonStatus } from '@/api/user'
+import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfTable } from '@/components/table/SfTable'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+
+function statusTagKey(status: CommonStatus): string {
+  return status === 'ACTIVE' ? 'enabled' : 'disabled'
+}
+
+interface DeptTreeOption {
+  value: string
+  title: string
+  children?: DeptTreeOption[]
+}
+
+/** 部门树 → TreeSelect 数据；excludeId 用于编辑时排除自身子树，防止把自己挂到后代下 */
+function toTreeOptions(nodes: DepartmentNode[], excludeId?: string): DeptTreeOption[] {
+  return nodes
+    .filter((node) => String(node.id) !== excludeId)
+    .map((node) => {
+      const children = toTreeOptions(node.children ?? [], excludeId)
+      return {
+        value: String(node.id),
+        title: `${node.name}（${node.code}）`,
+        children: children.length > 0 ? children : undefined,
+      }
+    })
+}
+
+/** 收集所有存在子级的节点 key（默认展开用） */
+function collectParentKeys(nodes: DepartmentNode[]): string[] {
+  return nodes.flatMap((node) => {
+    const keys = node.children && node.children.length > 0 ? [String(node.id), ...collectParentKeys(node.children)] : []
+    return keys
+  })
+}
+
+interface DepartmentFormValues {
+  parentId?: string
+  code: string
+  name: string
+}
+
+interface DepartmentFormModalProps {
+  editing: DepartmentNode | null
+  /** 新建子部门时的父级预置 */
+  parent: DepartmentNode | null
+  treeOptions: DeptTreeOption[]
+  submitting: boolean
+  onCancel: () => void
+  onSubmit: (values: DepartmentFormValues) => void
+}
+
+/** 新建 / 编辑部门弹窗（M1 契约：parent_id + code + name；无删除，走停用） */
+function DepartmentFormModal({ editing, parent, treeOptions, submitting, onCancel, onSubmit }: DepartmentFormModalProps) {
+  const isEdit = editing !== null
+  const [form] = Form.useForm<DepartmentFormValues>()
+  return (
+    <Modal
+      title={isEdit ? `编辑部门：${editing.name}` : parent ? `新增子部门：${parent.name}` : '新增部门'}
+      open
+      confirmLoading={submitting}
+      onCancel={onCancel}
+      onOk={() => {
+        void form.submit()
+      }}
+      okText={isEdit ? '保存' : '创建'}
+      maskClosable={false}
+    >
+      <Form
+        form={form}
+        layout="vertical"
+        onFinish={(values) => onSubmit(values)}
+        initialValues={
+          isEdit
+            ? {
+                parentId: editing.parentId != null ? String(editing.parentId) : undefined,
+                code: editing.code,
+                name: editing.name,
+              }
+            : parent
+              ? { parentId: String(parent.id) }
+              : undefined
+        }
+      >
+        <Form.Item name="parentId" label="上级部门">
+          <TreeSelect
+            treeData={treeOptions}
+            placeholder="不选择则作为根部门"
+            allowClear
+            showSearch
+            treeNodeFilterProp="title"
+            treeDefaultExpandAll
+            dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
+          />
+        </Form.Item>
+        <Form.Item
+          name="code"
+          label="部门编码"
+          rules={[
+            { required: true, message: '请输入部门编码' },
+            { pattern: /^[a-zA-Z0-9_-]{2,32}$/, message: '2–32 位字母、数字、下划线或中划线' },
+          ]}
+          extra="编码全局唯一，创建后不可修改"
+        >
+          <Input disabled={isEdit} placeholder="如 WH-NORTH" autoComplete="off" />
+        </Form.Item>
+        <Form.Item name="name" label="部门名称" rules={[{ required: true, message: '请输入部门名称' }]}>
+          <Input placeholder="如 华北仓运营部" allowClear maxLength={32} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+type ModalState = { kind: 'create'; parent: DepartmentNode | null } | { kind: 'edit'; dept: DepartmentNode } | null
+
+/** 部门管理（frontend.md 系统管理：部门）：树形展示 + 新增根/子部门、编辑、启停 */
+export default function DepartmentPage() {
+  const [modal, setModal] = useState<ModalState>(null)
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+  const [pagination, setPagination] = useState({ current: 1, pageSize: 20 })
+  const queryClient = useQueryClient()
+
+  // 全量树一次加载（部门为组织级小数据量），表格内做树形展示
+  const treeQuery = useQuery({ queryKey: ['system', 'departments'], queryFn: rbacApi.departmentTree })
+  const tree = useMemo(() => treeQuery.data ?? [], [treeQuery.data])
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'departments'] })
+
+  const createMutation = useMutation({
+    mutationFn: (payload: DepartmentFormValues) => rbacApi.createDepartment(payload),
+    onSuccess: () => {
+      message.success('部门已创建')
+      setModal(null)
+      void invalidate()
+    },
+    onError: (error) => message.error(resolveErrorMessage(error)),
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: DepartmentFormValues }) =>
+      rbacApi.updateDepartment(id, payload),
+    onSuccess: () => {
+      message.success('部门已保存')
+      setModal(null)
+      void invalidate()
+    },
+    onError: (error) => message.error(resolveErrorMessage(error)),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: CommonStatus }) => rbacApi.setDepartmentStatus(id, status),
+    onSuccess: (_data, variables) => {
+      message.success(variables.status === 'ACTIVE' ? '部门已启用' : '部门已停用')
+      void invalidate()
+    },
+    onError: (error) => message.error(resolveErrorMessage(error)),
+  })
+
+  const parentKeys = useMemo(() => collectParentKeys(tree), [tree])
+  useEffect(() => {
+    setExpandedKeys(parentKeys)
+  }, [parentKeys])
+
+  const treeOptions = toTreeOptions(tree, modal?.kind === 'edit' ? String(modal.dept.id) : undefined)
+
+  const columns: ColumnsType<DepartmentNode> = [
+    { title: '部门名称', dataIndex: 'name', width: 220, fixed: 'left' },
+    { title: '部门编码', dataIndex: 'code', width: 160 },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v: CommonStatus) => <SfStatusTag status={statusTagKey(v)} />,
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 220,
+      fixed: 'right',
+      render: (_, record) => {
+        const id = String(record.id)
+        return (
+          <>
+            <Button type="link" size="small" onClick={() => setModal({ kind: 'create', parent: record })}>
+              新增子部门
+            </Button>
+            <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', dept: record })}>
+              编辑
+            </Button>
+            {record.status === 'ACTIVE' ? (
+              <Popconfirm
+                title="确认停用该部门？"
+                description="停用后该部门不可再被新用户选择"
+                onConfirm={() => statusMutation.mutate({ id, status: 'DISABLED' })}
+              >
+                <Button type="link" size="small" danger>
+                  停用
+                </Button>
+              </Popconfirm>
+            ) : (
+              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ACTIVE' })}>
+                启用
+              </Button>
+            )}
+          </>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div className="sf-page">
+      <SfPageHeader
+        title="部门"
+        subtitle="组织架构（树形）"
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal({ kind: 'create', parent: null })}>
+            新增部门
+          </Button>
+        }
+      />
+      <Card size="small">
+        <SfTable<DepartmentNode>
+          storageKey="system-departments"
+          rowKey="id"
+          columns={columns}
+          dataSource={tree}
+          loading={treeQuery.isFetching}
+          error={treeQuery.error}
+          onRetry={treeQuery.refetch}
+          onRefresh={treeQuery.refetch}
+          pagination={{ current: pagination.current, pageSize: pagination.pageSize }}
+          total={tree.length}
+          onPageChange={(page, pageSize) => setPagination({ current: page, pageSize })}
+          emptyText="暂无部门"
+          scrollX={690}
+          expandable={{
+            expandedRowKeys: expandedKeys,
+            onExpand: (expanded, record) => {
+              const key = String(record.id)
+              setExpandedKeys((prev) => (expanded ? [...prev, key] : prev.filter((k) => k !== key)))
+            },
+          }}
+        />
+      </Card>
+
+      {modal && (
+        <DepartmentFormModal
+          editing={modal.kind === 'edit' ? modal.dept : null}
+          parent={modal.kind === 'create' ? modal.parent : null}
+          treeOptions={treeOptions}
+          submitting={createMutation.isPending || updateMutation.isPending}
+          onCancel={() => setModal(null)}
+          onSubmit={(values) => {
+            if (modal.kind === 'edit') updateMutation.mutate({ id: String(modal.dept.id), payload: values })
+            else createMutation.mutate(values)
+          }}
+        />
+      )}
+    </div>
+  )
+}
