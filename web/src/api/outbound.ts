@@ -54,8 +54,156 @@ export interface OutboundItem {
   createdAt: string
 }
 
+// ---------- 出库作业任务（拣货 → 复核 → 打包 → 发货，business-flow.md §7.2/§8） ----------
+// 端点为前端先行骨架：后端 outbound 域未交付，页面呈统一错误态（requirements.md §10）。
+// 字段名对齐 business-flow.md §8.2–8.5 作业内容与 database.md §表清单
+// （pick_tasks / check_tasks / packing_records / shipments），最终以后端 Go JSON tag 为准，交付时需回对。
+
+/** 拣货任务状态（business-flow.md §8.2；后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
+export type PickingTaskStatus = 'pending_pick' | 'picking' | 'picked'
+
+/** 复核任务状态（business-flow.md §8.3） */
+export type CheckingTaskStatus = 'pending_check' | 'checking' | 'checked'
+
+/** 打包记录状态（business-flow.md §8.4） */
+export type PackingTaskStatus = 'pending_pack' | 'packing' | 'packed'
+
+/** 发货状态（business-flow.md §8.5：待发货 → 已发货 → 运输中 → 已签收，含异常分支） */
+export type ShipmentStatus =
+  | 'pending_shipment'
+  | 'shipped'
+  | 'in_transit'
+  | 'signed'
+  | 'shipment_exception'
+
+/** 出库作业列表筛选公共参数（参数名为前端先行定义，待后端契约对齐） */
+interface OutboundTaskQuery extends PageQuery {
+  keyword?: string
+  warehouseCode?: string
+}
+
+export interface PickingTaskQuery extends OutboundTaskQuery {
+  status?: PickingTaskStatus
+}
+
+/** 拣货任务（business-flow.md §8.2：拣货单 → SKU → 来源库位 → 数量 → 操作人 → 完成时间） */
+export interface PickingTaskItem {
+  id: number | string
+  /** 拣货任务号 */
+  pickTaskNo: string
+  /** 关联出库单号 */
+  outboundNo: string
+  skuCode: string
+  skuName?: string
+  /** 来源库位 */
+  fromBinCode?: string
+  /** 批次（拣货支持换批次处理，business-flow.md §8.2） */
+  batchNo?: string
+  /** 应拣数量 */
+  totalQty: number
+  /** 已拣数量 */
+  pickedQty: number
+  status: string
+  operatorName?: string
+  /** 完成时间 */
+  completedAt?: string
+  createdAt: string
+}
+
+export interface CheckingTaskQuery extends OutboundTaskQuery {
+  status?: CheckingTaskStatus
+}
+
+/** 复核任务（business-flow.md §8.3：重新确认 SKU / 条码 / 数量 / 批次 / 序列号 / 订单） */
+export interface CheckingTaskItem {
+  id: number | string
+  /** 复核任务号 */
+  checkTaskNo: string
+  /** 关联出库单号 */
+  outboundNo: string
+  skuCode: string
+  skuName?: string
+  batchNo?: string
+  /** 复核数量 */
+  totalQty: number
+  status: string
+  /** 复核人 */
+  operatorName?: string
+  /** 复核完成时间 */
+  completedAt?: string
+  createdAt: string
+}
+
+export interface PackingTaskQuery extends OutboundTaskQuery {
+  status?: PackingTaskStatus
+}
+
+/** 打包记录（business-flow.md §8.4 记录字段；一个订单允许多个包裹） */
+export interface PackingTaskItem {
+  id: number | string
+  /** 包裹编号 */
+  packageNo: string
+  /** 关联出库单号 */
+  outboundNo: string
+  /** 包装材料 */
+  packMaterial?: string
+  /** 重量 */
+  weight?: number
+  /** 体积 */
+  volume?: number
+  /** 快递公司 */
+  carrierName?: string
+  /** 快递单号 */
+  trackingNo?: string
+  status: string
+  /** 打包人 */
+  operatorName?: string
+  /** 打包时间 */
+  packedAt?: string
+  createdAt: string
+}
+
+export interface ShipmentQuery extends OutboundTaskQuery {
+  status?: ShipmentStatus
+}
+
+/** 发货单（business-flow.md §8.5 发货信息字段全量；发货完成是库存正式扣减的触发点） */
+export interface ShipmentItem {
+  id: number | string
+  /** 发货单号 */
+  shipmentNo: string
+  /** 关联出库单号 */
+  outboundNo: string
+  /** 物流公司 */
+  carrierName?: string
+  /** 物流单号 */
+  trackingNo?: string
+  /** 发货仓 */
+  warehouseName?: string
+  /** 包裹数量 */
+  packageCount: number
+  /** 发货人 */
+  shipperName?: string
+  /** 发货时间 */
+  shippedAt?: string
+  status: string
+  createdAt: string
+}
+
 export const outboundApi = {
   /** 出库单列表（预置端点，后端未就绪时页面呈现统一错误态） */
   list: (query: OutboundQuery) =>
     http.get<PageResult<OutboundItem>>('/api/outbounds', { params: query }),
+  /** 拣货任务列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
+  pickingTasks: (query: PickingTaskQuery) =>
+    http.get<PageResult<PickingTaskItem>>('/api/outbound/picking-tasks', { params: query }),
+  /** 复核任务列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
+  checkingTasks: (query: CheckingTaskQuery) =>
+    http.get<PageResult<CheckingTaskItem>>('/api/outbound/checking-tasks', { params: query }),
+  /** 打包记录列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
+  packingTasks: (query: PackingTaskQuery) =>
+    http.get<PageResult<PackingTaskItem>>('/api/outbound/packing-tasks', { params: query }),
+  /** 发货单列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
+  shipments: (query: ShipmentQuery) =>
+    http.get<PageResult<ShipmentItem>>('/api/outbound/shipments', { params: query }),
 }

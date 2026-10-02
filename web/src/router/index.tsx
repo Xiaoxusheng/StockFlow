@@ -43,14 +43,45 @@ const InboundPage = lazy(() => import('@/views/inbound/InboundPage'))
 const OutboundPage = lazy(() => import('@/views/outbound/OutboundPage'))
 const PurchaseListPage = lazy(() => import('@/views/purchase/PurchaseListPage'))
 
+// 任务中心（F8：工作台四计数 + 我的任务；后端任务域未交付，呈统一错误态）
+const WorkbenchPage = lazy(() => import('@/views/workbench/WorkbenchPage'))
+const MyTasksPage = lazy(() => import('@/views/task/MyTasksPage'))
+
+// 库存中心余量（F6：批次/序列号/转移/追溯；端点 M1 不交付，呈统一错误态）
+const BatchListPage = lazy(() => import('@/views/inventory/BatchListPage'))
+const SerialListPage = lazy(() => import('@/views/inventory/SerialListPage'))
+const TransferPage = lazy(() => import('@/views/inventory/TransferPage'))
+const TracePage = lazy(() => import('@/views/inventory/TracePage'))
+
+// 出库作业（P0：拣货/复核/打包/发货；后端 outbound 域未交付，呈统一错误态）
+const PickingPage = lazy(() => import('@/views/outbound/PickingPage'))
+const CheckingPage = lazy(() => import('@/views/outbound/CheckingPage'))
+const PackingPage = lazy(() => import('@/views/outbound/PackingPage'))
+const ShipmentPage = lazy(() => import('@/views/outbound/ShipmentPage'))
+
+// 单据域（P0：销售三单 + 采购收货/退货；契约 M2 冻结，呈统一错误态）
+const SalesOrderListPage = lazy(() => import('@/views/sales/SalesOrderListPage'))
+const SalesOutboundListPage = lazy(() => import('@/views/sales/SalesOutboundListPage'))
+const SalesReturnListPage = lazy(() => import('@/views/sales/SalesReturnListPage'))
+const ReceiptListPage = lazy(() => import('@/views/purchase/ReceiptListPage'))
+const PurchaseReturnListPage = lazy(() => import('@/views/purchase/PurchaseReturnListPage'))
+
 /** 已有真实页面的路由；其余菜单路径统一落到 ModulePlaceholder */
 const IMPLEMENTED_PATHS = new Set([
   '/dashboard',
+  // 任务中心（F8）
+  '/workbench',
+  '/tasks',
   '/inventory/stock',
   '/inventory/ledger',
   '/inventory/alerts',
   '/inventory/locks',
   '/inventory/adjustments',
+  // 库存中心余量（F6）
+  '/inventory/batches',
+  '/inventory/serials',
+  '/inventory/transfers',
+  '/inventory/trace',
   // 基础资料
   '/products',
   '/skus',
@@ -73,6 +104,18 @@ const IMPLEMENTED_PATHS = new Set([
   '/inbound',
   '/outbound',
   '/purchases',
+  // 出库作业（P0）
+  '/picking',
+  '/checking',
+  '/packing',
+  '/shipment',
+  // 采购收货 / 退货（P0 单据域）
+  '/purchases/receipts',
+  '/purchases/returns',
+  // 销售三单（P0 单据域）
+  '/sales',
+  '/sales/outbounds',
+  '/sales/returns',
 ])
 
 function menuPaths(): string[] {
@@ -128,6 +171,15 @@ export const router = createBrowserRouter([
         path: 'dashboard',
         element: <LazyPage><DashboardPage /></LazyPage>,
       },
+      // 任务中心（F8）
+      {
+        path: 'workbench',
+        element: <LazyPage><WorkbenchPage /></LazyPage>,
+      },
+      {
+        path: 'tasks',
+        element: <LazyPage><MyTasksPage /></LazyPage>,
+      },
       {
         path: 'inventory/stock',
         element: <LazyPage><StockListPage /></LazyPage>,
@@ -148,6 +200,23 @@ export const router = createBrowserRouter([
         path: 'inventory/adjustments',
         element: <LazyPage><AdjustmentsPage /></LazyPage>,
       },
+      // 库存中心余量（F6：批次/序列号/转移/追溯）
+      {
+        path: 'inventory/batches',
+        element: <LazyPage><BatchListPage /></LazyPage>,
+      },
+      {
+        path: 'inventory/serials',
+        element: <LazyPage><SerialListPage /></LazyPage>,
+      },
+      {
+        path: 'inventory/transfers',
+        element: <LazyPage><TransferPage /></LazyPage>,
+      },
+      {
+        path: 'inventory/trace',
+        element: <LazyPage><TracePage /></LazyPage>,
+      },
       // 仓储作业（M2+ 骨架）
       {
         path: 'inbound',
@@ -156,6 +225,23 @@ export const router = createBrowserRouter([
       {
         path: 'outbound',
         element: <LazyPage><OutboundPage /></LazyPage>,
+      },
+      // 出库作业（P0：拣货/复核/打包/发货）
+      {
+        path: 'picking',
+        element: <LazyPage><PickingPage /></LazyPage>,
+      },
+      {
+        path: 'checking',
+        element: <LazyPage><CheckingPage /></LazyPage>,
+      },
+      {
+        path: 'packing',
+        element: <LazyPage><PackingPage /></LazyPage>,
+      },
+      {
+        path: 'shipment',
+        element: <LazyPage><ShipmentPage /></LazyPage>,
       },
       // 仓库中心
       {
@@ -182,6 +268,28 @@ export const router = createBrowserRouter([
       {
         path: 'purchases',
         element: <LazyPage><PurchaseListPage /></LazyPage>,
+      },
+      // 采购收货 / 退货（P0 单据域）
+      {
+        path: 'purchases/receipts',
+        element: <LazyPage><ReceiptListPage /></LazyPage>,
+      },
+      {
+        path: 'purchases/returns',
+        element: <LazyPage><PurchaseReturnListPage /></LazyPage>,
+      },
+      // 销售三单（P0 单据域）
+      {
+        path: 'sales',
+        element: <LazyPage><SalesOrderListPage /></LazyPage>,
+      },
+      {
+        path: 'sales/outbounds',
+        element: <LazyPage><SalesOutboundListPage /></LazyPage>,
+      },
+      {
+        path: 'sales/returns',
+        element: <LazyPage><SalesReturnListPage /></LazyPage>,
       },
       // 基础资料
       {

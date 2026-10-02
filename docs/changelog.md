@@ -56,6 +56,26 @@
 
 （按 development-plan.md 的 22 个阶段，每阶段完成后在此追加记录）
 
+## [2026-10-02] 前端：第二批五组并行页面集成收口（认证对齐/库存余量/任务中心/出库作业/销售采购单据）
+
+- **认证域真实接通**（共享文件唯一持有组，六文件全量对齐后端 auth 冻结契约，current.md:47 对齐清单销项）：types/permission.ts UserInfo 对齐 UserView/MeResult（snake_case、id 字符串形态）、canAccess 删空权限放行分支改 fail-closed（保留 is_super/super_admin/'*' 直通）、菜单两段码↔后端冻结三段码归一映射集中 RESOURCE_ALIASES（仅 stock→inventory、department→dept，config/menu.tsx 零改动）；api/auth.ts 改 LoginResult `{access_token,token_type,expires_in,refresh_token,must_change_password,user}`、新增 MeResult、改密入参 old_password/new_password、refresh 请求体 `{refresh_token}`、AuthSession 改 session_id/user_agent/login_at/last_active_at/current、sessions 返回分页信封、导出 PASSWORD_RULE（对齐 internal/auth/password.go:54-75）；stores/auth.ts 持久化结构同步（token/refreshToken/user/permissions/isSuper/mustChangePassword）并兜底旧/脏数据、新增 setMustChangePassword；api/client.ts 失败信封字符串错误码（AUTH_*/COMMON_ 等）提取进 ApiError.code，403+AUTH_PASSWORD_CHANGE_REQUIRED 特判不走通用无权限提示、置强改标志；LoginPage 登录后先 GET /api/auth/me 组装完整权限会话，must_change_password=true 先落强制改密表单（PASSWORD_RULE 校验）；PcLayout real_name 对齐 + 用户菜单新增「修改密码」Modal（强改模式不可关闭，成功后刷新 me 补全权限快照）。
+- 五组并行 **15 页 + 5 个 api 模块** 统一接入路由（web/src/router/index.tsx）：
+  - 任务中心 F8（/workbench /tasks；api/task.ts 前端先行契约：GET /api/workbench/summary、GET /api/tasks；工作台「我的待办/我的审批」无既有菜单路径，仅展示计数不跳转）；
+  - 库存中心余量 F6（/inventory/batches /inventory/serials /inventory/transfers /inventory/trace；api/inventory.ts 纯追加 batches/serials/transfers/trace 四端点，字段对齐迁移 000005 batches/serial_numbers、调拨状态机对齐 business-flow §10.1、追溯对齐 inventory_ledgers 列）；
+  - 出库作业 P0（/picking /checking /packing /shipment；api/outbound.ts 纯追加 /api/outbound/picking-tasks、/checking-tasks、/packing-tasks、/shipments 四端点，列对齐 business-flow §8.2–8.5）；
+  - 单据域 P0（/sales /sales/outbounds /sales/returns；api/sales.ts 新建 GET /api/sales-orders、/api/sales/outbounds、/api/sales/returns；/purchases/receipts /purchases/returns；api/purchase.ts 纯追加两组端点，状态筛选对齐 business-flow §6.2/§7.2/§9.1/§2.1/§9.2）。
+- IMPLEMENTED_PATHS 增补 15 条；程序化比对集合与 children 静态路由 **39↔39 完全一致**、无重复注册；15 条路径与 config/menu.tsx（:34/:40/:43-46/:58-59/:61/:64/:87-88/:96-98）逐条一致，menu.tsx 零改动。
+- 跨文件一致性检查（集成阶段实际执行）：15 个新页面均 default export 且组件名唯一；六个 api 模块（auth/inventory/outbound/purchase/sales/task）导出标识符 `grep | sort | uniq -d` 无重名；15 页 fetch 调用与 api 方法定义逐一比对通过（salesApi.orders/outbounds/returns.list、purchaseApi.receipts/returns.list、outboundApi.pickingTasks/checkingTasks/packingTasks/shipments、inventoryApi.batches/serials/transfers/trace、taskApi.list/summary）；SfStatusTag 沿用「注册表优先 + label/semantic 三参兜底」，调拨 pending_outbound/transferring/pending_inbound 与序列号大写 DB 值（IN_STOCK/LOCKED/OUTBOUND/RETURNED/FROZEN）由页面映射正确渲染、未知值中性灰兜底。
+- 验证：`npx tsc --noEmit -p tsconfig.app.json` 全项目 EXIT=0（并行期他组观察到的 client.ts:5 TS1127 与 PcLayout.tsx:293 报错均为半写入瞬时态，最终态已消除）；`npx eslint src/router/index.tsx` EXIT=0。按要求未运行全局构建（`npm run build` 留门禁阶段统一执行）。
+- 影响范围：路由接线与文档；未改动各页面/组件/api 模块实现。
+- 遗留对齐清单（后端任务/单据/outbound/库存查询域落地时处理）：
+  - 后端任务域（workbench/tasks）、outbound 作业域、单据域（sales/采购收退）、库存四查询端点均未交付，相关 15 页呈统一错误态为预期行为（requirements.md §10）；
+  - 前端先行契约待 M2 冻结回对：端点路径（/api/sales-orders、/api/sales/outbounds、/api/purchases/receipts、/api/outbound/picking-tasks 等与 docs/api.md 领域前缀 /api/sales、/api/picks、/api/receipts 口径不一，冻结时统一）、筛选参数（keyword/status/warehouseCode/taskType/transferType）、字段名（soNo/outNo/returnNo/receiptNo/pickTaskNo/packageNo/shipmentNo、totalQty/shippedQty/receivedQty/returnedQty/completedQty、poNo/soNo/outboundNo 关联单号）、WorkbenchSummary 四计数与各状态/任务类型枚举，均以后端 Go JSON tag 为准；
+  - types/status.ts 暂不补录前端先行枚举（沿用上一轮集成决策）：调拨 pending_outbound/transferring/pending_inbound、序列号 in_stock/outbound/returned 等由页面三参兜底，后端枚举冻结后统一补注册；
+  - 会话管理页未建：authApi.sessions/kickSession 已按新字段就绪，后续建页按 session_id/user_agent/login_at/last_active_at/current 消费并挂 auth:session:list/auth:session:kick 权限点（菜单码建议 system:session:view）；
+  - 认证端到端链路（登录→403 AUTH_PASSWORD_CHANGE_REQUIRED 拦截→强制改密→重进系统）未实测（本环境无 PG15/Redis7/后端，5432/6379/8080 均不通），待联调环境补跑；localStorage `sf.auth` 旧格式会话会被 loadSession 拒绝，发布联调需重登一次；canAccess 的 view 动作映射为「资源可见」语义（持任意动作即放行菜单），如需严格 list/read 语义改 permission.ts view 分支一行；
+  - 单据五页页头「导出/新建」为无 handler 骨架按钮（与既有 InboundPage/OutboundPage/PurchaseListPage 骨架一致），接详情/新建页时补真实动作。
+
 ## [2026-10-02] 前端：基础平台 F1–F5 + 库存中心示范页（阶段 4 前端部分）
 
 - 新建 `web/`（StockFlow Web PC 管理端）：Vite 6 + React 18.3 + TypeScript strict + Ant Design 6.6.5（锁定 minor）+ react-router 7 + TanStack Query 5 + zustand 5 + axios + dayjs；`npm run dev/build/lint/typecheck`，Vite 代理 `/api → http://localhost:8080`（`VITE_API_PROXY` 可覆盖，端口 `VITE_PORT`）。
@@ -67,6 +87,19 @@
 - 页面：登录页（DEV 旁路 `VITE_AUTH_BYPASS=1` 仅开发构建生效）、403/404/500 统一错误页、Dashboard 四层结构（指标条/趋势图表/任务+预警/仓库分析，全部真实 API + Loading/Error/Empty）、库存中心示范页三张（实时库存含统计条、库存流水、库存预警，均接 Service 与分页筛选）、其余菜单路由全部落到诚实占位页；全局格式化工具（时间/金额/数量/百分比/文件大小）。
 - 验证：`tsc -b` + `vite build` + ESLint 零错误；浏览器实测 1440/768 宽度、Light/Dark、错误态/空态/404（发现并修复 antd 6 空 Flex 无盒模型导致的工具栏布局问题、窄屏侧边栏折叠与用户名换行）。
 - 影响范围：前端工程基线就绪，后续 F6–F13 按"usePagedList + SfTable + SfStatusTag + api 模块"模式接入；后端未就绪期间数据页显示真实错误态为预期行为。
+
+
+## [2026-10-02] 后端：认证权限域全量交付（后端阶段 4，T2/scope C）
+
+- `internal/auth` 整包（backend-m1-plan §5.1/§7 冻结契约，导出签名未变）：公开路由 POST /api/auth/login、POST /api/auth/refresh；受保护路由 /auth/logout、/auth/me、/auth/password、GET/DELETE /auth/sessions（在线会话管理/踢下线）与 /users（CRUD+启停/重置密码/解锁/绑定角色）、/roles（CRUD+启停/绑定权限）、/permissions、/departments（CRUD+启停），共 27 个接口，全部挂 RequirePermission、列表强制分页（api.md §2.1）、统一信封输出。
+- 认证双轨（plan §7.2）：Access JWT（golang-jwt/v5，HS256，claims 含 uid/sid，算法白名单+exp 必填+issuer 校验）+ Refresh Token（256bit 不透明随机串，Redis 会话 sf:session:{sid}，滑动 TTL 默认 7d，刷新轮换 sid 并作废旧会话）；踢下线即刻 401 AUTH_SESSION_INVALID；刷新时重载数据范围快照（缩小 plan §13.3 漂移窗口）。
+- 登录保护（permission.md §3.2、plan §7.3）：连续失败计数 Redis `sf:loginfail:{username}`（TTL=锁定窗口，默认 5 次锁 15 分钟、SF_AUTH_MAX_LOGIN_FAILURES/SF_AUTH_LOCK_DURATION 可配），锁定落库 users.locked_until（进程重启不丢锁），PUT /api/users/{id}/unlock 提前解锁并清计数；每次登录/刷新/登出写 login_logs（§3.3）；未知用户与密码错误统一 AUTH_CREDENTIALS_INVALID + 恒定代价假 bcrypt 比较防枚举；bcrypt cost 12；强密码策略（≥8 位含字母数字、≤72 字节防 bcrypt 截断）；管理员首登 must_change_password 强制改密门禁（403 AUTH_PASSWORD_CHANGE_REQUIRED，白名单 password/logout/me，后两者为交付披露的放宽）。
+- RBAC 与数据权限（permission.md §2/§4）：AuthRequired 校验 JWT+会话并注入 UserContext/会话快照；RequirePermission 走 Redis 权限缓存（sf:perms:{uid}，TTL 10min）未命中回源 DB，RBAC 变更路径定向失效，缓存/DB 故障 fail-closed（503 拒绝而非放行）；权限点常量清单 80 个动作点与 plan §5.4.1 冻结清单及权限种子同源（permissions.go）；WarehouseScope/ApplyWarehouseScope/SelfScope/DepartmentScope 数据权限过滤助手供三个业务域使用（ALL/超管=全部、SPECIFIED_WAREHOUSE=绑定仓库集、DEPARTMENT/SELF/SELF_IN_CHARGE 按 plan §7.4 M1 返回空集不放大）。
+- 敏感操作审计（permission.md §6、architecture.md §8）：用户创建/更新/启停/重置密码/解锁/绑定角色/改密、角色变更/权限绑定、部门变更/启停、强制下线全部经共享 helper 在业务事务内写 operation_logs（before/after 快照不含任何密码值）；`internal/middleware/audit.go`（§4.4 共享审计 helper：AuditEntry/Audit + login_logs 模型与 WriteLoginLog）属 scope A 漏交文件，经 Orchestrator 裁决由本域按冻结形态代交（AuditEntry 增补 UserAgent/Method/Path 三字段以对齐 000002 迁移列与 architecture §8.1"设备/请求"要求）。
+- 运行配置（SF_AUTH_* 环境变量，auth 不 import config 的落位说明见 doc.go）：SF_AUTH_JWT_SECRET（release 缺失启动失败/debug 降级进程内随机密钥）、SF_AUTH_ACCESS_TTL（2h）、SF_AUTH_REFRESH_TTL（168h）、SF_AUTH_MAX_LOGIN_FAILURES（5）、SF_AUTH_LOCK_DURATION（15m）；BootstrapIfEmpty 按裁决委托 internal/database.BootstrapIfEmpty。
+- 测试：57 个用例/48 断言点全绿（JWT 签发/过期/篡改/算法混淆/缺 claims、bcrypt 往返与策略矩阵、权限判定与 fail-closed、登录保护计数与锁定、会话轮换/踢下线、改密闭环、RBAC 校验、超管保护、自停用保护、部门级联与成环），全部经内存 redisStore/fakeRepo/假 gorm 方言器替身实现、零外部依赖；真实 PG+Redis 集成测试置于 //go:build integration（SF_TEST_PG_*/SF_TEST_REDIS_ADDR 门控，未在本环境执行）。
+- 已知限制与披露：①users/roles/departments/permissions 的 code 唯一性中，除 users（部分唯一索引）外 roles/permissions/departments 的唯一索引在 000001 迁移中缺失（down 脚本却引用 uk_roles_code 等），Service 层以查询前置校验兜底、并在 seed 的 ON CONFLICT (code) 处存在真库首启失败风险，需 scope B 补迁移索引；②WithWarehouseChecker（plan §4.3 用户绑定仓库校验）需 router T6 注入，未注入时真实装配启动 fail-fast、测试装配豁免；③swag 注释随 T6 汇总补齐；④go test -race 因本机无 C 编译器（CGO）未执行，待 CI 补跑。
+- 影响范围：认证权限域为 M1 三业务域提供唯一鉴权入口与数据权限助手；go.mod 新增直接依赖 golang-jwt/jwt/v5 v5.2.0。
 
 
 ## [2026-10-02] 数据库：M1 迁移全集 + 生产安全初始化（后端阶段 3，T1/schema 冻结点）

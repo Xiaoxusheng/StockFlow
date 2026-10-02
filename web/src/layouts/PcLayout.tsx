@@ -1,7 +1,8 @@
-import { Avatar, Breadcrumb, Dropdown, Flex, Input, Layout, Menu, Tooltip } from 'antd'
+import { Alert, Avatar, Breadcrumb, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
 import {
   BellOutlined,
   DownOutlined,
+  LockOutlined,
   LogoutOutlined,
   MoonOutlined,
   SearchOutlined,
@@ -18,7 +19,8 @@ import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useUiStore } from '@/stores/ui'
 import { canAccess } from '@/types/permission'
-import { authApi } from '@/api/auth'
+import { authApi, PASSWORD_RULE, type ChangePasswordPayload } from '@/api/auth'
+import { resolveErrorMessage } from '@/api/client'
 import { NotificationDrawer } from './NotificationDrawer'
 
 const { Header, Sider, Content } = Layout
@@ -40,7 +42,10 @@ export function PcLayout() {
   const { mode, toggleMode } = useThemeStore()
   const user = useAuthStore((s) => s.user)
   const clearSession = useAuthStore((s) => s.clearSession)
+  /** 首登强制改密门禁（client.ts 403 AUTH_PASSWORD_CHANGE_REQUIRED 特判置位）：无条件弹出改密 Modal */
+  const mustChangePassword = useAuthStore((s) => s.mustChangePassword)
   const [notificationOpen, setNotificationOpen] = useState(false)
+  const [passwordOpen, setPasswordOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
   /** 窄屏（<992px）下自动折叠侧边栏（frontend.md §19.1 平板竖屏适配） */
   const [broken, setBroken] = useState(false)
@@ -89,10 +94,15 @@ export function PcLayout() {
   }
 
   const userMenu: MenuProps['items'] = [
+    { key: 'change-password', icon: <LockOutlined />, label: '修改密码' },
+    { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ]
 
   const handleUserMenu: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'change-password') {
+      setPasswordOpen(true)
+    }
     if (key === 'logout') {
       handleLogout()
     }
@@ -212,7 +222,7 @@ export function PcLayout() {
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {user?.realName ?? user?.username ?? '未登录'}
+                  {user?.real_name ?? user?.username ?? '未登录'}
                 </span>
                 <DownOutlined style={{ fontSize: 10, color: 'var(--sf-text-muted)' }} />
               </Flex>
@@ -226,7 +236,148 @@ export function PcLayout() {
       </Layout>
 
       <NotificationDrawer open={notificationOpen} onClose={() => setNotificationOpen(false)} />
+
+      <ChangePasswordModal
+        open={passwordOpen || mustChangePassword}
+        force={mustChangePassword}
+        onClose={() => setPasswordOpen(false)}
+      />
     </Layout>
+  )
+}
+
+interface ChangePasswordFormValues extends ChangePasswordPayload {
+  confirm_password: string
+}
+
+/**
+ * 修改密码弹窗（PUT /api/auth/password）：
+ * - 普通模式（用户菜单入口）：可取消，成功后要求重新登录（其余会话已被后端强制下线）；
+ * - 强制模式（首登门禁 mustChangePassword）：不可关闭，成功后刷新 /api/auth/me
+ *   补全权限快照并继续当前会话（后端已复位标志，service_auth.go:486-491）。
+ */
+function ChangePasswordModal({
+  open,
+  force,
+  onClose,
+}: {
+  open: boolean
+  force: boolean
+  onClose: () => void
+}) {
+  const [form] = Form.useForm<ChangePasswordFormValues>()
+  const [messageApi, contextHolder] = message.useMessage()
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const clearSession = useAuthStore((s) => s.clearSession)
+  const navigate = useNavigate()
+
+  const handleOk = async () => {
+    let values: ChangePasswordFormValues
+    try {
+      values = await form.validateFields()
+    } catch {
+      return // 表单校验失败：Form.Item 已内联提示
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await authApi.changePassword({
+        old_password: values.old_password,
+        new_password: values.new_password,
+      })
+      if (force) {
+        const { token, refreshToken, setSession } = useAuthStore.getState()
+        if (!token) {
+          setError('登录状态异常，请重新登录')
+          return
+        }
+        const me = await authApi.me()
+        setSession({
+          token,
+          refreshToken,
+          user: me.user,
+          permissions: me.permissions,
+          isSuper: me.is_super,
+          mustChangePassword: me.must_change_password,
+        })
+        messageApi.success('密码修改成功')
+        onClose()
+      } else {
+        messageApi.success('密码修改成功，请使用新密码重新登录')
+        onClose()
+        clearSession()
+        void authApi.logout().catch(() => undefined)
+        navigate('/login', { replace: true })
+      }
+    } catch (err) {
+      setError(resolveErrorMessage(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      title="修改密码"
+      open={open}
+      width={420}
+      forceRender
+      confirmLoading={submitting}
+      okText="保存"
+      onOk={handleOk}
+      onCancel={force ? undefined : onClose}
+      closable={!force}
+      keyboard={!force}
+      maskClosable={false}
+      cancelButtonProps={force ? { style: { display: 'none' } } : undefined}
+    >
+      {contextHolder}
+      {force && (
+        <Alert
+          type="warning"
+          showIcon
+          message="必须先修改初始密码"
+          description="修改密码后方可继续使用系统。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
+      {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
+      <Form<ChangePasswordFormValues> form={form} layout="vertical" requiredMark={false}>
+        <Form.Item
+          name="old_password"
+          label="原密码"
+          rules={[{ required: true, message: '请输入原密码' }]}
+        >
+          <Input.Password prefix={<LockOutlined />} autoComplete="current-password" />
+        </Form.Item>
+        <Form.Item
+          name="new_password"
+          label="新密码"
+          rules={[{ required: true, message: '请输入新密码' }, PASSWORD_RULE]}
+        >
+          <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母与数字" autoComplete="new-password" />
+        </Form.Item>
+        <Form.Item
+          name="confirm_password"
+          label="确认新密码"
+          dependencies={['new_password']}
+          rules={[
+            { required: true, message: '请再次输入新密码' },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('new_password') === value) {
+                  return Promise.resolve()
+                }
+                return Promise.reject(new Error('两次输入的密码不一致'))
+              },
+            }),
+          ]}
+        >
+          <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />
+        </Form.Item>
+      </Form>
+    </Modal>
   )
 }
 

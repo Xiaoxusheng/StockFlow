@@ -2,7 +2,7 @@ import axios, { type AxiosError, type AxiosInstance, type AxiosRequestConfig } f
 import type { ApiResponse } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
 
-/** 业务/API 错误：携带后端错误码与 request_id（docs/api.md §2.2） */
+/** 业务/API 错误：code 为后端字符串错误码（AUTH_/COMMON_ 前缀等）或 HTTP 状态数字（api.md §2.2） */
 export class ApiError extends Error {
   readonly code: number | string
   readonly requestId?: string
@@ -17,6 +17,16 @@ export class ApiError extends Error {
 
 /** 网络层错误（无法连接 / 超时） */
 export const NETWORK_ERROR_CODE = -1
+
+/** 后端失败信封：失败时 code 为模块命名空间字符串错误码（internal/response/errors.go 包注释） */
+interface ErrorEnvelope {
+  code?: number | string
+  message?: string
+  request_id?: string
+}
+
+/** 首登强制改密门禁错误码（internal/auth/errors.go:21，HTTP 403） */
+const PASSWORD_CHANGE_REQUIRED = 'AUTH_PASSWORD_CHANGE_REQUIRED'
 
 function isAuthRequest(url: string | undefined): boolean {
   return !!url && url.includes('/auth/login')
@@ -50,16 +60,26 @@ client.interceptors.response.use(
     response.data = body.data
     return response
   },
-  (error: AxiosError<Partial<ApiResponse>>) => {
+  (error: AxiosError<ErrorEnvelope>) => {
     if (error.response) {
       const { status, data } = error.response
       const message = data?.message
+      // 失败信封 code 为字符串错误码；非信封（如网关响应）退回 HTTP 状态数字
+      const code = typeof data?.code === 'string' ? data.code : status
       if (status === 401 && !isAuthRequest(error.config?.url)) {
         // 会话失效：清除登录态并回到登录页（permission.md §5）
         useAuthStore.getState().clearSession()
         const redirect = encodeURIComponent(window.location.pathname + window.location.search)
         window.location.href = `/login?redirect=${redirect}`
-        return Promise.reject(new ApiError(status, '登录已过期，请重新登录'))
+        return Promise.reject(new ApiError(code, '登录已过期，请重新登录'))
+      }
+      if (status === 403 && data?.code === PASSWORD_CHANGE_REQUIRED) {
+        // 首登强制改密门禁（internal/auth/middleware.go:74-78，白名单仅放行改密/登出/me）：
+        // 不走通用「没有权限」提示，置位标志后由 PcLayout 引导强制改密 UI
+        useAuthStore.getState().setMustChangePassword(true)
+        return Promise.reject(
+          new ApiError(code, message ?? '必须先修改初始密码', data?.request_id),
+        )
       }
       const fallback =
         status === 403
@@ -69,7 +89,7 @@ client.interceptors.response.use(
             : status >= 500
               ? '服务器开小差了，请稍后重试'
               : '请求失败'
-      return Promise.reject(new ApiError(status, message ?? fallback, data?.request_id))
+      return Promise.reject(new ApiError(code, message ?? fallback, data?.request_id))
     }
     if (error.code === 'ECONNABORTED') {
       return Promise.reject(new ApiError(NETWORK_ERROR_CODE, '请求超时，请检查网络后重试'))
