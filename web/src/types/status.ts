@@ -90,11 +90,12 @@ export const STATUS_META: Record<string, StatusMeta> = {
   // 库存调整单（business-flow.md §13.2：DRAFT→PENDING_APPROVAL→APPROVED→EXECUTED，驳回/作废复用通用键）
   executed: { label: '已执行', semantic: 'success' },
 
-  // 库位状态（frontend.md §11）
+  // 库位占用状态（契约：internal/warehouse/service_map.go:21-26 四值 IDLE/PARTIAL/FULL/LOCKED，
+  // 后端大写枚举经 toStatusKey 小写后注册；LOCKED 复用上方库存锁定键 locked；
+  // 冻结/异常为后端不产出的假值域（M1 不交付），已从库位占用域移除）
   idle: { label: '空闲', semantic: 'neutral' },
-  partially_occupied: { label: '部分占用', semantic: 'processing' },
+  partial: { label: '部分占用', semantic: 'processing' },
   full: { label: '满载', semantic: 'success' },
-  abnormal: { label: '异常', semantic: 'danger' },
 
   // 盘点（frontend.md §10.5 单据七态经大小写归一后复用通用键；此处为单据态 + 明细行态）
   pending_execute: { label: '待执行', semantic: 'pending' },

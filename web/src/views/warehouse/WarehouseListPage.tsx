@@ -76,7 +76,7 @@ const COLUMNS: ColumnsType<WarehouseItem> = [
   },
   {
     title: '更新时间',
-    dataIndex: 'updatedAt',
+    dataIndex: 'updated_at',
     width: 160,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },

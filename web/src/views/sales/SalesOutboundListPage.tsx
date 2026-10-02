@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   salesApi,
@@ -71,7 +70,8 @@ const COLUMNS: ColumnsType<SalesOutboundItem> = [
   },
 ]
 
-/** 销售出库列表（/sales/outbounds；GET /api/sales/outbounds 前端先行骨架，后端未交付呈统一错误态） */
+/** 销售出库列表（/sales/outbounds；GET /api/sales/outbounds 前端先行骨架，后端未交付呈统一错误态）。
+ * 出库单由销售订单审核后的下游流程（库存分配 → 拣货 → 复核 → 打包 → 发货）生成，页面不提供手工新建入口。 */
 export default function SalesOutboundListPage() {
   const [params, setParams] = useState<SalesOutboundQuery>({})
   const list = usePagedList<SalesOutboundItem, SalesOutboundQuery>({
@@ -90,14 +90,6 @@ export default function SalesOutboundListPage() {
       <SfPageHeader
         title="出库"
         subtitle="库存分配 → 拣货 → 复核 → 打包 → 发货"
-        extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建出库单
-            </Button>
-          </>
-        }
       />
       <Card size="small">
         <SfSearchForm

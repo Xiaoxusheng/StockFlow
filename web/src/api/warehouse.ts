@@ -1,13 +1,19 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 
-// ---------- 仓库空间（docs/api.md §1、backend-m1-plan.md §5.4） ----------
-// 值域来源：db/migrations/000004_create_warehouse_tables.up.sql
-//   * status 一律 ENABLED / DISABLED（warehouses/zones/shelves/bins 同构）；
-//   * warehouses / bins 为软删除对象（database.md §5.1），提供 delete；
-//     zones / shelves 走 status 停用，无删除接口。
+// ---------- 仓库空间（契约唯一来源：internal/warehouse/dto.go / service_map.go / handler.go） ----------
+// 视图 Item 的 ID/FK 为 database.ID（internal/database/model.go:22：JSON 序列化为字符串，
+// 防 JS 2^53 精度丢失）；创建入参关联 ID 为 int64（dto.go:170/188/207 binding:required），
+// 必须以 number 提交——encoding/json 不接受字符串，否则 400。
+// status 一律 ENABLED / DISABLED（db/migrations/000004 同构）；warehouses / bins 为软删除
+// 对象（database.md §5.1）提供 delete；zones / shelves 走 status 停用，无删除接口。
+// 后端视图不做联表：不含 warehouse_code / warehouse_name / zone_code / shelf_code 等字段。
+// 列表筛选参数名为 camelCase（handler.go:261/361/465：warehouseId / zoneId / shelfId 等）。
 
-/** 启停动作统一载荷（backend-m1-plan.md §5.4.1：status=启用/停用） */
+/** 视图 ID（后端 database.ID → JSON 字符串；保留 number 兼容，与 api/masterdata.ts 同约定） */
+export type WarehouseSpaceId = number | string
+
+/** 启停动作统一载荷（backend-m1-plan.md §5.4.1：status=ENABLED/DISABLED） */
 export type ResourceStatus = 'ENABLED' | 'DISABLED'
 
 /** 后端状态枚举为大写（迁移 000004），前端状态注册表为小写键（types/status.ts）：
@@ -22,7 +28,7 @@ export const RESOURCE_STATUS_OPTIONS = [
   { label: '已停用', value: 'DISABLED' },
 ]
 
-// ---------- 仓库 /api/warehouses ----------
+// ---------- 仓库 /api/warehouses（dto.go WarehouseView / WarehouseCreateInput / WarehouseUpdateInput） ----------
 
 export interface WarehouseQuery extends PageQuery {
   keyword?: string
@@ -31,39 +37,41 @@ export interface WarehouseQuery extends PageQuery {
 }
 
 export interface WarehouseItem {
-  id: number | string
+  id: WarehouseSpaceId
   code: string
   name: string
-  type?: string
-  address?: string
-  contact?: string
-  phone?: string
-  area?: number
-  capacity?: number
-  managerUserId?: number
+  address: string
+  contact: string
+  phone: string
+  area: number
+  capacity: number
+  type: string
   status: string
-  createdAt?: string
-  updatedAt?: string
+  manager_user_id: WarehouseSpaceId
+  created_at?: string
+  updated_at?: string
 }
 
+/** 创建/更新仓库（WarehouseCreateInput 必填 code/name；UpdateInput 同字段集为指针可选语义，
+ *  status 不在更新面，走启停接口） */
 export interface WarehousePayload {
   code: string
   name: string
-  type?: string
   address?: string
   contact?: string
   phone?: string
   area?: number
   capacity?: number
-  managerUserId?: number
+  type?: string
+  manager_user_id?: number
 }
 
-/** 仓库类型（迁移注释：默认 NORMAL 正常仓，值域随业务扩展由应用层校验） */
+/** 仓库类型（迁移注释：默认 NORMAL 正常仓，值域开放随业务扩展） */
 export const WAREHOUSE_TYPE_LABEL: Record<string, string> = {
   NORMAL: '正常仓',
 }
 
-// ---------- 库区 /api/zones ----------
+// ---------- 库区 /api/zones（dto.go ZoneView / ZoneCreateInput / ZoneUpdateInput） ----------
 
 export interface ZoneQuery extends PageQuery {
   keyword?: string
@@ -73,35 +81,42 @@ export interface ZoneQuery extends PageQuery {
 }
 
 export interface ZoneItem {
-  id: number | string
-  warehouseId?: number | string
-  warehouseCode?: string
-  warehouseName?: string
+  id: WarehouseSpaceId
+  warehouse_id: WarehouseSpaceId
   code: string
   name: string
-  zoneType?: string
-  capacity?: number
+  zone_type: string
+  capacity: number
   status: string
-  createdAt?: string
-  updatedAt?: string
+  created_at?: string
+  updated_at?: string
 }
 
+/** 创建库区（dto.go:168-175：warehouse_id 层级锚点 binding:required，创建后不可变更） */
 export interface ZonePayload {
-  warehouseId: number | string
+  warehouse_id: number
   code: string
   name: string
-  zoneType?: string
+  zone_type?: string
   capacity?: number
 }
 
-/** 库区类型（迁移注释：STORAGE 存储 / PICKING 拣货 / RECEIVING 收货暂存等） */
+/** 更新库区（dto.go ZoneUpdateInput：warehouse_id 不可变更，更新面不含关联 ID） */
+export interface ZoneUpdatePayload {
+  code?: string
+  name?: string
+  zone_type?: string
+  capacity?: number
+}
+
+/** 库区类型（迁移注释：STORAGE 存储 / PICKING 拣货 / RECEIVING 收货暂存等，值域开放） */
 export const ZONE_TYPE_LABEL: Record<string, string> = {
   STORAGE: '存储区',
   PICKING: '拣货区',
   RECEIVING: '收货暂存区',
 }
 
-// ---------- 货架 /api/shelves ----------
+// ---------- 货架 /api/shelves（dto.go ShelfView / ShelfCreateInput / ShelfUpdateInput） ----------
 
 export interface ShelfQuery extends PageQuery {
   keyword?: string
@@ -111,32 +126,37 @@ export interface ShelfQuery extends PageQuery {
 }
 
 export interface ShelfItem {
-  id: number | string
-  warehouseId?: number | string
-  warehouseCode?: string
-  warehouseName?: string
-  zoneId?: number | string
-  zoneCode?: string
-  zoneName?: string
+  id: WarehouseSpaceId
+  warehouse_id: WarehouseSpaceId
+  zone_id: WarehouseSpaceId
   code: string
-  layers?: number
-  columns?: number
-  capacity?: number
+  layers: number
+  columns: number
+  capacity: number
   status: string
-  createdAt?: string
-  updatedAt?: string
+  created_at?: string
+  updated_at?: string
 }
 
+/** 创建货架（dto.go:185-194：zone_id 层级锚点 binding:required；warehouse_id 可选交叉校验） */
 export interface ShelfPayload {
-  warehouseId: number | string
-  zoneId: number | string
+  zone_id: number
+  warehouse_id?: number
   code: string
   layers?: number
   columns?: number
   capacity?: number
 }
 
-// ---------- 库位 /api/bins ----------
+/** 更新货架（dto.go ShelfUpdateInput：zone_id/warehouse_id 不可变更） */
+export interface ShelfUpdatePayload {
+  code?: string
+  layers?: number
+  columns?: number
+  capacity?: number
+}
+
+// ---------- 库位 /api/bins（dto.go BinView / BinCreateInput / BinUpdateInput） ----------
 
 export interface BinQuery extends PageQuery {
   keyword?: string
@@ -148,83 +168,82 @@ export interface BinQuery extends PageQuery {
 }
 
 export interface BinItem {
-  id: number | string
-  warehouseId?: number | string
-  warehouseCode?: string
-  warehouseName?: string
-  zoneId?: number | string
-  zoneCode?: string
-  shelfId?: number | string
-  shelfCode?: string
-  layer?: number
-  columnNo?: number
+  id: WarehouseSpaceId
+  warehouse_id: WarehouseSpaceId
+  zone_id: WarehouseSpaceId
+  shelf_id: WarehouseSpaceId
+  layer: number
+  column_no: number
   code: string
-  binType?: string
-  maxCapacity?: number
-  currentCapacity?: number
+  bin_type: string
+  max_capacity: number
+  current_capacity: number
   status: string
-  createdAt?: string
-  updatedAt?: string
+  created_at?: string
+  updated_at?: string
 }
 
+/** 创建库位（dto.go:204-215：shelf_id 层级锚点 binding:required；zone_id/warehouse_id 可选交叉校验；
+ *  current_capacity 由上架/移库业务维护，禁止直改） */
 export interface BinPayload {
-  warehouseId: number | string
-  zoneId: number | string
-  shelfId: number | string
-  layer?: number
-  columnNo?: number
+  shelf_id: number
+  zone_id?: number
+  warehouse_id?: number
   code: string
-  binType?: string
-  maxCapacity?: number
+  bin_type?: string
+  layer?: number
+  column_no?: number
+  max_capacity?: number
 }
 
-/** 库位类型（迁移注释：PICK 拣货位 / STORAGE 存储位 / RECEIVE 收货位等） */
+/** 更新库位（dto.go BinUpdateInput：zone_id/shelf_id/warehouse_id/current_capacity 不可变更） */
+export interface BinUpdatePayload {
+  code?: string
+  bin_type?: string
+  layer?: number
+  column_no?: number
+  max_capacity?: number
+}
+
+/** 库位类型（迁移注释：PICK 拣货位 / STORAGE 存储位 / RECEIVE 收货位等，值域开放） */
 export const BIN_TYPE_LABEL: Record<string, string> = {
   PICK: '拣货位',
   STORAGE: '存储位',
   RECEIVE: '收货位',
 }
 
-// ---------- 库位地图 GET /api/warehouses/{id}/map ----------
-// backend-m1-plan.md §5.4：按仓库返回区/架/位网格与占用状态（占用经 BinOccupancyReader 由库存域聚合）。
-// 库位占用状态值域对齐 types/status.ts：idle/partially_occupied/full/locked/frozen/abnormal（frontend.md §11）。
+// ---------- 库位地图 GET /api/warehouses/{id}/map（service_map.go:30-53） ----------
+// 输出为全量层级树 { warehouse, zones: [{ zone, shelves: [{ shelf, bins }] }] }；
+// 占用经 BinOccupancyReader 由库存域聚合，occupancy_status 为四值占用状态
+// （锁定优先于容量状态），quantity/locked_quantity 仅在占用数据可用时返回。
 
-export interface WarehouseMapBin {
-  id: number | string
-  code: string
-  binType?: string
-  layer: number
-  columnNo: number
-  maxCapacity?: number
-  currentCapacity?: number
-  /** 占用状态；后端未就绪时页面呈现统一错误态 */
-  status?: string
+/** 库位占用显示状态（service_map.go:21-26：IDLE 空闲 / PARTIAL 部分占用 / FULL 满载 /
+ *  LOCKED 存在锁定中的库存） */
+export type BinOccupancyStatus = 'IDLE' | 'PARTIAL' | 'FULL' | 'LOCKED'
+
+/** 地图库位格（service_map.go:30 BinMapCell = BinView 展平 + 占用状态） */
+export interface BinMapCell extends BinItem {
+  occupancy_status: BinOccupancyStatus
+  quantity?: number
+  locked_quantity?: number
 }
 
-export interface WarehouseMapShelf {
-  id: number | string
-  code: string
-  layers: number
-  columns: number
-  bins: WarehouseMapBin[]
+/** 地图货架节点（service_map.go:38 ShelfMapNode） */
+export interface ShelfMapNode {
+  shelf: ShelfItem
+  bins: BinMapCell[]
 }
 
-export interface WarehouseMapZone {
-  id: number | string
-  code: string
-  name: string
-  zoneType?: string
-  status?: string
-  shelves: WarehouseMapShelf[]
+/** 地图库区节点（service_map.go:44 ZoneMapNode） */
+export interface ZoneMapNode {
+  zone: ZoneItem
+  shelves: ShelfMapNode[]
 }
 
+/** 仓库地图（service_map.go:50 WarehouseMapView） */
 export interface WarehouseMap {
-  warehouse: {
-    id: number | string
-    code: string
-    name: string
-  }
-  zones: WarehouseMapZone[]
+  warehouse: WarehouseItem
+  zones: ZoneMapNode[]
 }
 
 // ---------- API 模块 ----------
@@ -234,14 +253,15 @@ export const warehouseApi = {
     http.get<PageResult<WarehouseItem>>('/api/warehouses', { params: query }),
   create: (payload: WarehousePayload) =>
     http.post<WarehouseItem>('/api/warehouses', payload),
-  update: (id: number | string, payload: WarehousePayload) =>
+  update: (id: WarehouseSpaceId, payload: WarehousePayload) =>
     http.put<WarehouseItem>(`/api/warehouses/${id}`, payload),
   /** 软删除（warehouses 为 database.md §5.1 软删除对象；级联校验由后端执行） */
-  remove: (id: number | string) =>
+  remove: (id: WarehouseSpaceId) =>
     http.delete<void>(`/api/warehouses/${id}`),
-  setStatus: (id: number | string, status: ResourceStatus) =>
-    http.put<WarehouseItem>(`/api/warehouses/${id}/status`, { status }),
-  map: (id: number | string) =>
+  setStatus: (id: WarehouseSpaceId, status: ResourceStatus) =>
+    // 后端 handler.go:236 返回 {status}，非 Item 视图
+    http.put<{ status: ResourceStatus }>(`/api/warehouses/${id}/status`, { status }),
+  map: (id: WarehouseSpaceId) =>
     http.get<WarehouseMap>(`/api/warehouses/${id}/map`),
 }
 
@@ -250,11 +270,12 @@ export const zoneApi = {
     http.get<PageResult<ZoneItem>>('/api/zones', { params: query }),
   create: (payload: ZonePayload) =>
     http.post<ZoneItem>('/api/zones', payload),
-  update: (id: number | string, payload: ZonePayload) =>
+  update: (id: WarehouseSpaceId, payload: ZoneUpdatePayload) =>
     http.put<ZoneItem>(`/api/zones/${id}`, payload),
   /** zones 无删除接口：停用即下线（backend-m1-plan.md §5.4.1） */
-  setStatus: (id: number | string, status: ResourceStatus) =>
-    http.put<ZoneItem>(`/api/zones/${id}/status`, { status }),
+  setStatus: (id: WarehouseSpaceId, status: ResourceStatus) =>
+    // 后端 handler.go:346 返回 {status}，非 Item 视图
+    http.put<{ status: ResourceStatus }>(`/api/zones/${id}/status`, { status }),
 }
 
 export const shelfApi = {
@@ -262,11 +283,12 @@ export const shelfApi = {
     http.get<PageResult<ShelfItem>>('/api/shelves', { params: query }),
   create: (payload: ShelfPayload) =>
     http.post<ShelfItem>('/api/shelves', payload),
-  update: (id: number | string, payload: ShelfPayload) =>
+  update: (id: WarehouseSpaceId, payload: ShelfUpdatePayload) =>
     http.put<ShelfItem>(`/api/shelves/${id}`, payload),
   /** shelves 无删除接口：停用即下线（backend-m1-plan.md §5.4.1） */
-  setStatus: (id: number | string, status: ResourceStatus) =>
-    http.put<ShelfItem>(`/api/shelves/${id}/status`, { status }),
+  setStatus: (id: WarehouseSpaceId, status: ResourceStatus) =>
+    // 后端 handler.go:446 返回 {status}，非 Item 视图
+    http.put<{ status: ResourceStatus }>(`/api/shelves/${id}/status`, { status }),
 }
 
 export const binApi = {
@@ -274,11 +296,12 @@ export const binApi = {
     http.get<PageResult<BinItem>>('/api/bins', { params: query }),
   create: (payload: BinPayload) =>
     http.post<BinItem>('/api/bins', payload),
-  update: (id: number | string, payload: BinPayload) =>
+  update: (id: WarehouseSpaceId, payload: BinUpdatePayload) =>
     http.put<BinItem>(`/api/bins/${id}`, payload),
   /** 软删除（bins 为 database.md §5.1 软删除对象；级联校验由后端执行） */
-  remove: (id: number | string) =>
+  remove: (id: WarehouseSpaceId) =>
     http.delete<void>(`/api/bins/${id}`),
-  setStatus: (id: number | string, status: ResourceStatus) =>
-    http.put<BinItem>(`/api/bins/${id}/status`, { status }),
+  setStatus: (id: WarehouseSpaceId, status: ResourceStatus) =>
+    // 后端 handler.go:565 返回 {status}，非 Item 视图
+    http.put<{ status: ResourceStatus }>(`/api/bins/${id}/status`, { status }),
 }

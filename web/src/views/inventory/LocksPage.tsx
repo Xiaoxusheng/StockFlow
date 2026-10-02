@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   inventoryApi,
@@ -131,7 +130,6 @@ export default function LocksPage() {
       <SfPageHeader
         title="库存锁定"
         subtitle="订单占用 / 盘点锁定 / 质检 / 人工 / 异常冻结明细"
-        extra={<Button icon={<ExportOutlined />}>导出</Button>}
       />
       <Card size="small">
         <SfSearchForm

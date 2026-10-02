@@ -1,8 +1,10 @@
 import { useState } from 'react'
-import { Card, Typography } from 'antd'
+import { Button, Card, Typography } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  COUNT_CREATE_PERMISSION,
   COUNT_SCOPE_TYPE_LABEL,
   COUNT_TYPE_LABEL,
   countApi,
@@ -13,6 +15,8 @@ import {
   type CountTaskItem,
   type CountType,
 } from '@/api/count'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -66,6 +70,8 @@ function renderScope(record: CountTaskItem): string {
 export default function CountTaskListPage() {
   const [params, setParams] = useState<CountQuery>({})
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canCreate = canAccess(user, COUNT_CREATE_PERMISSION)
   const list = usePagedList<CountTaskItem, CountQuery>({
     queryKey: ['counts', 'tasks'],
     fetch: (q) => countApi.list(q),
@@ -152,6 +158,17 @@ export default function CountTaskListPage() {
       <SfPageHeader
         title="盘点中心"
         subtitle="盘点任务：全盘 / 按仓 / 按库区 / 按货架 / 按库位 / 按 SKU（单号 CK- 前缀）"
+        extra={
+          canCreate ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/counts/new')}
+            >
+              新建盘点单
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm

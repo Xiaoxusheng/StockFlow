@@ -1,25 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, Card, Flex, Skeleton, Statistic, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
+import type { ReactNode } from 'react'
+import { Card, Flex, Skeleton, Statistic } from 'antd'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { inventoryApi, type StockItem, type StockQuery } from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfError } from '@/components/common/SfError'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDate, formatNumber } from '@/utils/format'
-
-const { Text } = Typography
-
-const STATUS_OPTIONS = [
-  { label: '正常', value: 'normal' },
-  { label: '锁定', value: 'locked' },
-  { label: '冻结', value: 'frozen' },
-]
+import { formatDateTime, formatNumber } from '@/utils/format'
 
 /** §26.3 页面状态保留：筛选 + 分页持久化 key（详情返回后恢复） */
 const LIST_STATE_KEY = 'sf.page.inventory-stock'
@@ -43,63 +35,39 @@ function readListState(): StockListState | null {
   }
 }
 
+/** 数量列渲染（后端 Qty 为裸数字，identity.go:71） */
+function renderQty(value: number): ReactNode {
+  return <span className="sf-num">{formatNumber(value)}</span>
+}
+
+/** 可选维度 ID（zone/shelf/batch）0 值显示占位符（handler.go 注释：0=未指定/非批次） */
+function renderIdOrZero(value: StockItem['zone_id']): string {
+  return String(value) === '0' ? '-' : String(value)
+}
+
+/** 库存行列（InventoryView 仅含五维定位 ID + 六状态数量，handler.go:30-41；文本联表待后端聚合字段下发） */
 const COLUMNS: ColumnsType<StockItem> = [
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130, fixed: 'left' },
-  {
-    title: '商品名称',
-    dataIndex: 'productName',
-    width: 200,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库区', dataIndex: 'zoneCode', width: 90, render: (v?: string) => v ?? '-' },
-  { title: '库位', dataIndex: 'binCode', width: 110 },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
-  {
-    title: '总库存',
-    dataIndex: 'totalQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '可用',
-    dataIndex: 'availableQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '锁定',
-    dataIndex: 'lockedQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '冻结',
-    dataIndex: 'frozenQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  { title: '效期', dataIndex: 'expiryDate', width: 110, render: (v?: string) => formatDate(v) },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 90,
-    render: (v: string) => <SfStatusTag status={v} />,
-  },
+  { title: 'SKU ID', dataIndex: 'sku_id', width: 120, fixed: 'left' },
+  { title: '仓库 ID', dataIndex: 'warehouse_id', width: 110 },
+  { title: '库区 ID', dataIndex: 'zone_id', width: 100, render: renderIdOrZero },
+  { title: '货架 ID', dataIndex: 'shelf_id', width: 100, render: renderIdOrZero },
+  { title: '库位 ID', dataIndex: 'bin_id', width: 110 },
+  { title: '批次 ID', dataIndex: 'batch_id', width: 110, render: renderIdOrZero },
+  { title: '总库存', dataIndex: 'total_qty', width: 90, align: 'right', render: renderQty },
+  { title: '可用', dataIndex: 'available_qty', width: 90, align: 'right', render: renderQty },
+  { title: '锁定', dataIndex: 'locked_qty', width: 90, align: 'right', render: renderQty },
+  { title: '冻结', dataIndex: 'frozen_qty', width: 90, align: 'right', render: renderQty },
+  { title: '待检', dataIndex: 'pending_inspect_qty', width: 90, align: 'right', render: renderQty },
+  { title: '不良', dataIndex: 'defective_qty', width: 90, align: 'right', render: renderQty },
   {
     title: '更新时间',
-    dataIndex: 'updatedAt',
+    dataIndex: 'updated_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDate(v)}</span>,
+    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
 
-/** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格；点击行进入 SKU 库存详情（§10.2/§10.3） */
+/** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格；点击行进入库存行详情（§10.3） */
 export default function StockListPage() {
   const navigate = useNavigate()
   // §26.3：进入详情再返回时恢复离开前的筛选与分页
@@ -164,12 +132,18 @@ export default function StockListPage() {
         title="实时库存"
         subtitle="SKU / 库位 / 批次维度的实时库存"
         extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              库存调整
-            </Button>
-          </>
+          <SfExportButton
+            module="INVENTORY"
+            permission="inventory:inventory:list"
+            scopeParams={{
+              warehouse_id: params.warehouse_id,
+              zone_id: params.zone_id,
+              shelf_id: params.shelf_id,
+              bin_id: params.bin_id,
+              sku_id: params.sku_id,
+              batch_id: params.batch_id,
+            }}
+          />
         }
       />
 
@@ -203,10 +177,10 @@ export default function StockListPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU / 商品名称 / 条码' },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-            { name: 'binCode', label: '库位', control: 'input' },
-            { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
+            { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
+            { name: 'warehouse_id', label: '仓库 ID', control: 'input', placeholder: '仓库 ID（正整数）' },
+            { name: 'bin_id', label: '库位 ID', control: 'input', placeholder: '库位 ID（正整数）' },
+            { name: 'batch_id', label: '批次 ID', control: 'input', placeholder: '批次 ID（0=非批次）' },
           ]}
           onSearch={handleSearch}
         />
@@ -223,9 +197,9 @@ export default function StockListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存"
-          scrollX={1460}
+          scrollX={1520}
           onRow={(record: StockItem) => ({
-            onClick: () => navigate(`/inventory/stock/${encodeURIComponent(record.skuCode)}`),
+            onClick: () => navigate(`/inventory/stock/${encodeURIComponent(String(record.id))}`),
             style: { cursor: 'pointer' },
           })}
         />

@@ -59,7 +59,6 @@ export const MENU_TREE: MenuItem[] = [
       { path: '/inventory/serials', label: '序列号', permission: 'inventory:serial:view' },
       { path: '/inventory/adjustments', label: '库存调整', permission: 'inventory:adjustment:view' },
       { path: '/inventory/transfers', label: '库存转移', permission: 'inventory:transfer:view' },
-      { path: '/inventory/count', label: '库存盘点', permission: 'inventory:count:view' },
       { path: '/inventory/alerts', label: '库存预警', permission: 'inventory:alert:view' },
       { path: '/inventory/trace', label: '库存追溯', permission: 'inventory:trace:view' },
       { path: '/inventory/analytics', label: '库存分析', permission: 'inventory:analytics:view' },

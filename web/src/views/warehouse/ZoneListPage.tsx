@@ -11,8 +11,8 @@ import {
   zoneApi,
   type ResourceStatus,
   type ZoneItem,
-  type ZonePayload,
   type ZoneQuery,
+  type ZoneUpdatePayload,
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -32,19 +32,12 @@ const SEARCH_FIELDS: SearchField[] = [
 ]
 
 const COLUMNS: ColumnsType<ZoneItem> = [
-  {
-    title: '所属仓库',
-    dataIndex: 'warehouseName',
-    width: 110,
-    ellipsis: true,
-    render: (v?: string) => v ?? '-',
-  },
-  { title: '库区编码', dataIndex: 'code', width: 110, fixed: 'left' },
-  { title: '名称', dataIndex: 'name', width: 160, ellipsis: true },
+  { title: '库区编码', dataIndex: 'code', width: 130, fixed: 'left' },
+  { title: '名称', dataIndex: 'name', width: 180, ellipsis: true },
   {
     title: '类型',
-    dataIndex: 'zoneType',
-    width: 100,
+    dataIndex: 'zone_type',
+    width: 110,
     render: (v?: string) => (v ? (ZONE_TYPE_LABEL[v] ?? v) : '-'),
   },
   {
@@ -62,17 +55,19 @@ const COLUMNS: ColumnsType<ZoneItem> = [
   },
   {
     title: '更新时间',
-    dataIndex: 'updatedAt',
+    dataIndex: 'updated_at',
     width: 160,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
 
+/** 表单值与 ZonePayload 同构：warehouse_id 以 number 提交（dto.go:170 binding:required，
+ *  传字符串会被后端 int64 拒绝 400） */
 interface ZoneFormValues {
-  warehouseId: number | string
+  warehouse_id: number
   code: string
   name: string
-  zoneType?: string
+  zone_type?: string
   capacity?: number
 }
 
@@ -92,7 +87,7 @@ export default function ZoneListPage() {
   })
   const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.id,
+    value: Number(item.id),
   }))
   const searchFields: SearchField[] = SEARCH_FIELDS.map((field) =>
     field.name === 'warehouseId' ? { ...field, options: warehouseOptions.map((o) => ({ label: o.label, value: String(o.value) })) } : field,
@@ -123,10 +118,10 @@ export default function ZoneListPage() {
     setFormError(null)
     form.resetFields()
     form.setFieldsValue({
-      warehouseId: record.warehouseId,
+      warehouse_id: Number(record.warehouse_id),
       code: record.code,
       name: record.name,
-      zoneType: record.zoneType,
+      zone_type: record.zone_type,
       capacity: record.capacity,
     })
     setDrawerOpen(true)
@@ -139,7 +134,13 @@ export default function ZoneListPage() {
     setFormError(null)
     try {
       if (editing) {
-        const payload: ZonePayload = { ...values, warehouseId: editing.warehouseId ?? values.warehouseId }
+        // 更新面不含 warehouse_id（dto.go ZoneUpdateInput：层级锚点创建后不可变更）
+        const payload: ZoneUpdatePayload = {
+          code: values.code,
+          name: values.name,
+          zone_type: values.zone_type,
+          capacity: values.capacity,
+        }
         await zoneApi.update(editing.id, payload)
       } else {
         await zoneApi.create(values)
@@ -232,7 +233,7 @@ export default function ZoneListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库区"
-          scrollX={940}
+          scrollX={860}
         />
       </Card>
 
@@ -262,7 +263,7 @@ export default function ZoneListPage() {
         )}
         <Form form={form} layout="vertical">
           <Form.Item
-            name="warehouseId"
+            name="warehouse_id"
             label="所属仓库"
             rules={[{ required: true, message: '请选择所属仓库' }]}
             extra={editing ? '所属仓库创建后不可修改' : undefined}
@@ -282,7 +283,7 @@ export default function ZoneListPage() {
           <Form.Item name="name" label="库区名称" rules={[{ required: true, message: '请输入库区名称' }]}>
             <Input maxLength={255} />
           </Form.Item>
-          <Form.Item name="zoneType" label="库区类型">
+          <Form.Item name="zone_type" label="库区类型">
             <Select options={ZONE_TYPE_OPTIONS} allowClear />
           </Form.Item>
           <Form.Item name="capacity" label="容量">

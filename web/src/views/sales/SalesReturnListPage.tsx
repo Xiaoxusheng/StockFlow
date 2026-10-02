@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   salesApi,
@@ -69,7 +68,8 @@ const COLUMNS: ColumnsType<SalesReturnItem> = [
   },
 ]
 
-/** 销售退货列表（/sales/returns；GET /api/sales/returns 前端先行骨架，后端未交付呈统一错误态） */
+/** 销售退货列表（/sales/returns；GET /api/sales/returns 前端先行骨架，后端未交付呈统一错误态）。
+ * 退货创建页本批不交付（退货单创建入口随退货域后端契约冻结后统一建设），不保留无行为的假入口。 */
 export default function SalesReturnListPage() {
   const [params, setParams] = useState<SalesReturnQuery>({})
   const list = usePagedList<SalesReturnItem, SalesReturnQuery>({
@@ -88,14 +88,6 @@ export default function SalesReturnListPage() {
       <SfPageHeader
         title="销售退货"
         subtitle="退货申请 → 审核 → 收货 → 质检"
-        extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建退货单
-            </Button>
-          </>
-        }
       />
       <Card size="small">
         <SfSearchForm

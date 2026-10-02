@@ -23,8 +23,8 @@ import {
   warehouseApi,
   zoneApi,
   type BinItem,
-  type BinPayload,
   type BinQuery,
+  type BinUpdatePayload,
   type ResourceStatus,
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
@@ -45,16 +45,7 @@ const SEARCH_FIELDS: SearchField[] = [
 ]
 
 const COLUMNS: ColumnsType<BinItem> = [
-  {
-    title: '所属仓库',
-    dataIndex: 'warehouseName',
-    width: 110,
-    ellipsis: true,
-    render: (v?: string) => v ?? '-',
-  },
-  { title: '库区', dataIndex: 'zoneCode', width: 80, render: (v?: string) => v ?? '-' },
-  { title: '货架', dataIndex: 'shelfCode', width: 100, render: (v?: string) => v ?? '-' },
-  { title: '库位编码', dataIndex: 'code', width: 130, fixed: 'left' },
+  { title: '库位编码', dataIndex: 'code', width: 160, fixed: 'left' },
   {
     title: '层',
     dataIndex: 'layer',
@@ -64,27 +55,27 @@ const COLUMNS: ColumnsType<BinItem> = [
   },
   {
     title: '列',
-    dataIndex: 'columnNo',
+    dataIndex: 'column_no',
     width: 60,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '类型',
-    dataIndex: 'binType',
+    dataIndex: 'bin_type',
     width: 90,
     render: (v?: string) => (v ? (BIN_TYPE_LABEL[v] ?? v) : '-'),
   },
   {
     title: '最大容量',
-    dataIndex: 'maxCapacity',
+    dataIndex: 'max_capacity',
     width: 100,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '当前容量',
-    dataIndex: 'currentCapacity',
+    dataIndex: 'current_capacity',
     width: 100,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
@@ -97,21 +88,22 @@ const COLUMNS: ColumnsType<BinItem> = [
   },
   {
     title: '更新时间',
-    dataIndex: 'updatedAt',
+    dataIndex: 'updated_at',
     width: 160,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
 
+/** 表单值与 BinPayload 同构：shelf_id 等关联 ID 以 number 提交（dto.go:207 binding:required） */
 interface BinFormValues {
-  warehouseId: number | string
-  zoneId: number | string
-  shelfId: number | string
+  warehouse_id: number
+  zone_id: number
+  shelf_id: number
   layer?: number
-  columnNo?: number
+  column_no?: number
   code: string
-  binType?: string
-  maxCapacity?: number
+  bin_type?: string
+  max_capacity?: number
 }
 
 /** 库位管理（frontend.md §27 库位；M1 契约：/api/bins CRUD + 启停/删除；当前容量由上架/移库业务维护，禁止直改） */
@@ -130,7 +122,7 @@ export default function BinListPage() {
   })
   const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.id,
+    value: Number(item.id),
   }))
   const searchFields: SearchField[] = SEARCH_FIELDS.map((field) =>
     field.name === 'warehouseId'
@@ -148,8 +140,8 @@ export default function BinListPage() {
   const [removingId, setRemovingId] = useState<number | string | null>(null)
 
   // 表单内级联：仓库 → 库区 → 货架
-  const formWarehouseId = Form.useWatch('warehouseId', form)
-  const formZoneId = Form.useWatch('zoneId', form)
+  const formWarehouseId = Form.useWatch('warehouse_id', form)
+  const formZoneId = Form.useWatch('zone_id', form)
   const zoneOptionsQuery = useQuery({
     queryKey: ['warehouse', 'zones', 'options', formWarehouseId],
     queryFn: () => zoneApi.list({ warehouseId: formWarehouseId, page: 1, pageSize: 200 }),
@@ -157,7 +149,7 @@ export default function BinListPage() {
   })
   const zoneOptions = (zoneOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.id,
+    value: Number(item.id),
   }))
   const shelfOptionsQuery = useQuery({
     queryKey: ['warehouse', 'shelves', 'options', formZoneId],
@@ -166,7 +158,7 @@ export default function BinListPage() {
   })
   const shelfOptions = (shelfOptionsQuery.data?.items ?? []).map((item) => ({
     label: item.code,
-    value: item.id,
+    value: Number(item.id),
   }))
 
   const handleSearch = (values: Record<string, unknown>) => {
@@ -186,14 +178,14 @@ export default function BinListPage() {
     setFormError(null)
     form.resetFields()
     form.setFieldsValue({
-      warehouseId: record.warehouseId,
-      zoneId: record.zoneId,
-      shelfId: record.shelfId,
+      warehouse_id: Number(record.warehouse_id),
+      zone_id: Number(record.zone_id),
+      shelf_id: Number(record.shelf_id),
       layer: record.layer,
-      columnNo: record.columnNo,
+      column_no: record.column_no,
       code: record.code,
-      binType: record.binType,
-      maxCapacity: record.maxCapacity,
+      bin_type: record.bin_type,
+      max_capacity: record.max_capacity,
     })
     setDrawerOpen(true)
   }
@@ -205,11 +197,14 @@ export default function BinListPage() {
     setFormError(null)
     try {
       if (editing) {
-        const payload: BinPayload = {
-          ...values,
-          warehouseId: editing.warehouseId ?? values.warehouseId,
-          zoneId: editing.zoneId ?? values.zoneId,
-          shelfId: editing.shelfId ?? values.shelfId,
+        // 更新面不含 zone_id/shelf_id/warehouse_id（dto.go BinUpdateInput：层级锚点不可变更，
+        // current_capacity 由上架/移库业务维护）
+        const payload: BinUpdatePayload = {
+          code: values.code,
+          bin_type: values.bin_type,
+          layer: values.layer,
+          column_no: values.column_no,
+          max_capacity: values.max_capacity,
         }
         await binApi.update(editing.id, payload)
       } else {
@@ -325,7 +320,7 @@ export default function BinListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库位"
-          scrollX={1240}
+          scrollX={920}
         />
       </Card>
 
@@ -355,7 +350,7 @@ export default function BinListPage() {
         )}
         <Form form={form} layout="vertical">
           <Form.Item
-            name="warehouseId"
+            name="warehouse_id"
             label="所属仓库"
             rules={[{ required: true, message: '请选择所属仓库' }]}
           >
@@ -367,13 +362,13 @@ export default function BinListPage() {
               placeholder="请选择所属仓库"
               disabled={editing !== null}
               onChange={() => {
-                form.setFieldValue('zoneId', undefined)
-                form.setFieldValue('shelfId', undefined)
+                form.setFieldValue('zone_id', undefined)
+                form.setFieldValue('shelf_id', undefined)
               }}
             />
           </Form.Item>
           <Form.Item
-            name="zoneId"
+            name="zone_id"
             label="所属库区"
             rules={[{ required: true, message: '请选择所属库区' }]}
           >
@@ -384,11 +379,11 @@ export default function BinListPage() {
               optionFilterProp="label"
               placeholder="请先选择仓库，再选择库区"
               disabled={editing !== null}
-              onChange={() => form.setFieldValue('shelfId', undefined)}
+              onChange={() => form.setFieldValue('shelf_id', undefined)}
             />
           </Form.Item>
           <Form.Item
-            name="shelfId"
+            name="shelf_id"
             label="所属货架"
             rules={[{ required: true, message: '请选择所属货架' }]}
             extra={editing ? '所属仓库/库区/货架创建后不可修改' : undefined}
@@ -408,13 +403,13 @@ export default function BinListPage() {
           <Form.Item name="layer" label="层">
             <InputNumber style={{ width: '100%' }} min={1} precision={0} />
           </Form.Item>
-          <Form.Item name="columnNo" label="列">
+          <Form.Item name="column_no" label="列">
             <InputNumber style={{ width: '100%' }} min={1} precision={0} />
           </Form.Item>
-          <Form.Item name="binType" label="库位类型">
+          <Form.Item name="bin_type" label="库位类型">
             <Select options={BIN_TYPE_OPTIONS} allowClear />
           </Form.Item>
-          <Form.Item name="maxCapacity" label="最大容量">
+          <Form.Item name="max_capacity" label="最大容量">
             <InputNumber style={{ width: '100%' }} min={0} precision={2} />
           </Form.Item>
         </Form>

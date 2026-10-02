@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Button, Card, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
 import { purchaseApi, type PurchaseItem, type PurchaseQuery, type PurchaseStatus } from '@/api/purchase'
@@ -111,14 +110,6 @@ export default function PurchaseListPage() {
       <SfPageHeader
         title="采购订单"
         subtitle="草稿 → 待审核 → 已审核 → 到货 → 完成"
-        extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建采购订单
-            </Button>
-          </>
-        }
       />
       <Card size="small">
         <SfSearchForm

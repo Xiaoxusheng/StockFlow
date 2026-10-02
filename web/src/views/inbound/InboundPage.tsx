@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Button, Card, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
 import {
@@ -136,14 +135,6 @@ export default function InboundPage() {
       <SfPageHeader
         title="入库管理"
         subtitle="收货 → 质检 → 上架（支持部分收货）"
-        extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建入库单
-            </Button>
-          </>
-        }
       />
       <Card size="small">
         <SfSearchForm

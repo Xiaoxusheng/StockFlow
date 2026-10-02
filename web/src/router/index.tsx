@@ -63,6 +63,9 @@ const ShipmentPage = lazy(() => import('@/views/outbound/ShipmentPage'))
 const SalesOrderListPage = lazy(() => import('@/views/sales/SalesOrderListPage'))
 const SalesOutboundListPage = lazy(() => import('@/views/sales/SalesOutboundListPage'))
 const SalesReturnListPage = lazy(() => import('@/views/sales/SalesReturnListPage'))
+// 组5（第四批）销售订单新建（/sales/new）与详情（/sales/:id），无菜单路径
+const SalesOrderCreatePage = lazy(() => import('@/views/sales/SalesOrderCreatePage'))
+const SalesOrderDetailPage = lazy(() => import('@/views/sales/SalesOrderDetailPage'))
 const ReceiptListPage = lazy(() => import('@/views/purchase/ReceiptListPage'))
 const PurchaseReturnListPage = lazy(() => import('@/views/purchase/PurchaseReturnListPage'))
 
@@ -87,10 +90,15 @@ const StockDetailPage = lazy(() => import('@/views/inventory/StockDetailPage'))
 // 盘点中心（F9；后端盘点域未交付，呈统一错误态）
 const CountTaskListPage = lazy(() => import('@/views/count/CountTaskListPage'))
 const CountDetailPage = lazy(() => import('@/views/count/CountDetailPage'))
+// 组5（第四批）盘点新建（/counts/new），无菜单路径
+const CountCreatePage = lazy(() => import('@/views/count/CountCreatePage'))
 
 // 数据中心（F11：Excel 导入/导出；后端数据域未交付，呈统一错误态）
 const ImportWizardPage = lazy(() => import('@/views/data/ImportWizardPage'))
 const ExportTaskPage = lazy(() => import('@/views/data/ExportTaskPage'))
+
+// 报表中心（前端先行契约：后端报表域阶段 17–18 交付，目录呈统一错误态；页面为已交付真实页面聚合入口）
+const ReportsPage = lazy(() => import('@/views/reports/ReportsPage'))
 
 /** 已有真实页面的路由；其余菜单路径统一落到 ModulePlaceholder */
 const IMPLEMENTED_PATHS = new Set([
@@ -110,8 +118,9 @@ const IMPLEMENTED_PATHS = new Set([
   '/inventory/trace',
   // 库存分析（F10）
   '/inventory/analytics',
-  // 库存详情 /inbound/:id、/outbound/:id、/purchases/:id、/counts/:id、/inventory/stock/:skuCode
+  // 库存详情 /inbound/:id、/outbound/:id、/purchases/:id、/counts/:id、/sales/:id、/inventory/stock/:skuCode
   // 为动态段路由，无菜单路径，不参与占位匹配，不加入本 Set
+  // /sales/new、/counts/new 为组5 新建页的无菜单静态路径，同样不参与占位匹配、不加入本 Set
   // 基础资料
   '/products',
   '/skus',
@@ -156,6 +165,8 @@ const IMPLEMENTED_PATHS = new Set([
   '/quality/trace',
   // 盘点中心（F9）
   '/counts',
+  // 报表中心（前端先行契约）
+  '/reports',
   // 数据中心（F11：Excel 导入/导出）
   '/data/imports',
   '/data/exports',
@@ -361,6 +372,11 @@ export const router = createBrowserRouter([
         path: 'sales',
         element: <LazyPage><SalesOrderListPage /></LazyPage>,
       },
+      // 销售订单新建（组5；无菜单路径，静态段先于动态段）
+      {
+        path: 'sales/new',
+        element: <LazyPage><SalesOrderCreatePage /></LazyPage>,
+      },
       {
         path: 'sales/outbounds',
         element: <LazyPage><SalesOutboundListPage /></LazyPage>,
@@ -368,6 +384,11 @@ export const router = createBrowserRouter([
       {
         path: 'sales/returns',
         element: <LazyPage><SalesReturnListPage /></LazyPage>,
+      },
+      // 销售订单详情（组5；动态段无菜单，殿后注册）
+      {
+        path: 'sales/:id',
+        element: <LazyPage><SalesOrderDetailPage /></LazyPage>,
       },
       // 基础资料
       {
@@ -412,9 +433,19 @@ export const router = createBrowserRouter([
         path: 'counts',
         element: <LazyPage><CountTaskListPage /></LazyPage>,
       },
+      // 盘点新建（组5；无菜单路径，静态段先于动态段）
+      {
+        path: 'counts/new',
+        element: <LazyPage><CountCreatePage /></LazyPage>,
+      },
       {
         path: 'counts/:id',
         element: <LazyPage><CountDetailPage /></LazyPage>,
+      },
+      // 报表中心（前端先行契约：报表域未交付呈统一错误态；页面聚合已交付真实入口）
+      {
+        path: 'reports',
+        element: <LazyPage><ReportsPage /></LazyPage>,
       },
       // 数据中心（F11：Excel 导入/导出；/data/printing、/data/files 保持占位）
       {

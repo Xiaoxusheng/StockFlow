@@ -1,8 +1,14 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import { Card, Typography } from 'antd'
-import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
+import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { inventoryApi, type LedgerItem, type LedgerQuery } from '@/api/inventory'
+import {
+  inventoryApi,
+  type InventoryChangeType,
+  type LedgerItem,
+  type LedgerQuery,
+} from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -11,79 +17,129 @@ import { formatDateTime, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
-const BIZ_TYPE_OPTIONS = [
-  { label: '采购入库', value: 'purchase_in' },
-  { label: '销售出库', value: 'sale_out' },
-  { label: '调拨', value: 'transfer' },
-  { label: '盘点调整', value: 'count_adjust' },
-  { label: '其他', value: 'other' },
+/** 流水类型选项（inventory_ledgers CHECK 值域，与 StockDetailPage CHANGE_TYPE_LABEL 同源；后端 handler.go:300-308 校验） */
+const CHANGE_TYPE_OPTIONS: Array<{ label: string; value: InventoryChangeType }> = [
+  { label: '入库', value: 'INBOUND' },
+  { label: '出库', value: 'OUTBOUND' },
+  { label: '调拨出库', value: 'TRANSFER_OUT' },
+  { label: '调拨入库', value: 'TRANSFER_IN' },
+  { label: '锁定', value: 'LOCK' },
+  { label: '释放', value: 'RELEASE' },
+  { label: '移库', value: 'MOVE' },
+  { label: '质检合格', value: 'INSPECT_PASS' },
+  { label: '质检不合格', value: 'INSPECT_DEFECTIVE' },
+  { label: '调整', value: 'ADJUST' },
 ]
 
-const DIRECTION_OPTIONS = [
-  { label: '入库', value: 'in' },
-  { label: '出库', value: 'out' },
-]
+/** 变更类型文案（值域同上） */
+const CHANGE_TYPE_LABEL: Record<InventoryChangeType, string> = {
+  INBOUND: '入库',
+  OUTBOUND: '出库',
+  TRANSFER_OUT: '调拨出库',
+  TRANSFER_IN: '调拨入库',
+  LOCK: '锁定',
+  RELEASE: '释放',
+  MOVE: '移库',
+  INSPECT_PASS: '质检合格',
+  INSPECT_DEFECTIVE: '质检不合格',
+  ADJUST: '调整',
+}
+
+/** 库存状态文案（inventory_ledgers status_from/status_to CHECK 值域） */
+const STATE_LABEL: Record<string, string> = {
+  available: '可用',
+  locked: '锁定',
+  frozen: '冻结',
+  pending_inspect: '待检',
+  defective: '不良',
+}
+
+/** 方向由变更数量正负驱动（LedgerView 无独立 direction 字段，正=入、负=出） */
+function DirectionText({ qtyChange }: { qtyChange: number }) {
+  if (qtyChange > 0) {
+    return (
+      <Text style={{ color: 'var(--sf-success)' }}>
+        <ArrowDownOutlined /> 入
+      </Text>
+    )
+  }
+  if (qtyChange < 0) {
+    return (
+      <Text style={{ color: 'var(--sf-danger)' }}>
+        <ArrowUpOutlined /> 出
+      </Text>
+    )
+  }
+  return (
+    <Text type="secondary">
+      <MinusOutlined /> 无
+    </Text>
+  )
+}
+
+function renderQty(value: number): ReactNode {
+  return <span className="sf-num">{formatNumber(value)}</span>
+}
+
+function renderState(from?: string, to?: string): ReactNode {
+  if (!from && !to) return '-'
+  const fromLabel = STATE_LABEL[from ?? ''] ?? from ?? '-'
+  const toLabel = STATE_LABEL[to ?? ''] ?? to ?? '-'
+  return (
+    <Text style={{ maxWidth: 120, whiteSpace: 'nowrap' }} ellipsis={{ tooltip: `${fromLabel} → ${toLabel}` }}>
+      {fromLabel} → {toLabel}
+    </Text>
+  )
+}
 
 const COLUMNS: ColumnsType<LedgerItem> = [
   {
     title: '时间',
-    dataIndex: 'createdAt',
+    dataIndex: 'created_at',
     width: 160,
     render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
-  { title: '单据编号', dataIndex: 'bizNo', width: 150, fixed: 'left' },
-  { title: '业务类型', dataIndex: 'bizType', width: 100 },
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130 },
+  { title: '流水号', dataIndex: 'ledger_no', width: 150 },
+  { title: '单据编号', dataIndex: 'business_no', width: 150, fixed: 'left', render: (v: string) => v || '-' },
+  { title: '业务类型', dataIndex: 'business_type', width: 100, render: (v: string) => v || '-' },
   {
-    title: '商品名称',
-    dataIndex: 'productName',
-    width: 200,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
+    title: '变更类型',
+    dataIndex: 'change_type',
+    width: 100,
+    render: (v: InventoryChangeType) => CHANGE_TYPE_LABEL[v] ?? v,
   },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
+  { title: 'SKU ID', dataIndex: 'sku_id', width: 110 },
+  { title: '仓库 ID', dataIndex: 'warehouse_id', width: 100 },
+  { title: '库位 ID', dataIndex: 'bin_id', width: 100, render: renderIdOrDash },
+  { title: '批次 ID', dataIndex: 'batch_id', width: 100, render: renderIdOrDash },
+  { title: '序列号', dataIndex: 'serial_no', width: 130, render: (v: string) => v || '-' },
   {
     title: '方向',
-    dataIndex: 'direction',
-    width: 90,
-    render: (v: LedgerItem['direction']) =>
-      v === 'in' ? (
-        <Text style={{ color: 'var(--sf-success)' }}>
-          <ArrowDownOutlined /> 入库
-        </Text>
-      ) : (
-        <Text style={{ color: 'var(--sf-danger)' }}>
-          <ArrowUpOutlined /> 出库
-        </Text>
-      ),
+    key: 'direction',
+    width: 80,
+    render: (_: unknown, record: LedgerItem) => <DirectionText qtyChange={record.qty_change} />,
   },
+  { title: '数量', dataIndex: 'qty_change', width: 90, align: 'right', render: renderQty },
+  { title: '变动前', dataIndex: 'qty_before', width: 90, align: 'right', render: renderQty },
+  { title: '变动后', dataIndex: 'qty_after', width: 90, align: 'right', render: renderQty },
   {
-    title: '数量',
-    dataIndex: 'qty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    title: '状态流转',
+    key: 'state_flow',
+    width: 130,
+    render: (_: unknown, record: LedgerItem) => renderState(record.status_from, record.status_to),
   },
-  {
-    title: '变动前',
-    dataIndex: 'beforeQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '变动后',
-    dataIndex: 'afterQty',
-    width: 90,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  { title: '操作人', dataIndex: 'operatorName', width: 100 },
+  { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string) => v || '-' },
 ]
 
-/** 库存流水：所有库存变化必须可追溯（inventory-rules.md，禁止前端拼装数据） */
+/** 可选维度 ID 0 值显示占位符（0=非批次/不在库） */
+function renderIdOrDash(value: LedgerItem['batch_id']): string {
+  return String(value) === '0' ? '-' : String(value)
+}
+
+/**
+ * 库存流水（GET /api/inventory-ledgers，后端 T5 已交付）：所有库存变化完整轨迹
+ * （inventory-rules.md §5 字段清单，append-only 禁止前端拼装数据）。
+ */
 export default function LedgerPage() {
   const [params, setParams] = useState<LedgerQuery>({})
   const list = usePagedList<LedgerItem, LedgerQuery>({
@@ -103,9 +159,10 @@ export default function LedgerPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU / 单据编号 / 商品名称' },
-            { name: 'bizType', label: '业务类型', control: 'select', options: BIZ_TYPE_OPTIONS },
-            { name: 'direction', label: '方向', control: 'select', options: DIRECTION_OPTIONS },
+            { name: 'business_no', label: '单据编号', control: 'input', placeholder: '来源单据编号' },
+            { name: 'change_type', label: '变更类型', control: 'select', options: CHANGE_TYPE_OPTIONS },
+            { name: 'serial_no', label: '序列号', control: 'input', placeholder: '序列号' },
+            { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
           ]}
           onSearch={handleSearch}
         />
@@ -122,7 +179,7 @@ export default function LedgerPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存流水"
-          scrollX={1560}
+          scrollX={1960}
         />
       </Card>
     </div>

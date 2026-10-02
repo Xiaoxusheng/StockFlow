@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   Button,
   Card,
@@ -20,13 +20,12 @@ import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type DepartmentNode } from '@/api/rbac'
 import {
   userApi,
-  type CommonStatus,
   type DataScope,
   type UserCreatePayload,
   type UserItem,
   type UserQuery,
+  type UserStatus,
   type UserUpdatePayload,
-  type UserRoleBrief,
 } from '@/api/user'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -55,6 +54,9 @@ const DATA_SCOPE_META: Record<DataScope, { label: string; semantic: StatusSemant
 /** 强密码策略：长度 ≥ 8 且含字母 + 数字（backend-m1-plan.md §7.2） */
 const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)\S{8,64}$/
 
+/** 后端单页上限（internal/response/response.go:47 MaxPageSize）——角色选项一次取全 */
+const OPTIONS_PAGE_SIZE = 100
+
 const DATA_SCOPE_OPTIONS: Array<{ label: string; value: DataScope }> = [
   { label: '全部数据', value: 'ALL' },
   { label: '指定仓库', value: 'SPECIFIED_WAREHOUSE' },
@@ -72,7 +74,7 @@ interface DeptTreeOption {
 /** 部门树 → 筛选下拉选项（缩进表达层级） */
 function flattenDepartments(nodes: DepartmentNode[], depth = 0): Array<{ label: string; value: string }> {
   return nodes.flatMap((node) => [
-    { label: `${'　'.repeat(depth)}${node.name}`, value: String(node.id) },
+    { label: `${'　'.repeat(depth)}${node.name}`, value: node.id },
     ...flattenDepartments(node.children ?? [], depth + 1),
   ])
 }
@@ -80,25 +82,34 @@ function flattenDepartments(nodes: DepartmentNode[], depth = 0): Array<{ label: 
 /** 部门树 → TreeSelect 数据 */
 function toTreeOptions(nodes: DepartmentNode[]): DeptTreeOption[] {
   return nodes.map((node) => ({
-    value: String(node.id),
+    value: node.id,
     title: `${node.name}（${node.code}）`,
     children: node.children && node.children.length > 0 ? toTreeOptions(node.children) : undefined,
   }))
 }
 
+/** 部门树 → id→名称映射（列表部门列经 department_id 映射展示，后端不返回部门名） */
+function collectDepartmentNames(nodes: DepartmentNode[], map = new Map<string, string>()): Map<string, string> {
+  for (const node of nodes) {
+    map.set(node.id, node.name)
+    collectDepartmentNames(node.children ?? [], map)
+  }
+  return map
+}
+
 /** 业务状态 → SfStatusTag 注册表 key（types/status.ts：enabled/disabled） */
-function statusTagKey(status: CommonStatus): string {
+function statusTagKey(status: UserStatus): string {
   return status === 'ACTIVE' ? 'enabled' : 'disabled'
 }
 
 interface UserFormValues {
   username: string
   password: string
-  realName?: string
+  real_name?: string
   phone?: string
   email?: string
-  departmentId?: string
-  dataScope: DataScope
+  department_id?: string
+  data_scope: DataScope
 }
 
 interface UserFormModalProps {
@@ -130,7 +141,17 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
         form={form}
         layout="vertical"
         onFinish={(values) => onSubmit(values)}
-        initialValues={editing ? { realName: editing.realName, phone: editing.phone, email: editing.email, departmentId: editing.departmentId != null ? String(editing.departmentId) : undefined, dataScope: editing.dataScope } : undefined}
+        initialValues={
+          editing
+            ? {
+                real_name: editing.real_name,
+                phone: editing.phone,
+                email: editing.email,
+                department_id: editing.department_id ?? undefined,
+                data_scope: editing.data_scope,
+              }
+            : undefined
+        }
       >
         <Form.Item
           name="username"
@@ -155,7 +176,7 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
             <Input.Password placeholder="长度 ≥ 8 位，含字母和数字" autoComplete="new-password" />
           </Form.Item>
         )}
-        <Form.Item name="realName" label="姓名">
+        <Form.Item name="real_name" label="姓名">
           <Input placeholder="真实姓名" allowClear />
         </Form.Item>
         <Form.Item name="phone" label="手机号" rules={[{ pattern: /^1\d{10}$/, message: '请输入 11 位手机号' }]}>
@@ -164,7 +185,7 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
         <Form.Item name="email" label="邮箱" rules={[{ type: 'email', message: '邮箱格式不正确' }]}>
           <Input placeholder="邮箱" allowClear />
         </Form.Item>
-        <Form.Item name="departmentId" label="所属部门">
+        <Form.Item name="department_id" label="所属部门">
           <TreeSelect
             treeData={departmentTreeOptions}
             placeholder="请选择部门"
@@ -174,7 +195,7 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
             dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
           />
         </Form.Item>
-        <Form.Item name="dataScope" label="数据范围" rules={[{ required: true, message: '请选择数据范围' }]}>
+        <Form.Item name="data_scope" label="数据范围" rules={[{ required: true, message: '请选择数据范围' }]}>
           <Select options={DATA_SCOPE_OPTIONS} placeholder="请选择数据范围" />
         </Form.Item>
       </Form>
@@ -187,30 +208,51 @@ interface AssignRolesModalProps {
   roleOptions: Array<{ label: string; value: string }>
   submitting: boolean
   onCancel: () => void
-  onSubmit: (roleIds: string[]) => void
+  onSubmit: (roleIds: number[]) => void
 }
 
-/** 分配角色弹窗（PUT /api/users/{id}/roles） */
+/**
+ * 分配角色弹窗（PUT /api/users/{id}/roles，AssignRolesInput.role_ids 全量替换语义）。
+ * 绑定结果以 GET /api/users/:id 详情的 role_ids 为准预选——列表项不含角色绑定，
+ * 直接以空集提交会静默清空用户全部角色。
+ */
 function AssignRolesModal({ user, roleOptions, submitting, onCancel, onSubmit }: AssignRolesModalProps) {
-  const [roleIds, setRoleIds] = useState<string[]>(() => user.roles.map((role) => String(role.id)))
+  const [roleIds, setRoleIds] = useState<string[]>([])
+
+  const detailQuery = useQuery({
+    queryKey: ['system', 'user', user.id],
+    queryFn: () => userApi.user(user.id),
+  })
+
+  useEffect(() => {
+    if (detailQuery.data) setRoleIds(detailQuery.data.role_ids ?? [])
+  }, [detailQuery.data])
+
   return (
     <Modal
       title={`分配角色：${user.username}`}
       open
       confirmLoading={submitting}
       onCancel={onCancel}
-      onOk={() => onSubmit(roleIds)}
+      onOk={() => onSubmit(roleIds.map(Number))}
       okText="保存"
+      okButtonProps={{ disabled: detailQuery.isPending }}
       maskClosable={false}
     >
       <Form layout="vertical">
-        <Form.Item label="角色" required style={{ marginBottom: 8 }}>
+        <Form.Item
+          label="角色"
+          required
+          style={{ marginBottom: 8 }}
+          validateStatus={detailQuery.error ? 'error' : undefined}
+          help={detailQuery.error ? resolveErrorMessage(detailQuery.error) : undefined}
+        >
           <Select
             mode="multiple"
             options={roleOptions}
             value={roleIds}
             onChange={setRoleIds}
-            placeholder="请选择角色"
+            placeholder={detailQuery.isPending ? '正在加载已绑定角色…' : '请选择角色'}
             optionFilterProp="label"
             allowClear
           />
@@ -230,7 +272,7 @@ interface ResetPasswordModalProps {
   onSubmit: (newPassword: string) => void
 }
 
-/** 重置密码弹窗（PUT /api/users/{id}/reset-password） */
+/** 重置密码弹窗（PUT /api/users/{id}/reset-password，请求体 new_password 由 api 层对齐） */
 function ResetPasswordModal({ user, submitting, onCancel, onSubmit }: ResetPasswordModalProps) {
   const [form] = Form.useForm<{ newPassword: string }>()
   return (
@@ -281,11 +323,11 @@ export default function UserListPage() {
     params,
   })
 
-  // 部门（筛选项 / 表单选择）与角色（分配角色）选项数据
+  // 部门（筛选项 / 表单选择 / 部门列映射）与角色（分配角色 / 角色列映射）选项数据
   const departmentsQuery = useQuery({ queryKey: ['system', 'departments'], queryFn: rbacApi.departmentTree })
   const rolesQuery = useQuery({
     queryKey: ['system', 'roles', 'options'],
-    queryFn: () => rbacApi.roles({ page: 1, pageSize: 200 }),
+    queryFn: () => rbacApi.roles({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'users'] })
@@ -312,7 +354,7 @@ export default function UserListPage() {
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: CommonStatus }) =>
+    mutationFn: ({ id, status }: { id: string; status: UserStatus }) =>
       userApi.setUserStatus(id, status),
     onSuccess: (_data, variables) => {
       message.success(variables.status === 'ACTIVE' ? '用户已启用' : '用户已停用')
@@ -331,7 +373,7 @@ export default function UserListPage() {
   })
 
   const assignRolesMutation = useMutation({
-    mutationFn: ({ id, roleIds }: { id: string; roleIds: string[] }) => userApi.assignRoles(id, roleIds),
+    mutationFn: ({ id, roleIds }: { id: string; roleIds: number[] }) => userApi.assignRoles(id, roleIds),
     onSuccess: () => {
       message.success('角色已更新')
       setModal(null)
@@ -358,24 +400,25 @@ export default function UserListPage() {
   const handleUserFormSubmit = (values: UserFormValues) => {
     if (modal?.kind === 'edit') {
       updateMutation.mutate({
-        id: String(modal.user.id),
+        id: modal.user.id,
         payload: {
-          realName: values.realName,
+          real_name: values.real_name,
           phone: values.phone,
           email: values.email,
-          departmentId: values.departmentId,
-          dataScope: values.dataScope,
+          // 编辑态总是传数字：清空选择 → 0 = 显式清空部门（service_rbac.go:219-225 三态语义）
+          department_id: values.department_id ? Number(values.department_id) : 0,
+          data_scope: values.data_scope,
         },
       })
     } else if (modal?.kind === 'create') {
       createMutation.mutate({
         username: values.username,
         password: values.password,
-        realName: values.realName,
+        real_name: values.real_name,
         phone: values.phone,
         email: values.email,
-        departmentId: values.departmentId,
-        dataScope: values.dataScope,
+        department_id: values.department_id ? Number(values.department_id) : undefined,
+        data_scope: values.data_scope,
       })
     }
   }
@@ -384,27 +427,35 @@ export default function UserListPage() {
     items: [
       { key: 'roles', label: '分配角色' },
       { key: 'resetPassword', label: '重置密码' },
-      { key: 'unlock', label: '解锁账户', disabled: !record.lockedUntil },
+      { key: 'unlock', label: '解锁账户', disabled: !record.locked_until },
     ],
     onClick: ({ key }) => {
       if (key === 'roles') setModal({ kind: 'roles', user: record })
       if (key === 'resetPassword') setModal({ kind: 'resetPassword', user: record })
-      if (key === 'unlock') unlockMutation.mutate(String(record.id))
+      if (key === 'unlock') unlockMutation.mutate(record.id)
     },
   })
 
-  const departmentOptions = flattenDepartments(departmentsQuery.data ?? [])
-  const departmentTreeOptions = toTreeOptions(departmentsQuery.data ?? [])
-  const roleOptions = (rolesQuery.data?.items ?? []).map((role) => ({ label: role.name, value: String(role.id) }))
+  const departmentTree = departmentsQuery.data ?? []
+  const departmentOptions = flattenDepartments(departmentTree)
+  const departmentTreeOptions = toTreeOptions(departmentTree)
+  const departmentNames = collectDepartmentNames(departmentTree)
+  const roleNames = new Map((rolesQuery.data?.items ?? []).map((role) => [role.id, role.name]))
+  const roleOptions = (rolesQuery.data?.items ?? []).map((role) => ({ label: role.name, value: role.id }))
 
   const columns: ColumnsType<UserItem> = [
     { title: '用户名', dataIndex: 'username', width: 120, fixed: 'left' },
-    { title: '姓名', dataIndex: 'realName', width: 100, render: (v?: string) => v ?? '-' },
+    { title: '姓名', dataIndex: 'real_name', width: 100, render: (v?: string) => v ?? '-' },
     { title: '手机号', dataIndex: 'phone', width: 130, render: (v?: string) => v ?? '-' },
-    { title: '部门', dataIndex: 'departmentName', width: 130, render: (v?: string) => v ?? '-' },
+    {
+      title: '部门',
+      dataIndex: 'department_id',
+      width: 130,
+      render: (v?: string | null) => (v ? (departmentNames.get(v) ?? v) : '-'),
+    },
     {
       title: '数据范围',
-      dataIndex: 'dataScope',
+      dataIndex: 'data_scope',
       width: 110,
       render: (v: DataScope) => {
         const meta = DATA_SCOPE_META[v] ?? { label: v, semantic: 'neutral' as StatusSemantic }
@@ -412,12 +463,13 @@ export default function UserListPage() {
       },
     },
     {
+      // 列表项不含 role_ids（service_rbac.go GetUsers 仅 viewUser，详情才返回）——缺失时显示 '-'
       title: '角色',
-      dataIndex: 'roles',
+      dataIndex: 'role_ids',
       width: 170,
       ellipsis: true,
-      render: (roles: UserRoleBrief[]) => {
-        const names = roles.map((role) => role.name).join('、')
+      render: (roleIds?: string[]) => {
+        const names = (roleIds ?? []).map((id) => roleNames.get(id) ?? id).join('、')
         return names ? (
           <Text style={{ maxWidth: 170 }} ellipsis={{ tooltip: names }}>
             {names}
@@ -431,60 +483,57 @@ export default function UserListPage() {
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      render: (v: CommonStatus) => <SfStatusTag status={statusTagKey(v)} />,
+      render: (v: UserStatus) => <SfStatusTag status={statusTagKey(v)} />,
     },
     {
       title: '锁定至',
-      dataIndex: 'lockedUntil',
+      dataIndex: 'locked_until',
       width: 150,
-      render: (v?: string) =>
+      render: (v?: string | null) =>
         v ? <span style={{ whiteSpace: 'nowrap', color: 'var(--sf-danger)' }}>{formatDateTime(v)}</span> : '-',
     },
     {
       title: '最近登录',
-      dataIndex: 'lastLoginAt',
+      dataIndex: 'last_login_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
+      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
     },
     {
       title: '创建时间',
-      dataIndex: 'createdAt',
+      dataIndex: 'created_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
+      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
     },
     {
       title: '操作',
       key: 'actions',
       width: 170,
       fixed: 'right',
-      render: (_, record) => {
-        const id = String(record.id)
-        return (
-          <>
-            <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', user: record })}>
-              编辑
-            </Button>
-            {record.status === 'ACTIVE' ? (
-              <Popconfirm
-                title="确认停用该用户？"
-                description="停用后该用户将无法登录系统"
-                onConfirm={() => statusMutation.mutate({ id, status: 'DISABLED' })}
-              >
-                <Button type="link" size="small" danger>
-                  停用
-                </Button>
-              </Popconfirm>
-            ) : (
-              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ACTIVE' })}>
-                启用
+      render: (_, record) => (
+        <>
+          <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', user: record })}>
+            编辑
+          </Button>
+          {record.status === 'ACTIVE' ? (
+            <Popconfirm
+              title="确认停用该用户？"
+              description="停用后该用户将无法登录系统"
+              onConfirm={() => statusMutation.mutate({ id: record.id, status: 'DISABLED' })}
+            >
+              <Button type="link" size="small" danger>
+                停用
               </Button>
-            )}
-            <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
-              <Button type="link" size="small" icon={<MoreOutlined />} aria-label="更多操作" />
-            </Dropdown>
-          </>
-        )
-      },
+            </Popconfirm>
+          ) : (
+            <Button type="link" size="small" onClick={() => statusMutation.mutate({ id: record.id, status: 'ACTIVE' })}>
+              启用
+            </Button>
+          )}
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" icon={<MoreOutlined />} aria-label="更多操作" />
+          </Dropdown>
+        </>
+      ),
     },
   ]
 
@@ -504,7 +553,7 @@ export default function UserListPage() {
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '用户名 / 姓名 / 手机号' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'departmentId', label: '部门', control: 'select', options: departmentOptions },
+            { name: 'department_id', label: '部门', control: 'select', options: departmentOptions },
           ]}
           onSearch={handleSearch}
         />
@@ -540,7 +589,7 @@ export default function UserListPage() {
           roleOptions={roleOptions}
           submitting={assignRolesMutation.isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(roleIds) => assignRolesMutation.mutate({ id: String(modal.user.id), roleIds })}
+          onSubmit={(roleIds) => assignRolesMutation.mutate({ id: modal.user.id, roleIds })}
         />
       )}
       {modal?.kind === 'resetPassword' && (
@@ -548,7 +597,7 @@ export default function UserListPage() {
           user={modal.user}
           submitting={resetPasswordMutation.isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(newPassword) => resetPasswordMutation.mutate({ id: String(modal.user.id), newPassword })}
+          onSubmit={(newPassword) => resetPasswordMutation.mutate({ id: modal.user.id, newPassword })}
         />
       )}
     </div>

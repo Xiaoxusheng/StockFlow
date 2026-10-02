@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -20,6 +20,7 @@ import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
+import { useSearchParams } from 'react-router'
 import {
   DATA_TASK_STATUS_META,
   dataApi,
@@ -80,7 +81,7 @@ interface ExportFormValues {
 }
 
 /** 表单值 → 导出任务契约（字段对齐 excel.md §4 任务记录模型，冻结后回对） */
-function toExportPayload(values: ExportFormValues): ExportCreatePayload {
+function toExportPayload(values: ExportFormValues, presetFilters: Record<string, string>): ExportCreatePayload {
   const payload: ExportCreatePayload = { module: values.module, scope: values.scope }
   if (values.scope === 'SELECTED') {
     payload.ids = (values.idsText ?? '')
@@ -93,7 +94,10 @@ function toExportPayload(values: ExportFormValues): ExportCreatePayload {
     payload.pageSize = values.pageSize
   }
   if (values.scope === 'BY_FILTER') {
-    if (values.keyword) payload.filters = { keyword: values.keyword }
+    // URL 范围参数（SfExportButton 携带的列表筛选，如 warehouse_id）并入 filters 透传
+    const filters: Record<string, string> = { ...presetFilters }
+    if (values.keyword) filters.keyword = values.keyword
+    if (Object.keys(filters).length > 0) payload.filters = filters
     if (values.timeRange?.[0] && values.timeRange?.[1]) {
       payload.startTime = values.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
       payload.endTime = values.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
@@ -111,7 +115,15 @@ function toExportPayload(values: ExportFormValues): ExportCreatePayload {
 export default function ExportTaskPage() {
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
-  const [params, setParams] = useState<DataTaskQuery>({})
+  const [searchParams] = useSearchParams()
+  // SfExportButton 跳转携带的 URL 上下文：type=业务模块，其余 query 为范围参数（warehouse_id 等）
+  const urlModule = searchParams.get('type')
+  const presetFilters = useMemo(
+    () => Object.fromEntries([...searchParams.entries()].filter(([key]) => key !== 'type')),
+    [searchParams],
+  )
+  const hasPresetFilters = Object.keys(presetFilters).length > 0
+  const [params, setParams] = useState<DataTaskQuery>(() => (urlModule ? { module: urlModule } : {}))
   const [modalOpen, setModalOpen] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [form] = Form.useForm<ExportFormValues>()
@@ -160,10 +172,21 @@ export default function ExportTaskPage() {
     }
   }
 
+  /** 打开新建弹窗：URL 携带的模块/范围参数预填进表单（SfExportButton 入口） */
+  const openCreateModal = () => {
+    if (urlModule || hasPresetFilters) {
+      form.setFieldsValue({
+        ...(urlModule ? { module: urlModule } : {}),
+        ...(hasPresetFilters ? { scope: 'BY_FILTER' as ExportScope } : {}),
+      })
+    }
+    setModalOpen(true)
+  }
+
   const handleSubmit = () => {
     form
       .validateFields()
-      .then((values) => createMutation.mutate(toExportPayload(values)))
+      .then((values) => createMutation.mutate(toExportPayload(values, presetFilters)))
       .catch(() => {
         // 表单校验失败：Form.Item 已内联提示
       })
@@ -237,7 +260,7 @@ export default function ExportTaskPage() {
         title="Excel 导出"
         subtitle="导出任务化执行：创建任务 → 后台处理 → 下载产物（excel.md §3）"
         extra={
-          <Button type="primary" icon={<ExportOutlined />} onClick={() => setModalOpen(true)}>
+          <Button type="primary" icon={<ExportOutlined />} onClick={openCreateModal}>
             新建导出任务
           </Button>
         }
@@ -313,6 +336,17 @@ export default function ExportTaskPage() {
           )}
           {scope === 'BY_FILTER' && (
             <>
+              {hasPresetFilters && (
+                <Alert
+                  type="info"
+                  showIcon
+                  style={{ marginBottom: 16 }}
+                  message="已从列表带入范围参数"
+                  description={Object.entries(presetFilters)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join('，')}
+                />
+              )}
               <Form.Item name="keyword" label="筛选关键词">
                 <Input placeholder="随业务模块的筛选条件（后端契约冻结后回对）" />
               </Form.Item>

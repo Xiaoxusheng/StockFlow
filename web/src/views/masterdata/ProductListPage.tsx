@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -8,7 +8,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Row,
   Select,
   Typography,
@@ -17,6 +16,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   OPTIONS_PAGE_SIZE,
   masterdataApi,
@@ -41,16 +41,17 @@ const STATUS_OPTIONS = [
   { label: '已停用', value: 'DISABLED' },
 ]
 
-/** 表单值：InputNumber 可清空为 null，提交前统一转 undefined（对应"未填写"） */
+/** 表单值：InputNumber 可清空为 null，提交前统一转 undefined（对应"未填写"）；
+ * 字段名与后端 JSON tag（snake_case）一致，减少映射出错面 */
 interface ProductFormValues {
   code: string
   name: string
-  shortName?: string
-  categoryId?: string
+  short_name?: string
+  category_id?: string
   brand?: string
   model?: string
   spec?: string
-  unitId?: string
+  unit_id?: string
   weight?: number | null
   length?: number | null
   width?: number | null
@@ -58,19 +59,18 @@ interface ProductFormValues {
   volume?: number | null
   description?: string
   remark?: string
-  status?: EnabledStatus
 }
 
 function toFormValues(record: ProductItem): ProductFormValues {
   return {
     code: record.code,
     name: record.name,
-    shortName: record.shortName,
-    categoryId: record.categoryId != null ? String(record.categoryId) : undefined,
+    short_name: record.short_name,
+    category_id: record.category_id != null ? String(record.category_id) : undefined,
     brand: record.brand,
     model: record.model,
     spec: record.spec,
-    unitId: record.unitId != null ? String(record.unitId) : undefined,
+    unit_id: record.unit_id != null ? String(record.unit_id) : undefined,
     weight: record.weight ?? null,
     length: record.length ?? null,
     width: record.width ?? null,
@@ -78,20 +78,21 @@ function toFormValues(record: ProductItem): ProductFormValues {
     volume: record.volume ?? null,
     description: record.description,
     remark: record.remark,
-    status: record.status,
   }
 }
 
+/** 提交契约（ProductCreateInput/UpdateInput，service_product.go:100-136）：
+ * 外键 *int64 必须 number；null/省略=创建不设置 / 更新不修改（指针三态） */
 function toPayload(values: ProductFormValues): ProductSavePayload {
   return {
     code: values.code.trim(),
     name: values.name.trim(),
-    shortName: values.shortName,
-    categoryId: values.categoryId,
+    short_name: values.short_name,
+    category_id: values.category_id != null ? Number(values.category_id) : null,
     brand: values.brand,
     model: values.model,
     spec: values.spec,
-    unitId: values.unitId,
+    unit_id: values.unit_id != null ? Number(values.unit_id) : null,
     weight: values.weight ?? undefined,
     length: values.length ?? undefined,
     width: values.width ?? undefined,
@@ -99,7 +100,6 @@ function toPayload(values: ProductFormValues): ProductSavePayload {
     volume: values.volume ?? undefined,
     description: values.description,
     remark: values.remark,
-    status: values.status,
   }
 }
 
@@ -143,6 +143,17 @@ export default function ProductListPage() {
     value: String(item.id),
   }))
 
+  // 后端列表不装配 category_name/unit_name（omitempty，service_product.go:29/34 仅详情返回），
+  // 列表展示用一次取全的下拉数据源按 id 兜底映射（同一 API 的真实数据，非前端造数）
+  const categoryNameById = useMemo(
+    () => new Map((categories.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    [categories.data],
+  )
+  const unitNameById = useMemo(
+    () => new Map((units.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    [units.data],
+  )
+
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['masterdata', 'products'] })
   }
@@ -152,6 +163,21 @@ export default function ProductListPage() {
       editing ? masterdataApi.products.update(editing.id, payload) : masterdataApi.products.create(payload),
     onSuccess: () => {
       setModalOpen(false)
+      invalidate()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: ProductItem['id']; status: EnabledStatus }) =>
+      masterdataApi.products.setStatus(id, { status }),
+    onSuccess: (data) => {
+      const cascaded = data.cascade_disabled_skus ?? 0
+      if (data.status === 'DISABLED' && cascaded > 0) {
+        messageApi.success(`已停用，并级联停用 ${cascaded} 个启用中的 SKU`)
+      } else {
+        messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
+      }
       invalidate()
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
@@ -195,12 +221,28 @@ export default function ProductListPage() {
       ellipsis: true,
       render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
     },
-    { title: '简称', dataIndex: 'shortName', width: 100, render: (v?: string) => v ?? '-' },
-    { title: '分类', dataIndex: 'categoryName', width: 110, render: (v?: string) => v ?? '-' },
+    { title: '简称', dataIndex: 'short_name', width: 100, render: (v?: string) => v ?? '-' },
+    {
+      title: '分类',
+      key: 'category_name',
+      width: 110,
+      render: (_: unknown, record: ProductItem) =>
+        record.category_name ??
+        (record.category_id != null ? categoryNameById.get(String(record.category_id)) : undefined) ??
+        '-',
+    },
     { title: '品牌', dataIndex: 'brand', width: 100, render: (v?: string) => v ?? '-' },
     { title: '型号', dataIndex: 'model', width: 100, render: (v?: string) => v ?? '-' },
     { title: '规格', dataIndex: 'spec', width: 100, render: (v?: string) => v ?? '-' },
-    { title: '单位', dataIndex: 'unitName', width: 80, render: (v?: string) => v ?? '-' },
+    {
+      title: '单位',
+      key: 'unit_name',
+      width: 80,
+      render: (_: unknown, record: ProductItem) =>
+        record.unit_name ??
+        (record.unit_id != null ? unitNameById.get(String(record.unit_id)) : undefined) ??
+        '-',
+    },
     {
       title: '重量',
       dataIndex: 'weight',
@@ -245,7 +287,7 @@ export default function ProductListPage() {
     },
     {
       title: '更新时间',
-      dataIndex: 'updatedAt',
+      dataIndex: 'updated_at',
       width: 160,
       render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
     },
@@ -253,25 +295,48 @@ export default function ProductListPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 110,
-      render: (_: unknown, record: ProductItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除该商品？"
-            description="已产生业务数据的商品后端将拒绝删除，建议改用停用。"
-            okText="删除"
-            okButtonProps={{ danger: true, loading: removeMutation.isPending }}
-            onConfirm={() => removeMutation.mutate(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      width: 150,
+      render: (_: unknown, record: ProductItem) => {
+        const disabling = record.status === 'ENABLED'
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </span>
-      ),
+            <SfConfirm
+              title={disabling ? '确认停用该商品？' : '确认启用该商品？'}
+              description={
+                disabling
+                  ? '停用将级联停用其启用中的 SKU；启用不自动反启 SKU。'
+                  : '启用后商品可重新挂 SKU 与参与业务。'
+              }
+              okText={disabling ? '停用' : '启用'}
+              confirming={statusMutation.isPending}
+              onConfirm={() =>
+                statusMutation.mutate({
+                  id: record.id,
+                  status: disabling ? 'DISABLED' : 'ENABLED',
+                })
+              }
+            >
+              <Button type="link" size="small" danger={disabling}>
+                {disabling ? '停用' : '启用'}
+              </Button>
+            </SfConfirm>
+            <SfConfirm
+              title="确认删除该商品？"
+              description="已产生业务数据的商品后端将拒绝删除，建议改用停用。"
+              okText="删除"
+              confirming={removeMutation.isPending}
+              onConfirm={() => removeMutation.mutate(record.id)}
+            >
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </SfConfirm>
+          </span>
+        )
+      },
     },
   ]
 
@@ -291,7 +356,7 @@ export default function ProductListPage() {
         <SfSearchForm
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '商品编码 / 名称' },
-            { name: 'categoryId', label: '分类', control: 'select', options: categoryFilterOptions },
+            { name: 'category_id', label: '分类', control: 'select', options: categoryFilterOptions },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
           onSearch={(values) => {
@@ -312,7 +377,7 @@ export default function ProductListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无商品，点击右上角「新建商品」创建"
-          scrollX={1650}
+          scrollX={1690}
         />
       </Card>
 
@@ -334,11 +399,13 @@ export default function ProductListPage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Form<ProductFormValues> form={form} layout="vertical" initialValues={{ status: 'ENABLED' }}>
+        <Form<ProductFormValues> form={form} layout="vertical">
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="code" label="商品编码" rules={[{ required: true, message: '请输入商品编码' }]}>
-                <Input placeholder="唯一编码" maxLength={64} />
+              <Form.Item name="code" label="商品编码" rules={[{ required: true, message: '请输入商品编码' }]}
+                extra={editing ? '编码创建后不可修改' : undefined}
+              >
+                <Input placeholder="唯一编码" maxLength={64} disabled={editing !== null} />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -347,12 +414,12 @@ export default function ProductListPage() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="shortName" label="简称">
+              <Form.Item name="short_name" label="简称">
                 <Input placeholder="请输入简称" maxLength={64} />
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="categoryId" label="商品分类">
+              <Form.Item name="category_id" label="商品分类">
                 <Select options={categoryOptions} placeholder="请选择商品分类" allowClear />
               </Form.Item>
             </Col>
@@ -372,7 +439,7 @@ export default function ProductListPage() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="unitId" label="计量单位">
+              <Form.Item name="unit_id" label="计量单位">
                 <Select options={unitOptions} placeholder="请选择计量单位" allowClear />
               </Form.Item>
             </Col>
@@ -409,11 +476,6 @@ export default function ProductListPage() {
             <Col span={24}>
               <Form.Item name="remark" label="备注">
                 <Input.TextArea rows={2} placeholder="请输入备注" maxLength={500} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="状态">
-                <Select options={STATUS_OPTIONS} />
               </Form.Item>
             </Col>
           </Row>

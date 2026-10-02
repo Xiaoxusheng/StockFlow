@@ -120,7 +120,51 @@ export interface CountItemSavePayload {
   remark: string
 }
 
+// ---------- 新建盘点单 / 七态流转（前端先行契约：POST /api/counts、PUT /api/counts/{id}/status；
+// 后端盘点域冻结后回对。业务依据 business-flow.md §10.2：范围/类型 + 创建 → 冻结 → 实盘 → 差异 → 审核 → 调整单） ----------
+
+/** 新建盘点单按钮权限码（前端先行：资源段对齐 config/menu.tsx「count:view」，动作词对齐
+ * internal/auth/permissions.go 动作枚举 create；后端盘点域权限点冻结后回对，未持有点 fail-closed 隐藏） */
+export const COUNT_CREATE_PERMISSION = 'count:create'
+
+/** 盘点单流转按钮权限码（动作词 status 对齐 permissions.go 动作枚举） */
+export const COUNT_STATUS_PERMISSION = 'count:status'
+
+export interface CountCreatePayload {
+  /** 仓库编码（/api/warehouses M1 冻结契约） */
+  warehouseCode: string
+  scopeType: CountScopeType
+  /** 范围明细：按仓=仓库编码；按库区/货架/库位/SKU=对应编码；全盘省略（business-flow.md §10.2 范围值域） */
+  scopeValue?: string
+  countType: CountType
+  /** 负责人用户 ID（/api/users M1 冻结契约；ownerName 由后端落库回显） */
+  ownerId?: string
+  remark?: string
+}
+
+/** 七态流转动作（前端先行动作枚举：提交执行/开始盘点/提交复核/审核通过/取消，后端冻结时回对） */
+export type CountStatusAction = 'submit_execute' | 'start' | 'submit_review' | 'approve' | 'cancel'
+
+export interface CountStatusPayload {
+  action: CountStatusAction
+  remark?: string
+}
+
+/** 流转动作 → 按钮文案（CountDetailPage 按当前状态渲染合法迁移） */
+export const COUNT_STATUS_ACTION_LABEL: Record<CountStatusAction, string> = {
+  submit_execute: '提交执行',
+  start: '开始盘点',
+  submit_review: '提交复核',
+  approve: '审核通过',
+  cancel: '取消',
+}
+
 export const countApi = {
+  /** 新建盘点单（前端先行：后端盘点域未交付前呈统一错误提示） */
+  create: (payload: CountCreatePayload) => http.post<unknown>('/api/counts', payload),
+  /** 七态流转（前端先行：按当前状态渲染合法迁移，二次确认后提交） */
+  updateStatus: (id: CountId, payload: CountStatusPayload) =>
+    http.put<unknown>(`/api/counts/${id}/status`, payload),
   list: (query: CountQuery) => http.get<PageResult<CountTaskItem>>('/api/counts', { params: query }),
   detail: (id: CountId) => http.get<CountTaskDetail>(`/api/counts/${id}`),
   items: (id: CountId, query: CountItemQuery) =>

@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   purchaseApi,
@@ -86,14 +85,6 @@ export default function ReceiptListPage() {
       <SfPageHeader
         title="收货"
         subtitle="到货 → 收货 → 质检 → 上架 → 入库完成"
-        extra={
-          <>
-            <Button icon={<ExportOutlined />}>导出</Button>
-            <Button type="primary" icon={<PlusOutlined />}>
-              新建收货单
-            </Button>
-          </>
-        }
       />
       <Card size="small">
         <SfSearchForm

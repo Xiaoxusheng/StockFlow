@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { inventoryApi, type StockAlertItem, type StockAlertLevel, type StockAlertQuery } from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -84,7 +83,6 @@ export default function AlertsPage() {
       <SfPageHeader
         title="库存预警"
         subtitle="低库存 / 超储 / 临期 / 过期 / 积压"
-        extra={<Button icon={<ExportOutlined />}>导出</Button>}
       />
       <Card size="small">
         <SfSearchForm

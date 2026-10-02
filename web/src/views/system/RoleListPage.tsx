@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Form, Input, Modal, Popconfirm, Spin, Tree, Typography, message } from 'antd'
+import { Button, Card, Form, Input, Modal, Popconfirm, Spin, Tooltip, Tree, Typography, message } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import type { TreeDataNode } from 'antd'
 import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type PermissionItem, type RoleItem, type RoleQuery } from '@/api/rbac'
-import type { CommonStatus } from '@/api/user'
+import type { OnOffStatus } from '@/api/user'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -17,29 +17,29 @@ import { formatDateTime } from '@/utils/format'
 const { Text } = Typography
 
 const STATUS_OPTIONS = [
-  { label: '已启用', value: 'ACTIVE' },
+  { label: '已启用', value: 'ENABLED' },
   { label: '已停用', value: 'DISABLED' },
 ]
 
-function statusTagKey(status: CommonStatus): string {
-  return status === 'ACTIVE' ? 'enabled' : 'disabled'
+/** roles 状态枚举为 ENABLED/DISABLED（迁移 000001 chk_roles_status） */
+function statusTagKey(status: OnOffStatus): string {
+  return status === 'ENABLED' ? 'enabled' : 'disabled'
 }
 
-/** 权限平铺列表 → 树（按 parentId 归组；父级缺失时按根节点处理） */
+/** 权限平铺列表 → 树（按 parent_id 归组；父级缺失时按根节点处理） */
 function buildPermissionTree(items: PermissionItem[]): TreeDataNode[] {
   const nodes = new Map<string, TreeDataNode & { children?: TreeDataNode[] }>()
   for (const item of items) {
-    nodes.set(String(item.id), { key: String(item.id), title: `${item.name}（${item.code}）` })
+    nodes.set(item.id, { key: item.id, title: `${item.name}（${item.code}）` })
   }
   const roots: TreeDataNode[] = []
   for (const item of items) {
-    const node = nodes.get(String(item.id))
+    const node = nodes.get(item.id)
     if (!node) continue
-    const parentKey = item.parentId != null ? String(item.parentId) : null
-    const parent = parentKey ? nodes.get(parentKey) : undefined
+    const parent = item.parent_id ? nodes.get(item.parent_id) : undefined
     if (parent && parent !== node) {
-      parent.children = parent.children ?? []
-      parent.children.push(node)
+      if (parent.children) parent.children.push(node)
+      else parent.children = [node]
     } else {
       roots.push(node)
     }
@@ -104,36 +104,39 @@ interface AssignPermissionsModalProps {
   role: RoleItem
   submitting: boolean
   onCancel: () => void
-  onSubmit: (permissionIds: string[]) => void
+  onSubmit: (permissionIds: number[]) => void
 }
 
-/** 绑定权限弹窗（PUT /api/roles/{id}/permissions；权限点来自 GET /api/permissions 全量） */
+/**
+ * 绑定权限弹窗（PUT /api/roles/{id}/permissions，AssignPermissionsInput.permission_ids 全量替换语义）。
+ * 已绑定集合以 GET /api/roles/:id 详情的 permission_ids 为准预选；权限点经 permissionsAll 全量拉取。
+ */
 function AssignPermissionsModal({ role, submitting, onCancel, onSubmit }: AssignPermissionsModalProps) {
   const [checkedKeys, setCheckedKeys] = useState<string[]>([])
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
 
   const detailQuery = useQuery({
-    queryKey: ['system', 'role', String(role.id)],
-    queryFn: () => rbacApi.role(String(role.id)),
+    queryKey: ['system', 'role', role.id],
+    queryFn: () => rbacApi.role(role.id),
   })
   const permissionsQuery = useQuery({
     queryKey: ['system', 'permissions', 'all'],
-    queryFn: () => rbacApi.permissions({ page: 1, pageSize: 1000 }),
+    queryFn: rbacApi.permissionsAll,
   })
 
   // 角色已绑定权限 → 勾选态；权限树就绪后默认展开全部父节点
   useEffect(() => {
-    if (detailQuery.data) setCheckedKeys(detailQuery.data.permissionIds.map(String))
+    if (detailQuery.data) setCheckedKeys(detailQuery.data.permission_ids)
   }, [detailQuery.data])
 
   useEffect(() => {
-    const items = permissionsQuery.data?.items
+    const items = permissionsQuery.data
     if (!items) return
-    const parentIds = new Set(items.filter((item) => item.parentId != null).map((item) => String(item.parentId)))
-    setExpandedKeys(items.filter((item) => parentIds.has(String(item.id))).map((item) => String(item.id)))
+    const parentIds = new Set(items.filter((item) => item.parent_id != null).map((item) => item.parent_id as string))
+    setExpandedKeys(items.filter((item) => parentIds.has(item.id)).map((item) => item.id))
   }, [permissionsQuery.data])
 
-  const treeData = buildPermissionTree(permissionsQuery.data?.items ?? [])
+  const treeData = buildPermissionTree(permissionsQuery.data ?? [])
 
   return (
     <Modal
@@ -141,7 +144,7 @@ function AssignPermissionsModal({ role, submitting, onCancel, onSubmit }: Assign
       open
       confirmLoading={submitting}
       onCancel={onCancel}
-      onOk={() => onSubmit(checkedKeys)}
+      onOk={() => onSubmit(checkedKeys.map(Number))}
       okText="保存"
       okButtonProps={{ disabled: detailQuery.isPending }}
       maskClosable={false}
@@ -200,7 +203,7 @@ export default function RoleListPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: RoleFormValues }) => rbacApi.updateRole(id, payload),
+    mutationFn: ({ id, name }: { id: string; name: string }) => rbacApi.updateRole(id, { name }),
     onSuccess: () => {
       message.success('角色已保存')
       setModal(null)
@@ -210,16 +213,16 @@ export default function RoleListPage() {
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: CommonStatus }) => rbacApi.setRoleStatus(id, status),
+    mutationFn: ({ id, status }: { id: string; status: OnOffStatus }) => rbacApi.setRoleStatus(id, status),
     onSuccess: (_data, variables) => {
-      message.success(variables.status === 'ACTIVE' ? '角色已启用' : '角色已停用')
+      message.success(variables.status === 'ENABLED' ? '角色已启用' : '角色已停用')
       void invalidate()
     },
     onError: (error) => message.error(resolveErrorMessage(error)),
   })
 
   const assignPermissionsMutation = useMutation({
-    mutationFn: ({ id, permissionIds }: { id: string; permissionIds: string[] }) =>
+    mutationFn: ({ id, permissionIds }: { id: string; permissionIds: number[] }) =>
       rbacApi.assignRolePermissions(id, permissionIds),
     onSuccess: () => {
       message.success('权限已更新')
@@ -239,22 +242,22 @@ export default function RoleListPage() {
     { title: '角色名称', dataIndex: 'name', width: 180 },
     {
       title: '类型',
-      dataIndex: 'isSystem',
+      dataIndex: 'is_system',
       width: 90,
-      render: (v: boolean) =>
+      render: (v?: boolean) =>
         v ? <SfStatusTag label="内置" semantic="processing" /> : <SfStatusTag label="自定义" semantic="neutral" />,
     },
     {
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      render: (v: CommonStatus) => <SfStatusTag status={statusTagKey(v)} />,
+      render: (v: OnOffStatus) => <SfStatusTag status={statusTagKey(v)} />,
     },
     {
       title: '创建时间',
-      dataIndex: 'createdAt',
+      dataIndex: 'created_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
+      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
     },
     {
       title: '操作',
@@ -262,7 +265,7 @@ export default function RoleListPage() {
       width: 190,
       fixed: 'right',
       render: (_, record) => {
-        const id = String(record.id)
+        const id = record.id
         return (
           <>
             <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', role: record })}>
@@ -271,18 +274,21 @@ export default function RoleListPage() {
             <Button type="link" size="small" onClick={() => setModal({ kind: 'permissions', role: record })}>
               权限
             </Button>
-            {record.status === 'ACTIVE' ? (
+            {record.status === 'ENABLED' ? (
               <Popconfirm
                 title="确认停用该角色？"
                 description="停用后关联用户将失去该角色的权限"
                 onConfirm={() => statusMutation.mutate({ id, status: 'DISABLED' })}
+                disabled={record.is_system}
               >
-                <Button type="link" size="small" danger>
-                  停用
-                </Button>
+                <Tooltip title={record.is_system ? '内置角色不可停用' : undefined}>
+                  <Button type="link" size="small" danger disabled={record.is_system}>
+                    停用
+                  </Button>
+                </Tooltip>
               </Popconfirm>
             ) : (
-              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ACTIVE' })}>
+              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ENABLED' })}>
                 启用
               </Button>
             )}
@@ -334,7 +340,8 @@ export default function RoleListPage() {
           submitting={createMutation.isPending || updateMutation.isPending}
           onCancel={() => setModal(null)}
           onSubmit={(values) => {
-            if (modal.kind === 'edit') updateMutation.mutate({ id: String(modal.role.id), payload: values })
+            // 更新入参仅 name（RoleUpdateInput，code 不可变——service_rbac.go:568-570）
+            if (modal.kind === 'edit') updateMutation.mutate({ id: modal.role.id, name: values.name })
             else createMutation.mutate(values)
           }}
         />
@@ -344,9 +351,7 @@ export default function RoleListPage() {
           role={modal.role}
           submitting={assignPermissionsMutation.isPending}
           onCancel={() => setModal(null)}
-          onSubmit={(permissionIds) =>
-            assignPermissionsMutation.mutate({ id: String(modal.role.id), permissionIds })
-          }
+          onSubmit={(permissionIds) => assignPermissionsMutation.mutate({ id: modal.role.id, permissionIds })}
         />
       )}
     </div>

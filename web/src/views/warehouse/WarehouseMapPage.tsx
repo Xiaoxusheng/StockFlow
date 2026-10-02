@@ -7,9 +7,10 @@ import {
   ZONE_TYPE_LABEL,
   toStatusKey,
   warehouseApi,
-  type WarehouseMapBin,
-  type WarehouseMapShelf,
-  type WarehouseMapZone,
+  type BinMapCell,
+  type BinOccupancyStatus,
+  type ShelfMapNode,
+  type ZoneMapNode,
 } from '@/api/warehouse'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
@@ -19,9 +20,11 @@ import { formatNumber } from '@/utils/format'
 import { resolveStatus, type StatusSemantic } from '@/types/status'
 
 /**
- * 库位地图（frontend.md §11、requirements.md §2.6）：
- * 仓库 → 库区 → 货架 → 库位网格；颜色语义全局唯一来自 types/status.ts，
- * 单元格颜色经语义 → --sf-* Token 映射，页面不写死色值。
+ * 库位地图（requirements.md §2.6；契约：internal/warehouse/service_map.go:30-53
+ * { warehouse, zones: [{ zone, shelves: [{ shelf, bins }] }] } 层级树）：
+ * 库位格颜色读 occupancy_status 四值占用状态（IDLE/PARTIAL/FULL/LOCKED，锁定优先于容量），
+ * 不再读启停 status；颜色语义全局唯一来自 types/status.ts，
+ * 经语义 → --sf-* Token 映射，页面不写死色值。
  */
 
 /** 语义色 → Design Token（与 SfStatusTag 同源注册表，仅换色值载体） */
@@ -35,17 +38,17 @@ const SEMANTIC_TOKEN: Record<StatusSemantic, string> = {
   disabled: 'var(--sf-text-muted)',
 }
 
-/** 库位占用状态图例（frontend.md §11：空闲/部分占用/满载/锁定/冻结/异常） */
-const MAP_LEGEND: string[] = ['idle', 'partially_occupied', 'full', 'locked', 'frozen', 'abnormal']
+/** 库位占用图例（service_map.go:21-26 四值；经 toStatusKey 小写注册表取文案与语义） */
+const MAP_LEGEND: BinOccupancyStatus[] = ['IDLE', 'PARTIAL', 'FULL', 'LOCKED']
 
 interface BinCell {
   layer: number
-  columnNo: number
-  bin?: WarehouseMapBin
+  column_no: number
+  bin?: BinMapCell
 }
 
-function statusSemantic(status?: string): StatusSemantic {
-  return resolveStatus(toStatusKey(status))?.semantic ?? 'neutral'
+function occupancySemantic(occupancyStatus: BinOccupancyStatus): StatusSemantic {
+  return resolveStatus(toStatusKey(occupancyStatus))?.semantic ?? 'neutral'
 }
 
 function occupiedCellStyle(semantic: StatusSemantic): CSSProperties {
@@ -77,36 +80,36 @@ function emptyCellStyle(): CSSProperties {
   }
 }
 
-function buildCells(shelf: WarehouseMapShelf): BinCell[] {
-  const byPosition = new Map<string, WarehouseMapBin>()
-  for (const bin of shelf.bins) {
-    byPosition.set(`${bin.layer}-${bin.columnNo}`, bin)
+function buildCells(node: ShelfMapNode): BinCell[] {
+  const byPosition = new Map<string, BinMapCell>()
+  for (const bin of node.bins) {
+    byPosition.set(`${bin.layer}-${bin.column_no}`, bin)
   }
-  const rows = Math.max(shelf.layers ?? 1, ...shelf.bins.map((b) => b.layer ?? 1), 1)
-  const cols = Math.max(shelf.columns ?? 1, ...shelf.bins.map((b) => b.columnNo ?? 1), 1)
+  const rows = Math.max(node.shelf.layers, 1, ...node.bins.map((b) => b.layer))
+  const cols = Math.max(node.shelf.columns, 1, ...node.bins.map((b) => b.column_no))
   const cells: BinCell[] = []
   for (let layer = 1; layer <= rows; layer += 1) {
-    for (let columnNo = 1; columnNo <= cols; columnNo += 1) {
-      cells.push({ layer, columnNo, bin: byPosition.get(`${layer}-${columnNo}`) })
+    for (let column_no = 1; column_no <= cols; column_no += 1) {
+      cells.push({ layer, column_no, bin: byPosition.get(`${layer}-${column_no}`) })
     }
   }
   return cells
 }
 
-type SelectBin = (bin: WarehouseMapBin, zone: WarehouseMapZone, shelf: WarehouseMapShelf) => void
+type SelectBin = (bin: BinMapCell, zone: ZoneMapNode, shelf: ShelfMapNode) => void
 
 function ShelfGrid({
   zone,
-  shelf,
+  node,
   onSelect,
 }: {
-  zone: WarehouseMapZone
-  shelf: WarehouseMapShelf
+  zone: ZoneMapNode
+  node: ShelfMapNode
   onSelect: SelectBin
 }) {
-  const cells = buildCells(shelf)
-  const cols = Math.max(shelf.columns ?? 1, 1)
-  const rows = Math.max(shelf.layers ?? 1, 1)
+  const cells = buildCells(node)
+  const cols = Math.max(node.shelf.columns, 1)
+  const rows = Math.max(node.shelf.layers, 1)
   return (
     <div
       style={{
@@ -117,7 +120,7 @@ function ShelfGrid({
       }}
     >
       <Space size={8} style={{ marginBottom: 8 }}>
-        <Typography.Text strong>{shelf.code}</Typography.Text>
+        <Typography.Text strong>{node.shelf.code}</Typography.Text>
         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           {rows}层 × {cols}列
         </Typography.Text>
@@ -134,26 +137,33 @@ function ShelfGrid({
           {cells.map((cell) => {
             const bin = cell.bin
             if (!bin) {
-              return <div key={`${cell.layer}-${cell.columnNo}`} style={emptyCellStyle()} />
+              return <div key={`${cell.layer}-${cell.column_no}`} style={emptyCellStyle()} />
             }
-            const meta = resolveStatus(toStatusKey(bin.status))
+            const meta = resolveStatus(toStatusKey(bin.occupancy_status))
             return (
               <Tooltip
-                key={`${cell.layer}-${cell.columnNo}`}
+                key={`${cell.layer}-${cell.column_no}`}
                 title={
                   <div>
                     <div>{bin.code}</div>
                     <div>
-                      {meta?.label ?? bin.status ?? '未知状态'} ·{' '}
-                      {bin.binType ? (BIN_TYPE_LABEL[bin.binType] ?? bin.binType) : '未设类型'}
+                      {meta?.label ?? bin.occupancy_status} ·{' '}
+                      {bin.bin_type ? (BIN_TYPE_LABEL[bin.bin_type] ?? bin.bin_type) : '未设类型'}
                     </div>
                     <div>
-                      容量 {formatNumber(bin.currentCapacity)} / {formatNumber(bin.maxCapacity)}
+                      容量 {formatNumber(bin.current_capacity)} / {formatNumber(bin.max_capacity)}
                     </div>
+                    {bin.quantity !== undefined && <div>在库数量 {formatNumber(bin.quantity)}</div>}
+                    {bin.locked_quantity !== undefined && (
+                      <div>锁定数量 {formatNumber(bin.locked_quantity)}</div>
+                    )}
                   </div>
                 }
               >
-                <div style={occupiedCellStyle(statusSemantic(bin.status))} onClick={() => onSelect(bin, zone, shelf)}>
+                <div
+                  style={occupiedCellStyle(occupancySemantic(bin.occupancy_status))}
+                  onClick={() => onSelect(bin, zone, node)}
+                >
                   {bin.code}
                 </div>
               </Tooltip>
@@ -165,32 +175,32 @@ function ShelfGrid({
   )
 }
 
-function ZoneCard({ zone, onSelect }: { zone: WarehouseMapZone; onSelect: SelectBin }) {
+function ZoneCard({ zone, onSelect }: { zone: ZoneMapNode; onSelect: SelectBin }) {
   return (
     <Card
       size="small"
       style={{ marginBottom: 16 }}
       title={
         <Space size={8}>
-          <Typography.Text strong>{zone.name}</Typography.Text>
+          <Typography.Text strong>{zone.zone.name}</Typography.Text>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            {zone.code}
+            {zone.zone.code}
           </Typography.Text>
-          {zone.zoneType && (
+          {zone.zone.zone_type && (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              {ZONE_TYPE_LABEL[zone.zoneType] ?? zone.zoneType}
+              {ZONE_TYPE_LABEL[zone.zone.zone_type] ?? zone.zone.zone_type}
             </Typography.Text>
           )}
         </Space>
       }
-      extra={<SfStatusTag status={toStatusKey(zone.status)} />}
+      extra={<SfStatusTag status={toStatusKey(zone.zone.status)} />}
     >
       {zone.shelves.length === 0 ? (
         <SfEmpty description="该库区暂无货架" />
       ) : (
         <Flex gap={12} wrap="wrap">
-          {zone.shelves.map((shelf) => (
-            <ShelfGrid key={shelf.id} zone={zone} shelf={shelf} onSelect={onSelect} />
+          {zone.shelves.map((node) => (
+            <ShelfGrid key={node.shelf.id} zone={zone} node={node} onSelect={onSelect} />
           ))}
         </Flex>
       )}
@@ -206,13 +216,13 @@ function CenteredLoading() {
   )
 }
 
-/** 库位地图（M1 契约：GET /api/warehouses/{id}/map 区/架/位网格与占用状态） */
+/** 库位地图（M1 契约：GET /api/warehouses/{id}/map 区/架/位网格与 occupancy_status 占用状态） */
 export default function WarehouseMapPage() {
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string | undefined>(undefined)
   const [selected, setSelected] = useState<{
-    bin: WarehouseMapBin
-    zone: WarehouseMapZone
-    shelf: WarehouseMapShelf
+    bin: BinMapCell
+    zone: ZoneMapNode
+    shelf: ShelfMapNode
   } | null>(null)
 
   const warehousesQuery = useQuery({
@@ -260,15 +270,15 @@ export default function WarehouseMapPage() {
       <>
         <Card size="small" style={{ marginBottom: 16 }}>
           <Flex align="center" gap={12} wrap="wrap">
-            <Typography.Text type="secondary">库位状态：</Typography.Text>
+            <Typography.Text type="secondary">库位占用：</Typography.Text>
             {MAP_LEGEND.map((key) => (
-              <SfStatusTag key={key} status={key} />
+              <SfStatusTag key={key} status={toStatusKey(key)} />
             ))}
           </Flex>
         </Card>
         {zones.map((zone) => (
           <ZoneCard
-            key={zone.id}
+            key={zone.zone.id}
             zone={zone}
             onSelect={(bin, zoneOf, shelfOf) => setSelected({ bin, zone: zoneOf, shelf: shelfOf })}
           />
@@ -308,31 +318,60 @@ export default function WarehouseMapPage() {
                 {
                   key: 'type',
                   label: '库位类型',
-                  children: selected.bin.binType
-                    ? (BIN_TYPE_LABEL[selected.bin.binType] ?? selected.bin.binType)
+                  children: selected.bin.bin_type
+                    ? (BIN_TYPE_LABEL[selected.bin.bin_type] ?? selected.bin.bin_type)
                     : '-',
                 },
-                { key: 'status', label: '状态', children: <SfStatusTag status={toStatusKey(selected.bin.status)} /> },
+                {
+                  key: 'occupancy',
+                  label: '占用状态',
+                  children: <SfStatusTag status={toStatusKey(selected.bin.occupancy_status)} />,
+                },
                 {
                   key: 'position',
                   label: '层 / 列',
                   children: (
                     <span className="sf-num">
-                      {formatNumber(selected.bin.layer)} / {formatNumber(selected.bin.columnNo)}
+                      {formatNumber(selected.bin.layer)} / {formatNumber(selected.bin.column_no)}
                     </span>
                   ),
                 },
-                { key: 'shelf', label: '所属货架', children: selected.shelf.code },
-                { key: 'zone', label: '所属库区', children: `${selected.zone.name}（${selected.zone.code}）` },
+                { key: 'shelf', label: '所属货架', children: selected.shelf.shelf.code },
+                {
+                  key: 'zone',
+                  label: '所属库区',
+                  children: `${selected.zone.zone.name}（${selected.zone.zone.code}）`,
+                },
                 {
                   key: 'capacity',
                   label: '容量（当前 / 最大）',
                   children: (
                     <span className="sf-num">
-                      {formatNumber(selected.bin.currentCapacity)} / {formatNumber(selected.bin.maxCapacity)}
+                      {formatNumber(selected.bin.current_capacity)} /{' '}
+                      {formatNumber(selected.bin.max_capacity)}
                     </span>
                   ),
                 },
+                ...(selected.bin.quantity !== undefined
+                  ? [
+                      {
+                        key: 'quantity',
+                        label: '在库数量',
+                        children: <span className="sf-num">{formatNumber(selected.bin.quantity)}</span>,
+                      },
+                    ]
+                  : []),
+                ...(selected.bin.locked_quantity !== undefined
+                  ? [
+                      {
+                        key: 'locked',
+                        label: '锁定数量',
+                        children: (
+                          <span className="sf-num">{formatNumber(selected.bin.locked_quantity)}</span>
+                        ),
+                      },
+                    ]
+                  : []),
               ]}
             />
             <Typography.Paragraph type="secondary" style={{ marginTop: 16, marginBottom: 0, fontSize: 12 }}>

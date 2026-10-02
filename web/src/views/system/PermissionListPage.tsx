@@ -2,14 +2,14 @@ import { useState } from 'react'
 import { Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { rbacApi, type PermissionItem, type PermissionQuery, type PermissionType } from '@/api/rbac'
-import type { CommonStatus } from '@/api/user'
+import type { OnOffStatus } from '@/api/user'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const TYPE_META: Record<PermissionType, { label: string; semantic: StatusSemantic }> = {
   MENU: { label: '菜单', semantic: 'processing' },
@@ -23,8 +23,9 @@ const TYPE_OPTIONS: Array<{ label: string; value: PermissionType }> = [
   { label: '接口', value: 'API' },
 ]
 
-function statusTagKey(status: CommonStatus): string {
-  return status === 'ACTIVE' ? 'enabled' : 'disabled'
+/** permissions 状态枚举为 ENABLED/DISABLED（迁移 000001 chk_permissions_status） */
+function statusTagKey(status: OnOffStatus): string {
+  return status === 'ENABLED' ? 'enabled' : 'disabled'
 }
 
 /** 权限列表（frontend.md 系统管理：权限）——权限点由后端种子冻结维护，页面只读 */
@@ -64,13 +65,7 @@ export default function PermissionListPage() {
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      render: (v: CommonStatus) => <SfStatusTag status={statusTagKey(v)} />,
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updatedAt',
-      width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{v ? formatDateTime(v) : '-'}</span>,
+      render: (v: OnOffStatus) => <SfStatusTag status={statusTagKey(v)} />,
     },
   ]
 
@@ -98,7 +93,7 @@ export default function PermissionListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无权限点"
-          scrollX={820}
+          scrollX={660}
         />
       </Card>
     </div>

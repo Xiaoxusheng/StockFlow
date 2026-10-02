@@ -1,4 +1,4 @@
-import { Alert, Avatar, Breadcrumb, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
+import { Alert, AutoComplete, Avatar, Badge, Breadcrumb, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
 import {
   BellOutlined,
   DownOutlined,
@@ -13,13 +13,15 @@ import {
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
-import type { MenuProps } from 'antd'
+import type { AutoCompleteProps, MenuProps } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import { MENU_TREE, resolveMenuTrail, type MenuItem } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useUiStore } from '@/stores/ui'
 import { canAccess } from '@/types/permission'
 import { authApi, PASSWORD_RULE, type ChangePasswordPayload } from '@/api/auth'
+import { notificationApi } from '@/api/notifications'
 import { resolveErrorMessage } from '@/api/client'
 import { NotificationDrawer } from './NotificationDrawer'
 
@@ -32,6 +34,11 @@ function buildMenuItems(items: MenuItem[]): NonNullable<MenuProps['items']> {
     label: item.label,
     children: item.children ? buildMenuItems(item.children) : undefined,
   }))
+}
+
+/** MENU_TREE 取叶子：分组容器在侧边栏点击是展开而非跳转，不作为搜索直达目标 */
+function flattenMenuLeaves(items: MenuItem[]): MenuItem[] {
+  return items.flatMap((item) => (item.children && item.children.length > 0 ? item.children : [item]))
 }
 
 /** PC Layout（frontend.md §4）：固定 Sidebar + 紧凑 Header + 面包屑 + 内容区 */
@@ -47,20 +54,33 @@ export function PcLayout() {
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
+  const [messageApi, contextHolder] = message.useMessage()
   /** 窄屏（<992px）下自动折叠侧边栏（frontend.md §19.1 平板竖屏适配） */
   const [broken, setBroken] = useState(false)
   const collapsed = siderCollapsed || broken
 
-  const menuItems = useMemo(
+  /** 通知未读数（GET /api/notifications/unread-count，api/notifications.ts 前端先行契约）：
+   * 后端通知域未交付时请求失败，Badge 无 count 自动隐藏（错误隐藏方案，不阻塞布局） */
+  const unreadCount = useQuery({
+    queryKey: ['notifications', 'unread-count'],
+    queryFn: notificationApi.unreadCount,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 30_000,
+  })
+
+  /** 可见菜单（与 sidebar 同一 canAccess fail-closed 过滤），同时驱动渲染与全局搜索 */
+  const visibleMenu = useMemo(
     () =>
-      buildMenuItems(
-        MENU_TREE.filter((group) => canAccess(user, group.permission)).map((group) => ({
-          ...group,
-          children: group.children?.filter((child) => canAccess(user, child.permission)),
-        })),
-      ),
+      MENU_TREE.filter((group) => canAccess(user, group.permission)).map((group) => ({
+        ...group,
+        children: group.children?.filter((child) => canAccess(user, child.permission)),
+      })),
     [user],
   )
+  const menuItems = useMemo(() => buildMenuItems(visibleMenu), [visibleMenu])
+  /** 全局搜索候选源：菜单叶子（与侧边栏可点击行为一致，占位叶子跳占位页亦为真实反馈） */
+  const searchSource = useMemo(() => flattenMenuLeaves(visibleMenu), [visibleMenu])
 
   const trail = resolveMenuTrail(location.pathname)
   const openKey = useMemo(
@@ -108,8 +128,36 @@ export function PcLayout() {
     }
   }
 
+  /** 搜索候选：菜单标签（含分组）包含关键字即命中 */
+  const searchOptions: AutoCompleteProps['options'] = useMemo(() => {
+    const kw = keyword.trim().toLowerCase()
+    if (!kw) return []
+    return searchSource
+      .filter((item) => item.label.toLowerCase().includes(kw))
+      .map((item) => ({ value: item.path, label: item.label }))
+  }, [keyword, searchSource])
+
+  /** 候选点选 / 下拉高亮回车：真实导航到对应菜单路由 */
+  const handleSearchSelect = (path: string) => {
+    navigate(path)
+    setKeyword('')
+  }
+
+  /** 直接回车（下拉无高亮项时兜底）：取第一个标签命中项直达，未命中给出真实反馈 */
+  const handleSearchEnter = () => {
+    const kw = keyword.trim()
+    if (!kw) return
+    const hit = searchSource.find((item) => item.label.toLowerCase().includes(kw.toLowerCase()))
+    if (hit) {
+      handleSearchSelect(hit.path)
+    } else {
+      messageApi.warning(`未找到与「${kw}」匹配的菜单`)
+    }
+  }
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
+      {contextHolder}
       <Sider
         width={216}
         collapsedWidth={48}
@@ -183,16 +231,23 @@ export function PcLayout() {
           </Flex>
 
           <Flex align="center" gap={8}>
-            <Input
-              size="small"
-              allowClear
+            <AutoComplete
               value={keyword}
-              onChange={(e) => setKeyword(e.target.value)}
-              onPressEnter={() => setKeyword('')}
-              prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
-              placeholder="搜索 SKU / 单据 / 库位 / SN"
+              options={searchOptions}
+              onChange={(value) => setKeyword(value)}
+              onSelect={handleSearchSelect}
+              popupMatchSelectWidth={280}
               style={{ width: 220 }}
-            />
+            >
+              <Input
+                size="small"
+                allowClear
+                onPressEnter={handleSearchEnter}
+                prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
+                placeholder="搜索菜单名称，回车直达"
+                style={{ width: 220 }}
+              />
+            </AutoComplete>
             <Tooltip title={mode === 'light' ? '切换深色模式' : '切换浅色模式'}>
               <ButtonGhost
                 title="主题"
@@ -201,11 +256,13 @@ export function PcLayout() {
               />
             </Tooltip>
             <Tooltip title="通知">
-              <ButtonGhost
-                title="通知"
-                icon={<BellOutlined />}
-                onClick={() => setNotificationOpen(true)}
-              />
+              <Badge count={unreadCount.data} size="small" offset={[3, -1]}>
+                <ButtonGhost
+                  title="通知"
+                  icon={<BellOutlined />}
+                  onClick={() => setNotificationOpen(true)}
+                />
+              </Badge>
             </Tooltip>
             <Dropdown menu={{ items: userMenu, onClick: handleUserMenu }} trigger={['click']}>
               <Flex
@@ -235,7 +292,14 @@ export function PcLayout() {
         </Content>
       </Layout>
 
-      <NotificationDrawer open={notificationOpen} onClose={() => setNotificationOpen(false)} />
+      <NotificationDrawer
+        open={notificationOpen}
+        onClose={() => {
+          setNotificationOpen(false)
+          // 关闭抽屉时刷新未读数（抽屉内可能已标记已读）
+          void unreadCount.refetch()
+        }}
+      />
 
       <ChangePasswordModal
         open={passwordOpen || mustChangePassword}

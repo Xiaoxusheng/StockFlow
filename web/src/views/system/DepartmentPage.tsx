@@ -5,13 +5,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type DepartmentNode } from '@/api/rbac'
-import type { CommonStatus } from '@/api/user'
+import type { OnOffStatus } from '@/api/user'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 
-function statusTagKey(status: CommonStatus): string {
-  return status === 'ACTIVE' ? 'enabled' : 'disabled'
+/** departments 状态枚举为 ENABLED/DISABLED（迁移 000001 chk_departments_status） */
+function statusTagKey(status: OnOffStatus): string {
+  return status === 'ENABLED' ? 'enabled' : 'disabled'
 }
 
 interface DeptTreeOption {
@@ -23,11 +24,11 @@ interface DeptTreeOption {
 /** 部门树 → TreeSelect 数据；excludeId 用于编辑时排除自身子树，防止把自己挂到后代下 */
 function toTreeOptions(nodes: DepartmentNode[], excludeId?: string): DeptTreeOption[] {
   return nodes
-    .filter((node) => String(node.id) !== excludeId)
+    .filter((node) => node.id !== excludeId)
     .map((node) => {
       const children = toTreeOptions(node.children ?? [], excludeId)
       return {
-        value: String(node.id),
+        value: node.id,
         title: `${node.name}（${node.code}）`,
         children: children.length > 0 ? children : undefined,
       }
@@ -37,7 +38,7 @@ function toTreeOptions(nodes: DepartmentNode[], excludeId?: string): DeptTreeOpt
 /** 收集所有存在子级的节点 key（默认展开用） */
 function collectParentKeys(nodes: DepartmentNode[]): string[] {
   return nodes.flatMap((node) => {
-    const keys = node.children && node.children.length > 0 ? [String(node.id), ...collectParentKeys(node.children)] : []
+    const keys = node.children && node.children.length > 0 ? [node.id, ...collectParentKeys(node.children)] : []
     return keys
   })
 }
@@ -58,7 +59,10 @@ interface DepartmentFormModalProps {
   onSubmit: (values: DepartmentFormValues) => void
 }
 
-/** 新建 / 编辑部门弹窗（M1 契约：parent_id + code + name；无删除，走停用） */
+/**
+ * 新建 / 编辑部门弹窗（M1 契约：parent_id + code + name；无删除，走停用）。
+ * 更新入参仅 parent_id/name（DeptUpdateInput，code 不可变——service_rbac.go:809-812）。
+ */
 function DepartmentFormModal({ editing, parent, treeOptions, submitting, onCancel, onSubmit }: DepartmentFormModalProps) {
   const isEdit = editing !== null
   const [form] = Form.useForm<DepartmentFormValues>()
@@ -81,12 +85,12 @@ function DepartmentFormModal({ editing, parent, treeOptions, submitting, onCance
         initialValues={
           isEdit
             ? {
-                parentId: editing.parentId != null ? String(editing.parentId) : undefined,
+                parentId: editing.parent_id ?? undefined,
                 code: editing.code,
                 name: editing.name,
               }
             : parent
-              ? { parentId: String(parent.id) }
+              ? { parentId: parent.id }
               : undefined
         }
       >
@@ -129,14 +133,19 @@ export default function DepartmentPage() {
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 })
   const queryClient = useQueryClient()
 
-  // 全量树一次加载（部门为组织级小数据量），表格内做树形展示
+  // 全量组树一次加载（api 层循环拉取分页信封后按 parent_id 组树），表格内做树形展示
   const treeQuery = useQuery({ queryKey: ['system', 'departments'], queryFn: rbacApi.departmentTree })
   const tree = useMemo(() => treeQuery.data ?? [], [treeQuery.data])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'departments'] })
 
   const createMutation = useMutation({
-    mutationFn: (payload: DepartmentFormValues) => rbacApi.createDepartment(payload),
+    mutationFn: (values: DepartmentFormValues) =>
+      rbacApi.createDepartment({
+        parent_id: values.parentId ? Number(values.parentId) : undefined,
+        code: values.code,
+        name: values.name,
+      }),
     onSuccess: () => {
       message.success('部门已创建')
       setModal(null)
@@ -146,8 +155,12 @@ export default function DepartmentPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: DepartmentFormValues }) =>
-      rbacApi.updateDepartment(id, payload),
+    mutationFn: ({ id, values }: { id: string; values: DepartmentFormValues }) =>
+      rbacApi.updateDepartment(id, {
+        // 清空上级选择 → 0 = 提升为顶级（parent_id 三态语义，service_rbac.go:827-868）
+        parent_id: values.parentId ? Number(values.parentId) : 0,
+        name: values.name,
+      }),
     onSuccess: () => {
       message.success('部门已保存')
       setModal(null)
@@ -157,9 +170,9 @@ export default function DepartmentPage() {
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: CommonStatus }) => rbacApi.setDepartmentStatus(id, status),
+    mutationFn: ({ id, status }: { id: string; status: OnOffStatus }) => rbacApi.setDepartmentStatus(id, status),
     onSuccess: (_data, variables) => {
-      message.success(variables.status === 'ACTIVE' ? '部门已启用' : '部门已停用')
+      message.success(variables.status === 'ENABLED' ? '部门已启用' : '部门已停用')
       void invalidate()
     },
     onError: (error) => message.error(resolveErrorMessage(error)),
@@ -170,7 +183,7 @@ export default function DepartmentPage() {
     setExpandedKeys(parentKeys)
   }, [parentKeys])
 
-  const treeOptions = toTreeOptions(tree, modal?.kind === 'edit' ? String(modal.dept.id) : undefined)
+  const treeOptions = toTreeOptions(tree, modal?.kind === 'edit' ? modal.dept.id : undefined)
 
   const columns: ColumnsType<DepartmentNode> = [
     { title: '部门名称', dataIndex: 'name', width: 220, fixed: 'left' },
@@ -179,7 +192,7 @@ export default function DepartmentPage() {
       title: '状态',
       dataIndex: 'status',
       width: 90,
-      render: (v: CommonStatus) => <SfStatusTag status={statusTagKey(v)} />,
+      render: (v: OnOffStatus) => <SfStatusTag status={statusTagKey(v)} />,
     },
     {
       title: '操作',
@@ -187,7 +200,7 @@ export default function DepartmentPage() {
       width: 220,
       fixed: 'right',
       render: (_, record) => {
-        const id = String(record.id)
+        const id = record.id
         return (
           <>
             <Button type="link" size="small" onClick={() => setModal({ kind: 'create', parent: record })}>
@@ -196,7 +209,7 @@ export default function DepartmentPage() {
             <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', dept: record })}>
               编辑
             </Button>
-            {record.status === 'ACTIVE' ? (
+            {record.status === 'ENABLED' ? (
               <Popconfirm
                 title="确认停用该部门？"
                 description="停用后该部门不可再被新用户选择"
@@ -207,7 +220,7 @@ export default function DepartmentPage() {
                 </Button>
               </Popconfirm>
             ) : (
-              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ACTIVE' })}>
+              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ENABLED' })}>
                 启用
               </Button>
             )}
@@ -246,7 +259,7 @@ export default function DepartmentPage() {
           expandable={{
             expandedRowKeys: expandedKeys,
             onExpand: (expanded, record) => {
-              const key = String(record.id)
+              const key = record.id
               setExpandedKeys((prev) => (expanded ? [...prev, key] : prev.filter((k) => k !== key)))
             },
           }}
@@ -261,7 +274,7 @@ export default function DepartmentPage() {
           submitting={createMutation.isPending || updateMutation.isPending}
           onCancel={() => setModal(null)}
           onSubmit={(values) => {
-            if (modal.kind === 'edit') updateMutation.mutate({ id: String(modal.dept.id), payload: values })
+            if (modal.kind === 'edit') updateMutation.mutate({ id: modal.dept.id, values })
             else createMutation.mutate(values)
           }}
         />

@@ -11,8 +11,8 @@ import {
   zoneApi,
   type ResourceStatus,
   type ShelfItem,
-  type ShelfPayload,
   type ShelfQuery,
+  type ShelfUpdatePayload,
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -29,26 +29,18 @@ const SEARCH_FIELDS: SearchField[] = [
 ]
 
 const COLUMNS: ColumnsType<ShelfItem> = [
-  {
-    title: '所属仓库',
-    dataIndex: 'warehouseName',
-    width: 110,
-    ellipsis: true,
-    render: (v?: string) => v ?? '-',
-  },
-  { title: '库区', dataIndex: 'zoneCode', width: 90, render: (v?: string) => v ?? '-' },
-  { title: '货架编码', dataIndex: 'code', width: 110, fixed: 'left' },
+  { title: '货架编码', dataIndex: 'code', width: 140, fixed: 'left' },
   {
     title: '层数',
     dataIndex: 'layers',
-    width: 70,
+    width: 80,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '列数',
     dataIndex: 'columns',
-    width: 70,
+    width: 80,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
@@ -67,15 +59,16 @@ const COLUMNS: ColumnsType<ShelfItem> = [
   },
   {
     title: '更新时间',
-    dataIndex: 'updatedAt',
+    dataIndex: 'updated_at',
     width: 160,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
 
+/** 表单值与 ShelfPayload 同构：zone_id/warehouse_id 以 number 提交（dto.go:188 binding:required） */
 interface ShelfFormValues {
-  warehouseId: number | string
-  zoneId: number | string
+  warehouse_id: number
+  zone_id: number
   code: string
   layers?: number
   columns?: number
@@ -98,7 +91,7 @@ export default function ShelfListPage() {
   })
   const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.id,
+    value: Number(item.id),
   }))
   const searchFields: SearchField[] = SEARCH_FIELDS.map((field) =>
     field.name === 'warehouseId'
@@ -115,7 +108,7 @@ export default function ShelfListPage() {
   const [togglingId, setTogglingId] = useState<number | string | null>(null)
 
   // 表单内级联：选中仓库后加载其库区选项
-  const formWarehouseId = Form.useWatch('warehouseId', form)
+  const formWarehouseId = Form.useWatch('warehouse_id', form)
   const zoneOptionsQuery = useQuery({
     queryKey: ['warehouse', 'zones', 'options', formWarehouseId],
     queryFn: () => zoneApi.list({ warehouseId: formWarehouseId, page: 1, pageSize: 200 }),
@@ -123,7 +116,7 @@ export default function ShelfListPage() {
   })
   const zoneOptions = (zoneOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.id,
+    value: Number(item.id),
   }))
 
   const handleSearch = (values: Record<string, unknown>) => {
@@ -143,8 +136,8 @@ export default function ShelfListPage() {
     setFormError(null)
     form.resetFields()
     form.setFieldsValue({
-      warehouseId: record.warehouseId,
-      zoneId: record.zoneId,
+      warehouse_id: Number(record.warehouse_id),
+      zone_id: Number(record.zone_id),
       code: record.code,
       layers: record.layers,
       columns: record.columns,
@@ -160,10 +153,12 @@ export default function ShelfListPage() {
     setFormError(null)
     try {
       if (editing) {
-        const payload: ShelfPayload = {
-          ...values,
-          warehouseId: editing.warehouseId ?? values.warehouseId,
-          zoneId: editing.zoneId ?? values.zoneId,
+        // 更新面不含 zone_id/warehouse_id（dto.go ShelfUpdateInput：层级锚点创建后不可变更）
+        const payload: ShelfUpdatePayload = {
+          code: values.code,
+          layers: values.layers,
+          columns: values.columns,
+          capacity: values.capacity,
         }
         await shelfApi.update(editing.id, payload)
       } else {
@@ -257,7 +252,7 @@ export default function ShelfListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有货架"
-          scrollX={940}
+          scrollX={710}
         />
       </Card>
 
@@ -287,7 +282,7 @@ export default function ShelfListPage() {
         )}
         <Form form={form} layout="vertical">
           <Form.Item
-            name="warehouseId"
+            name="warehouse_id"
             label="所属仓库"
             rules={[{ required: true, message: '请选择所属仓库' }]}
           >
@@ -298,11 +293,11 @@ export default function ShelfListPage() {
               optionFilterProp="label"
               placeholder="请选择所属仓库"
               disabled={editing !== null}
-              onChange={() => form.setFieldValue('zoneId', undefined)}
+              onChange={() => form.setFieldValue('zone_id', undefined)}
             />
           </Form.Item>
           <Form.Item
-            name="zoneId"
+            name="zone_id"
             label="所属库区"
             rules={[{ required: true, message: '请选择所属库区' }]}
             extra={editing ? '所属仓库/库区创建后不可修改' : undefined}

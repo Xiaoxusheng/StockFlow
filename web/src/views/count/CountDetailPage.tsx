@@ -24,6 +24,8 @@ import type { ColumnsType } from 'antd/es/table'
 import type { TimelineProps, UploadFile } from 'antd'
 import {
   COUNT_SCOPE_TYPE_LABEL,
+  COUNT_STATUS_ACTION_LABEL,
+  COUNT_STATUS_PERMISSION,
   COUNT_TYPE_LABEL,
   countApi,
   type CountId,
@@ -32,8 +34,11 @@ import {
   type CountItemSavePayload,
   type CountItemStatus,
   type CountStatus,
+  type CountStatusAction,
 } from '@/api/count'
 import { resolveErrorMessage } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -82,6 +87,41 @@ const COUNT_STEPS: Array<{ key: CountStatus; title: string }> = [
   { key: 'PENDING_APPROVAL', title: '待审核' },
   { key: 'COMPLETED', title: '已完成' },
 ]
+
+/**
+ * 七态状态机合法迁移（business-flow.md §10.2 + frontend.md §10.5，前端先行提案，后端冻结后回对）：
+ * 草稿→提交执行/取消；待执行→开始盘点/取消；盘点中→提交复核；待复核/待审核→审核通过；
+ * 已完成/已取消为终态无操作。待复核与待审核均放行「审核通过」，兼容后端复核/审核两段式。
+ */
+const COUNT_STATUS_TRANSITIONS: Record<CountStatus, CountStatusAction[]> = {
+  DRAFT: ['submit_execute', 'cancel'],
+  PENDING_EXECUTE: ['start', 'cancel'],
+  COUNTING: ['submit_review'],
+  PENDING_REVIEW: ['approve'],
+  PENDING_APPROVAL: ['approve'],
+  COMPLETED: [],
+  CANCELLED: [],
+}
+
+/** 流转动作二次确认文案（集成轮裁决：保留 Modal.confirm——流转为业务操作确认而非危险操作，SfConfirm 确认键固定 danger 且为 Popconfirm 形态，语义不匹配；仅 cancel 单独 danger） */
+const COUNT_ACTION_CONFIRM: Record<CountStatusAction, { content: string }> = {
+  submit_execute: {
+    content: '提交后盘点单进入「待执行」，等待开始盘点。',
+  },
+  start: {
+    content: '开始盘点将冻结盘点范围内库位 / 库存（COUNT_FREEZE），实盘期间相关库存锁定。',
+  },
+  submit_review: {
+    content: '实盘完成后提交复核，系统将对比实盘与系统库存生成差异。',
+  },
+  approve: {
+    content:
+      '审核通过后盘点完成；差异不可直接修改系统库存，将由系统生成库存调整单并走审批链路（business-flow.md §10.2 硬性规则）。',
+  },
+  cancel: {
+    content: '取消后盘点流程终止，已冻结的范围将解冻，该操作不可恢复。',
+  },
+}
 
 /** 差异原因选项（前端先行：devices.md §10.3 差异必须进入原因流程，枚举未冻结，后端交付时对齐） */
 const REASON_OPTIONS = [
@@ -176,6 +216,31 @@ export default function CountDetailPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
+  // 七态流转：经 canAccess fail-closed 过滤（前端仅体验优化，后端仍做最终校验）
+  const user = useAuthStore((s) => s.user)
+  const canFlow = canAccess(user, COUNT_STATUS_PERMISSION)
+
+  const statusMutation = useMutation({
+    mutationFn: ({ action }: { action: CountStatusAction }) => countApi.updateStatus(countId, { action }),
+    onSuccess: (_data, variables) => {
+      messageApi.success(`「${COUNT_STATUS_ACTION_LABEL[variables.action]}」操作已提交`)
+      void queryClient.invalidateQueries({ queryKey: ['counts', countId] })
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  /** 流转二次确认：确认后提交 PUT /api/counts/{id}/status（Modal.confirm 命令式确认保留，理由见 COUNT_ACTION_CONFIRM 注释） */
+  const confirmStatusAction = (action: CountStatusAction) => {
+    Modal.confirm({
+      title: `确认「${COUNT_STATUS_ACTION_LABEL[action]}」？`,
+      content: COUNT_ACTION_CONFIRM[action].content,
+      okText: '确认',
+      cancelText: '再想想',
+      okButtonProps: action === 'cancel' ? { danger: true } : undefined,
+      onOk: () => statusMutation.mutateAsync({ action }),
+    })
+  }
+
   // 差异预览：实盘数量与系统数量不等时给出调整单链路提示（business-flow.md §10.2）
   const watchedQty = Form.useWatch('countedQty', form)
   const previewDiff =
@@ -221,6 +286,7 @@ export default function CountDetailPage() {
   }
 
   const detail = detailQuery.data
+  const allowedActions = detail ? (COUNT_STATUS_TRANSITIONS[detail.status] ?? []) : []
 
   const renderBody = () => {
     if (detailQuery.isPending) {
@@ -424,9 +490,23 @@ export default function CountDetailPage() {
         subtitle={detail ? <CountStatusTag status={detail.status} /> : undefined}
         onBack={() => navigate('/counts')}
         extra={
-          <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
-            刷新
-          </Button>
+          <>
+            {canFlow &&
+              allowedActions.map((action) => (
+                <Button
+                  key={action}
+                  type={action === 'cancel' ? 'default' : 'primary'}
+                  danger={action === 'cancel'}
+                  disabled={statusMutation.isPending}
+                  onClick={() => confirmStatusAction(action)}
+                >
+                  {COUNT_STATUS_ACTION_LABEL[action]}
+                </Button>
+              ))}
+            <Button icon={<ReloadOutlined />} onClick={handleRefresh}>
+              刷新
+            </Button>
+          </>
         }
       />
       {renderBody()}

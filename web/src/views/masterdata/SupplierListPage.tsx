@@ -7,15 +7,14 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Row,
-  Select,
   Typography,
   message,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   masterdataApi,
   toStatusKey,
@@ -47,7 +46,6 @@ interface SupplierFormValues {
   email?: string
   address?: string
   remark?: string
-  status?: EnabledStatus
 }
 
 function toFormValues(record: SupplierItem): SupplierFormValues {
@@ -59,10 +57,11 @@ function toFormValues(record: SupplierItem): SupplierFormValues {
     email: record.email,
     address: record.address,
     remark: record.remark,
-    status: record.status,
   }
 }
 
+/** 提交契约（SupplierCreateInput/SupplierUpdateInput，service_partner.go:87-105）：
+ * 后端无 status 字段——创建恒 ENABLED、启停走 PUT /suppliers/:id/status，编码创建后不可改 */
 function toPayload(values: SupplierFormValues): SupplierSavePayload {
   return {
     code: values.code.trim(),
@@ -72,7 +71,6 @@ function toPayload(values: SupplierFormValues): SupplierSavePayload {
     email: values.email,
     address: values.address,
     remark: values.remark,
-    status: values.status,
   }
 }
 
@@ -102,6 +100,16 @@ export default function SupplierListPage() {
         : masterdataApi.suppliers.create(payload),
     onSuccess: () => {
       setModalOpen(false)
+      invalidate()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: SupplierItem['id']; status: EnabledStatus }) =>
+      masterdataApi.suppliers.setStatus(id, { status }),
+    onSuccess: (data) => {
+      messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
       invalidate()
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
@@ -177,7 +185,7 @@ export default function SupplierListPage() {
     },
     {
       title: '更新时间',
-      dataIndex: 'updatedAt',
+      dataIndex: 'updated_at',
       width: 160,
       render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
     },
@@ -185,25 +193,45 @@ export default function SupplierListPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 110,
-      render: (_: unknown, record: SupplierItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除该供应商？"
-            description="已产生采购业务的供应商后端将拒绝删除，建议改用停用。"
-            okText="删除"
-            okButtonProps={{ danger: true, loading: removeMutation.isPending }}
-            onConfirm={() => removeMutation.mutate(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      width: 150,
+      render: (_: unknown, record: SupplierItem) => {
+        const disabling = record.status === 'ENABLED'
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </span>
-      ),
+            <SfConfirm
+              title={disabling ? '确认停用该供应商？' : '确认启用该供应商？'}
+              description={
+                disabling
+                  ? '停用后不可再被新采购业务引用，已有业务记录不受影响。'
+                  : '启用后供应商可重新参与采购业务。'
+              }
+              okText={disabling ? '停用' : '启用'}
+              confirming={statusMutation.isPending}
+              onConfirm={() =>
+                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
+              }
+            >
+              <Button type="link" size="small" danger={disabling}>
+                {disabling ? '停用' : '启用'}
+              </Button>
+            </SfConfirm>
+            <SfConfirm
+              title="确认删除该供应商？"
+              description="已产生采购业务的供应商后端将拒绝删除，建议改用停用。"
+              okText="删除"
+              confirming={removeMutation.isPending}
+              onConfirm={() => removeMutation.mutate(record.id)}
+            >
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </SfConfirm>
+          </span>
+        )
+      },
     },
   ]
 
@@ -243,7 +271,7 @@ export default function SupplierListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无供应商，点击右上角「新建供应商」创建"
-          scrollX={1460}
+          scrollX={1500}
         />
       </Card>
 
@@ -265,11 +293,16 @@ export default function SupplierListPage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Form<SupplierFormValues> form={form} layout="vertical" initialValues={{ status: 'ENABLED' }}>
+        <Form<SupplierFormValues> form={form} layout="vertical">
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="code" label="供应商编码" rules={[{ required: true, message: '请输入供应商编码' }]}>
-                <Input placeholder="唯一编码" maxLength={64} />
+              <Form.Item
+                name="code"
+                label="供应商编码"
+                rules={[{ required: true, message: '请输入供应商编码' }]}
+                extra={editing ? '编码创建后不可修改' : undefined}
+              >
+                <Input placeholder="唯一编码" maxLength={64} disabled={editing !== null} />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -294,11 +327,6 @@ export default function SupplierListPage() {
                 rules={[{ type: 'email', message: '邮箱格式不正确' }]}
               >
                 <Input placeholder="请输入邮箱" maxLength={128} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="状态">
-                <Select options={STATUS_OPTIONS} />
               </Form.Item>
             </Col>
             <Col span={24}>

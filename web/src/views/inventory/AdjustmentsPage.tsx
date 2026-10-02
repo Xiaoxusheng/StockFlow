@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Typography } from 'antd'
-import { ExportOutlined } from '@ant-design/icons'
+import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   inventoryApi,
@@ -129,7 +128,6 @@ export default function AdjustmentsPage() {
       <SfPageHeader
         title="库存调整"
         subtitle="盘盈 / 盘亏 / 损耗 / 报废 / 其他调整单（申请 → 审核 → 执行）"
-        extra={<Button icon={<ExportOutlined />}>导出</Button>}
       />
       <Card size="small">
         <SfSearchForm

@@ -56,6 +56,93 @@
 
 （按 development-plan.md 的 22 个阶段，每阶段完成后在此追加记录）
 
+## [2026-10-03] 前端：契约对齐轮集成收口（组2–组5 交付归档 + 跨组一致性检查与销项）
+
+- **组2 仓库空间域契约对齐归档**（api/warehouse.ts + 仓库五页）：四组 Item/Payload 全量 snake_case 对齐 internal/warehouse/dto.go JSON tag；Zone/Shelf/Bin Payload 关联 ID 改 number（dto.go:170/188/207 int64 binding:required）并按 UpdateInput 拆出 UpdatePayload；删除 warehouseName/zoneCode/shelfCode 等后端不返回的幻影字段；WarehouseMap 重写为 service_map.go:44-53 包装结构，库位格颜色/图例/Tooltip/详情抽屉改读 occupancy_status 四值（IDLE/PARTIAL/FULL/LOCKED，经 --sf-* Token 配色）；types/status.ts 库位占用注册键 partially_occupied→partial、删除无引用的 abnormal。
+- **组3 系统权限域契约对齐归档**（api/user.ts + api/rbac.ts + 系统四页）：响应类型对齐 UserView/RoleView/PermissionView/DepartmentView JSON tag（internal/auth/service_auth.go:70-163）；请求体 department_id/role_ids/permission_ids 改 JSON number 形态（后端 *int64/[]int64 不接受字符串）；assignRoles/assignRolePermissions 全量替换语义（先取详情 role_ids 预选再全量提交，防静默清空角色）；departmentTree 改分页信封循环拉全量+前端组树（MaxPageSize=100）；修复角色/权限选项 pageSize 200/1000 超 MaxPageSize 必 400 的运行时阻断（分配弹窗「暂无可选角色/权限点」根因）；角色/部门状态枚举修正为 ENABLED/DISABLED（原传 ACTIVE 必 400 且状态列错乱，internal/auth/models.go:27-28 + 迁移 chk_*_status 佐证）；内置角色停用按钮禁用（ErrRoleSystemLocked）。**集成轮销项**：current.md「遗留：api/user.ts 对齐后端 UserView JSON tag」已由组3 本轮完成，销项落档。
+- **组4 封装组件与库存域收口归档**（新建 SfExportButton/SfConfirm + api/inventory.ts + 库存六页 + 作业/采购五页 + ExportTaskPage）：batches/serials 端点改 GET /api/batches、GET /api/serials（inventory.go:55-56），四个已交付 Query/Item 按 handler.go:30-41/54-78/107-119/131-144 View JSON tag 重写（本会话 grep 后端 JSON tag 交叉复核一致）；StockListPage 导出接 SfExportButton（module=INVENTORY、permission fail-closed、范围参数随跳转）；StockDetailPage 改库存行 id 语义、汇总条六状态、页签按详情行 sku_id 真实过滤；Locks/Adjustments/Alerts 三页导出死按钮移除；作业/采购五列表页导出+新建死按钮共 10 个移除；ExportTaskPage 消费 URL query 预填模块与范围参数（BY_FILTER 并入 filters）。
+- **组5 销售与盘点创建/流转归档**（api/sales.ts + api/count.ts 纯追加 + 销售/盘点六页）：SalesOrderCreatePage（/sales/new，客户/仓库/SKU 下拉走 M1 冻结契约、SKU 选中自动带 sale_price 默认价）、SalesOrderDetailPage（/sales/:id，复用 SfDetailHeader/SfSummaryBar/SfDetailSection/SfTimeline 模式）、CountCreatePage（/counts/new，范围×类型表单、库区/货架/库位按所选仓库惰性加载、负责人取 /api/users）；api 层仅纯追加 orders.create/detail 与 create/updateStatus，既有端点未动；CountTaskListPage 增「新建盘点单」入口、CountDetailPage 按 COUNT_STATUS_TRANSITIONS 状态机渲染合法迁移（每次流转 Modal.confirm 二次确认，裁决见下）；新建/流转按钮全部经 canAccess fail-closed（sales:create / count:create / count:status）。
+- **集成收口动作（本会话实测）**：
+  - 路由核验：router/index.tsx 已由组6 注册 /reports（:447，入 IMPLEMENTED_PATHS:169）、/sales/new（:377）、/sales/:id（:390）、/counts/new（:438，先于 /counts/:id:442），静态段先于动态段、无重复注册；git 未跟踪新页面 5 个全部有路由覆盖（CountCreatePage/SalesOrderCreatePage/SalesOrderDetailPage/ReportsPage；SfConfirm/SfExportButton/api/reports.ts 为组件与 API 文件无需路由），本轮路由零改动。
+  - 菜单脱节核验：config/menu.tsx「库存盘点」/inventory/count 子项已删除（库存中心 children :54-65 无该项），顶级 /counts（:110）指向实际实现路径，其余菜单结构与第三批收口时一致，本轮菜单零改动。
+  - 波及项销项：CountCreatePage.tsx:97 item.realName→real_name 已由组5 落盘修复（组3 UserItem 字段改名波及，tsc 全量通过佐证）；组4 披露的 SalesOrderListPage.tsx:89 / SalesOutboundListPage.tsx:95 导出死按钮已由组5 落盘移除（grep 复核销售三页无 ExportOutlined/「导出」残留）。
+  - 死按钮复查：node 脚本解析 views/layouts/components 全部 `<Button>` 元素块（跟踪花括号嵌套，防 icon 属性内 `/>` 误截断致误报），匹配 ExportOutlined/DownloadOutlined/PlusOutlined 与「导出/新建/新增」文案者缺失 onClick 为 **0**。
+  - 重复导出：api/views/components 层 export 标识符同文件查重为 0，无重复 export default。
+  - API 调用比对：22 个 Api 命名空间导出方法与全部页面调用点程序化比对全部匹配；views/layouts/components/stores/hooks 无绕过 api 层的直连 axios（硬性规则 6）。
+  - **小修（组2 披露项）**：api/warehouse.ts 四组 setStatus 返回类型 `*Item` → `{ status: ResourceStatus }`——后端 handler.go:236/346/446/565 实际返回 `gin.H{"status": in.Status}`（本会话读后端源码确认）；四个消费方（仓库/库区/货架/库位列表页启停动作）均不消费返回值，改类型安全。
+  - **裁决：CountDetailPage 流转确认保留 Modal.confirm，不替换 SfConfirm**——SfConfirm 为危险操作封装（Popconfirm 形态、确认键固定 danger，组件注释定位「删除、停用、强制执行等破坏性动作」），盘点七态流转属业务操作确认且确认文案较长（审批链路提示），仅 cancel 为不可恢复动作需 danger（CountDetailPage.tsx:239 已单独处理）；两处「SfConfirm 就绪前暂用」过时注释更新为裁决说明（COUNT_ACTION_CONFIRM 与 confirmStatusAction 处）。
+- **前端先行契约清单**（后端未交付/未冻结，页面呈统一错误态或空态，后端冻结后回对）：POST /api/sales-orders、GET /api/sales-orders/:id，明细行 skuCode 标识与配送方式四值 EXPRESS/LOGISTICS/SELF_PICK/OTHER（组5）；POST /api/counts、PUT /api/counts/:id/status 与 CountStatusAction 五动作/七态迁移表（组5）；GET /api/reports（组6）；GET /api/notifications/unread-count（组6）；/api/inventory/summary 与 alerts/locks/adjustments/trace/transfers/distribution/analytics 端点（api/inventory.ts 对应 Item 保留 camelCase 前端先行形态——已交付的 stock/ledger/batches/serials 四域为 snake_case，两组形态并存是设计状态）；api/data.ts、api/inbound.ts、api/outbound.ts、api/task.ts、api/quality.ts、api/transfer.ts、api/exception.ts（既有前端先行契约不变）；权限码 sales:create / count:create / count:status 为前端先行提案（后端销售/盘点域权限点冻结后回对 internal/auth/permissions.go 与菜单编码）。
+- **遗留清单**：① 商品编辑清空分类/单位不生效（后端 ProductUpdateInput 指针三态 nil=不修改、≤0 非法，service_product.go:119-127，需后端支持显式清空语义后前端跟进）；② SKU 条码编辑入口与 image_urls 表单入口未提供（barcodes 省略=更新不修改、列表展示已覆盖；上传接口待阶段 14 文件中心）；③ GET /api/users 列表项不含 role_ids，用户列表角色列恒显示"-"（需后端 ListUsers 填充）；④ 用户表单数据范围 SPECIFIED_WAREHOUSE 提交必 400（service_rbac.go:105-109 要求 warehouse_ids 非空，M1 前端无仓库绑定 UI，需后端/产品定夺：补仓库选择或收敛选项）；⑤ 后端无 AssignRoles/AssignPermissions 全量替换语义行为级测试（仅形态级入参）；⑥ StockListPage 统计条 /api/inventory/summary 后端未注册，维持 SfError；⑦ SfSearchForm 暂无日期控件，流水 created_from/created_to、批次 expiry_from/expiry_to/order 等已认领参数无筛选 UI（Query 类型与 API 层已就绪）；⑧ 库存详情路由段名 /inventory/stock/:skuCode 实际承载库存行 id（组4 遗留命名，页面按旧段名兼容，可后续更名 :id）；⑨ 全部启停/创建/更新契约为静态比对结论，端到端生效待联调环境（本机无 PG15/Redis7，8080/5432/6379 无监听）。
+- 验证（本机实测）：`npx tsc --noEmit -p tsconfig.app.json` 全量 **EXIT=0**（各组在途类型错误已收敛，含本轮修改 warehouse.ts/CountDetailPage.tsx 后复跑）；`npx eslint src/api/warehouse.ts src/views/count/CountDetailPage.tsx` EXIT=0；死按钮/重复导出/API 调用比对三项 node 程序化扫描 PASS。**全局构建（npm run build）按任务要求未跑**（门禁阶段统一执行）；`go test ./internal/warehouse/` 由组2 执行通过（ok），本会话未复跑后端测试。
+
+## [2026-10-03] 前端：第四批路由、菜单与全局体验收口（组6 集成收口位）
+
+- **路由收口**（web/src/router/index.tsx）：注册静态 /reports（报表中心，ReportsPage 聚合入口）+ 组5 新页无菜单路由 /sales/new、/sales/:id、/counts/new——静态段先于动态段（/sales → /sales/new → /sales/outbounds → /sales/returns → /sales/:id 殿后；/counts → /counts/new → /counts/:id），沿用 :113 注释共存规则；IMPLEMENTED_PATHS 增补 /reports（共 49 条），/sales/new、/counts/new 为无菜单静态路径不入 Set（同动态段 :114 规则）。程序化比对（node 临时脚本正则提取三集合）：children 57 条路由（静态 51 + 动态 6）无重复注册、IMPLEMENTED_PATHS 与静态路由一一对应、菜单 70 路径无重复、静态路由与占位路由零重叠。
+- **菜单脱节修正**（web/src/config/menu.tsx）：删除「库存盘点」/inventory/count 子项（该路径此前落占位页，功能按既有裁决由 /counts 盘点中心承载，见 current.md 2026-10-02 第二批 F6 行）；其余菜单零改动。程序化断言：/inventory/count 已从菜单、路由、IMPLEMENTED_PATHS、占位路由四处消失。
+- **报表中心**（新建 web/src/api/reports.ts + web/src/views/reports/ReportsPage.tsx）：api/reports.ts 前端先行契约 GET /api/reports → ReportCatalogItem[]（后端报表域属阶段 17–18，backend-m1-plan.md:479，页面呈统一错误态/空态）；ReportsPage 为聚合入口——「库存分析与数据工具」卡片组链到已交付真实页面 /inventory/analytics、/inventory/ledger、/data/exports（描述与三页实际 SfPageHeader 副标题逐一核对），报表目录区消费真实 API，SfLoading/SfError/SfEmpty 三态完整，无任何写死数据。
+- **全局体验收口**（web/src/layouts/PcLayout.tsx）：全局搜索去装饰——原 :191 onPressEnter 仅 setKeyword('')（无真实行为），改为 AutoComplete + MENU_TREE 叶子标签匹配（flattenMenuLeaves：分组容器侧边栏点击本为展开不跳转，不作为直达目标；占位叶子跳占位页与点菜单行为一致），候选点选/回车选中/直接回车三路径均真实 navigate，未命中给 messageApi.warning 真实反馈；候选源 visibleMenu 与侧边栏共用同一 canAccess fail-closed 过滤（单一来源）。通知铃铛（原 :203-205）接真实 GET /api/notifications/unread-count（notificationApi.unreadCount，api/notifications.ts:18；useQuery retry:false/staleTime 30s），Badge 渲染未读数，后端通知域未交付时请求失败无 count 自动隐藏；关闭 NotificationDrawer 时 refetch 刷新未读数。
+- 验证（本机实测）：`npx tsc --noEmit -p tsconfig.app.json` EXIT=0；`npx eslint src/router/index.tsx src/config/menu.tsx src/layouts/PcLayout.tsx src/views/reports/ReportsPage.tsx src/api/reports.ts` EXIT=0；node 程序化路由比对 5/5 断言 PASS。浏览器运行时实测未执行（本环境无浏览器自动化工具链），页面行为待门禁/联调阶段实测；全局构建按任务要求未跑（门禁阶段统一执行）。
+- 说明：组6 开工时组5 三个页面文件尚未落盘（git status 干净），会话中途落盘后完成注册——SalesOrderCreatePage/SalesOrderDetailPage/CountCreatePage 均组5 交付（列表页入口 navigate('/sales/new')、navigate(`/sales/${id}`)、navigate('/counts/new') 已由组5 接线），本组仅做路由注册与收口；本轮仅修改 fileScope 内 5 个 web/src 文件。
+
+## [2026-10-03] 前端：基础资料域契约对齐（api/masterdata.ts 全量 snake_case + 六列表页字段/动作同步）
+
+- **API 层全量对齐后端 JSON tag**（契约依据 internal/masterdata/service_*.go View/Input 与 handler.go，非猜测）：Item 视图字段统一 snake_case——short_name/category_id/unit_id/product_id/parent_id/cost_price/sale_price/safety_stock/max_stock/min_replenish_qty/is_batch_managed/is_expiry_managed/is_serial_managed/is_enabled/created_at/updated_at/shipping_address；**关联 ID 提交统一 number**（Create/Update Input 外键为 *int64，传字符串即 400 COMMON_INVALID_PARAM；视图出参 database.ID JSON 为字符串，internal/database/model.go:22，MasterdataId 双类型保留）。
+- **Query 参数对齐**（internal/masterdata/handler.go:86/193/203/305）：ProductQuery.categoryId→category_id、SkuQuery.productId→product_id 并补 enabled?: boolean（后端 strconv.ParseBool）、CategoryQuery 补 parent_id（0=仅顶级）。
+- **删除 categories.remove / units.remove**（后端无 DELETE 路由——分类/单位停用即生命周期终点，internal/masterdata/masterdata.go:22/66/73）；**六组补 setStatus**：products/categories/units/suppliers/customers 传 {status}（handler.go:148 StatusRequest）、skus 传 {enabled:boolean}（handler.go:184 SKUStatusRequest），商品停用返回 cascade_disabled_skus 级联计数。
+- **类型增补**：SkuItem/SkuSavePayload 增 barcodes:{barcode,code_type,is_primary}[]（service_sku.go:31 BarcodeView/139 BarcodeInput，列表批量装配返回、更新提供即全量替换）；ProductItem 增 image_urls:string[]（service_product.go:40，上传接口随阶段 14 文件中心）；六域 SavePayload 移除创建即被后端忽略的 status（CategoryCreateInput/UnitCreateInput/ProductCreateInput/SupplierCreateInput/CustomerCreateInput 均无 status，创建恒 ENABLED）。
+- **六列表页同步**（web/src/views/masterdata/）：列表读取全量 snake_case（categoryName/updatedAt 等引用不再是 undefined）；ProductListPage 分类筛选参数改 category_id；SkuListPage 增 product_id/enabled 筛选与条码列（主条码「（主）」标注）、启停接 PUT /skus/:id/status；CategoryListPage/UnitListPage 删除入口（DELETE 404）改「停用/启用」动作（SfConfirm 二次确认，真实调 PUT .../status）；Supplier/Customer 页字段同步并增启停动作；六页编辑弹窗移除「状态」假开关（提交即被忽略，requirements.md §10）、编码字段编辑时禁用（后端编码不可改）。
+- **名称列兜底映射**：后端列表不装配 category_name/unit_name/product_name（omitempty 仅详情返回，service_product.go:29/34、service_sku.go:43-44）、CategoryView 无 parent_name——列表展示用一次取全的下拉数据源按 id 映射兜底（同一 API 的真实数据，非前端造数；详情字段优先）。
+- 验证（本机实测）：`npx tsc --noEmit -p tsconfig.app.json` 本轮修改 7 文件零错误（全仓余 4 错误均在 inventory 域他组在途文件，与本次无关）；grep 证实 categories/units 无 DELETE 调用、六页无 camelCase 字段残留。端到端启停/400 消除待后端环境联调复测。
+- 遗留：后端 ProductUpdateInput 语义为 nil=不修改、≤0 非法——商品编辑清空分类/单位不生效（契约限制，前端提交 null=不修改）；SKU 条码编辑入口未提供（barcodes 省略=更新不修改，列表展示已覆盖）；image_urls 表单暂无编辑入口（待阶段 14 文件中心）。
+
+## [2026-10-03] 后端：M1 全量交付（T0–T5：脚手架与基础设施、数据库迁移与初始化、认证与权限、基础资料、仓库空间、库存核心）
+
+- 后端 M1 六个 scope 收口，仓库根 Go module `github.com/stockflow/server`（module 根 = 仓库根，backend-m1-plan §2/§11）。**脚手架与基础设施（T0/scope A）**：cmd/server 启动入口、internal/ 平台八包（config/logger/response/middleware/database/cache/health/router）、config.example.yaml、Makefile（fmt/fmt-check/vet/test/build/run/tidy/ci + migrate-up/down/new + seed-demo）；
+- **数据库迁移与初始化（T1/scope B）**：db/migrations 000001–000005 五组成对迁移共 26 表 + db/grants/app_grants.sql 审计账号分层 + db/seed/dev_seed.sql + internal/database.BootstrapIfEmpty 生产安全初始化（schema 冻结点，详见 2026-10-02 数据库条目）；
+- **认证与权限（T2/scope C）**：internal/auth 共 27 接口——JWT+Redis 会话双轨、登录保护、RBAC 与数据权限助手、敏感操作审计；**基础资料（T3/scope D）**：internal/masterdata 商品/SKU/分类/单位/供应商/客户六资源 34 条路由；**仓库空间（T4/scope E）**：internal/warehouse 四级结构 23 条路由 + 库位地图；**库存核心（T5/scope F）**：internal/inventory 九个变更原语（原生 SQL 行锁 + 双重数量校验 + 幂等键）+ FEFO/FIFO 分配策略 + M1 只读 HTTP 面五路由——各域均挂 RequirePermission、列表强制分页、同事务 operation_logs 审计（详见 2026-10-02 各域交付条目）；
+- 独立评审复核修复一并计入本轮交付：库存首建 RETURNING id / Lock 行锁内幂等查重 / 000001 code 唯一索引补齐 / inventory:batch·serial 权限点补录 / 405 语义（详见 2026-10-02 复核条目）；
+- 跨域装配（plan §4.3 规则①）：internal/router/router.go:56-62 已注入 auth.WithWarehouseChecker 与 inventory.WithSKUChecker/WithBinChecker 三组 Checker（必需 Checker 未注入启动期 fail-fast）；
+- 验证（本机 2026-10-03 实测，仓库根 go1.27.0）：单元测试 `go test -count=1 ./...` 12 个测试包全部 ok（PG15/Redis 集成测试经 //go:build integration 门控本机未触发，待真库回归），`go build ./...`、`go vet ./...` 通过，`gofmt -l .` 无未格式化文件——单元测试与 go build/vet/gofmt 门禁全绿。
+- 影响范围：后端 M1（T0–T5）交付完成，M2 起业务单据域须以 inventory Service 组合事务为唯一库存变更入口（plan §4.2 判据 3）；遗留：swag 注释汇总与 Makefile swag 目标（T6 收口）、docker-compose.dev.yml 与 .golangci.yml 未建（plan §11 T0 行所列、本仓库未交付）、真实 PG15+Redis7 环境集成回归（含 migrate up/down 双向验证）——均见 docs/tasks/current.md 与各域既有条目披露。
+
+## [2026-10-02] 后端：独立评审复核修复（库存首建 RETURNING id / 000001 唯一索引 / Lock 行锁内幂等查重 / batch·serial 权限点补录 / 405 语义 / 杂散文件清理）
+
+- **insertRow 改 `INSERT ... RETURNING id`**（internal/inventory/repository.go）：原 Exec 无 RETURNING，新建库存行 ID=0——Putaway 对全新库位在 buildLedger 解引用 panic（首次上架 500）、Adjust 盘盈到全新库位与 MoveBin 到空库位的 `UPDATE WHERE id=0` 影响 0 行而恒失败。三处同根因一并收敛，与 insertLock/insertBatch 写法对齐。
+- **Lock 幂等查重移入库存行锁之后**（internal/inventory/service.go）：原 findLockBySource（无锁读）在 locateRowForUpdate 之前，并发两个同 (source_type,source_no,lock_type) 且无幂等键的 Lock 双方都在对方提交前完成查重，各自落一条 ACTIVE 锁（同单据重复预占双倍可用库存；idx_inventory_locks_source 为普通索引无唯一兜底）。改后并发请求被行锁串行化，后到者可见先到者已提交的 ACTIVE 锁并幂等返回；带幂等键路径行为不变（uk_inventory_ledgers_idempotency_key 部分唯一索引兜底）。
+- **000001 迁移补齐 roles/permissions/departments 的 code 唯一索引**与 permissions/departments 的 parent_id 反查索引（db/migrations/000001_create_auth_tables.up.sql）：down 脚本原本就引用这五个索引、BootstrapIfEmpty 种子的 `ON CONFLICT (code)` 依赖之——缺索引时真库首启种子 INSERT 直接报错、服务初始化失败。三表无软删除，采用全量唯一索引（与不带谓词的 ON CONFLICT 推断匹配）；迁移从未在真库执行（T1 条目已披露），原地补齐无存量风险，scope B 待办销项。
+- **inventory:batch / inventory:serial 权限点闭环**：常量收编 internal/auth/permissions.go（单一事实来源）、权限种子补录两资源 + 两菜单节点（权限点 102→106：API 30→32、MENU 22→24）、backend-m1-plan §5.4.1 冻结清单同步补行、seed_test.go 字面清单交叉核对同步；/api/batches、/api/serials 对普通角色不再恒 403。
+- **NoMethod 响应改 405 语义**（internal/router/router.go + internal/response/errors.go 新增 COMMON_METHOD_NOT_ALLOWED），区别于路径不存在的 404；统一信封结构不变。
+- 删除仓库根 Windows 保留名杂散文件 `nul`（psql 误重定向输出，47 字节）。
+- **（二轮补充）insertLedger 改 `INSERT ... RETURNING id`**（internal/inventory/repository.go）：原 Exec 无 RETURNING，首调路径 MutationResult.Ledger.ID 恒为 0，与幂等重放路径（replayResult/findLockCreationLedger 从 SELECT 回读真实 ID）返回形态不一致；改后七个变更原语两条路径返回形态归一（与 insertLock/insertBatch/insertRow 同款）。
+- **（二轮补充）seed_test.go 三级分布断言的失败文案同步为 API=32**（断言本身上轮已改，文案遗漏）。
+- 验证：仓库根 `go build ./... && go vet ./... && go test ./...` 全绿（见本条目交付时点门禁）。
+
+## [2026-10-02] 后端：库存核心域全量交付（后端阶段 7，T5/scope F）
+
+- `internal/inventory` 整包（backend-m1-plan §2/§8 冻结契约）：全系统库存与流水的唯一变更入口。九个变更原语——Putaway/Deduct/Lock/ReleaseLock/MoveBin/InspectResult/Adjust/EnsureBatch/SerialEvent（§8.2 冻结方法集，tx 传 nil 自建事务、传外层 tx 组合 M2 业务单据事务，§8.3）；另有纯函数分配策略 AllocateFEFO/AllocateFIFO（inventory-rules §6/§7.2）与 BinOccupancy 库位占用聚合（§4.3 ②，供 warehouse 库位地图消费）。
+- 事务与并发（§8.3 冻结口径）：库存关键路径一律原生 SQL——先 SELECT ... FOR UPDATE 行锁定位、业务层+数据层（WHERE col >= n 影响行数 0 判败）双重数量校验、原子条件 UPDATE 成对改列（恒等式由构造成立）、同事务 append-only 流水 + 操作日志；多行变更（MoveBin）先无锁定位行 id 再按 id 升序加锁防死锁；行创建竞态经 uk_inventory_location 唯一冲突重读收敛。
+- 幂等（§8.5）：可选幂等键 + inventory_ledgers.idempotency_key 部分唯一索引为最终准绳（并发同键由数据库裁决），重复请求返回既有结果（Replay=true）不重复变更；Lock 另按来源单据幂等查重；流水号/调整单单号随机后缀碰撞重试。
+- 审计与校验：全部变更方法同事务写 operation_logs（before/after 库存快照）；跨域 SKU/库位存在性校验经 WithSKUChecker/WithBinChecker 接口注入，未注入启动期 fail-fast（plan §4.3 规则①）。
+- M1 HTTP 面只读（§8.7）：GET /api/inventory（列表/详情）、/api/inventory-ledgers、/api/batches、/api/serials 五条路由全部挂 RequirePermission、强制分页、数据权限仓库范围过滤（ALL/SPECIFIED_WAREHOUSE；序列号 warehouse_id=0=不在库行对所有范围可见——为已出库序列号可追溯的设计取舍，见 repository.go 注释）。
+- 测试：纯函数单测（Qty/恒等式/枚举/幂等判定）不依赖外部；PG15 集成测试（并发锁不超卖、并发扣减不超卖、每步恒等式、流水配对、幂等重放、锁生命周期）置于 //go:build integration 门控（SF_TEST_PG_*，本环境无 PG 全部 SKIP，待真库回归）。
+- 影响范围：M2 业务单据域（入库/出库/盘点/调整执行）经本 Service 组合事务，禁止任何包直写库存族六表（plan §4.2 判据 3）。
+
+## [2026-10-02] 后端：仓库空间域全量交付（后端阶段 6，T4/scope E）
+
+- `internal/warehouse` 整包（backend-m1-plan §2/§5 冻结契约）：仓库/库区/货架/库位四级结构 CRUD + GET /api/warehouses/{id}/map 库位地图，共 23 条路由，全部挂 RequirePermission、列表强制分页。
+- 校验（business-flow §1.6、api.md §4）：编码格式/唯一、删除保护（有子级或被引用拒绝）、warehouses/bins 软删除（database.md §5.1）而 zones/shelves 仅启停无删除（plan §5.4.1 同源）、库位地图按仓库返回区/架/位网格与占用状态。
+- 跨域契约（plan §4.3/§5.1 冻结签名）：NewChecker（用户绑定仓库校验，供 auth）、NewBinChecker（库位校验，供 inventory）导出；作为消费方定义 BinOccupancyReader 接口由 router 装配注入 inventory 实现，未注入时地图不带占用字段。
+- 审计：增/改/删/启停全部经 middleware.Audit 与业务同事务写 operation_logs；EnsureDefaultWarehouse 委托 internal/database.BootstrapIfEmpty 的默认仓库种子（单一种子入口，无第二套种子逻辑）。
+- 测试：service/handler 单测经假 gorm 方言器替身实现零外部依赖；PG 集成测试门控同 T5（本环境 SKIP）。
+
+## [2026-10-02] 后端：基础资料域全量交付（后端阶段 5，T3/scope D）
+
+- `internal/masterdata` 整包（backend-m1-plan §2/§5 冻结契约）：商品/SKU（含条码）/商品分类/计量单位/供应商/客户六资源 34 条路由（CRUD+启停+软删除；分类/单位无删除、停用即终点），全部挂 RequirePermission、列表强制分页（api.md §2.1）。
+- 完整校验（api.md §4）：编码格式/唯一、删除被引用（商品↔SKU 级联约束）、停用被引用（分类/单位）、条码全局唯一（一码一 SKU）、SKU 三开关一致性（效期依赖批次，inventory-rules §6–§8）、数量/金额 numeric(18,4) 非负。
+- 审计：增/改/删/启停全部经 middleware.Audit 与业务同事务写 operation_logs（architecture.md §8.1）；跨域导出 NewSKUChecker 供 inventory 域 WithSKUChecker 注入消费（plan §4.3）。
+- 数据权限（permission.md §4）：基础资料为组织级数据（不分仓），不做仓库级行过滤。
+- 测试：service/routes 单测经 fakedb/fakerepo 替身实现零外部依赖；本环境无 PG，真库回归待集成环境。
+
 ## [2026-10-02] 前端：第三批五组并行页面集成收口（质量/调拨/异常/库存分析详情/单据详情/盘点/数据导入导出）
 
 - 五组并行开发的 14 个页面 + 3 个新 api 模块 + 3 个既有 api 模块追加 + 2 个新公共组件统一接入路由（web/src/router/index.tsx），注册 **14 条 lazy 路由**（静态 9 条 + 动态段 5 条）：

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -8,7 +8,6 @@ import {
   Input,
   InputNumber,
   Modal,
-  Popconfirm,
   Row,
   Select,
   Typography,
@@ -17,6 +16,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   OPTIONS_PAGE_SIZE,
   masterdataApi,
@@ -41,36 +41,34 @@ const STATUS_OPTIONS = [
   { label: '已停用', value: 'DISABLED' },
 ]
 
-/** 表单值：InputNumber 可清空为 null，提交前统一转 undefined（对应"未填写"） */
+/** 表单值；字段名与后端 JSON tag（snake_case）一致 */
 interface CategoryFormValues {
   code: string
   name: string
-  parentId?: string
+  parent_id?: string
   sort?: number | null
-  status?: EnabledStatus
 }
 
-function toFormValues(record: CategoryItem): CategoryFormValues {
+/** 提交契约（CategoryCreateInput/CategoryUpdateInput，service_category.go:72-77/134-138）：
+ * parent_id 为 *int64 必须 number。创建：null=顶级；更新：0=提升为顶级 / >0=换上级
+ * （编辑表单清空选择即提交 0=置顶级，未变更时原值回传无副作用） */
+function toPayload(values: CategoryFormValues, isEdit: boolean): CategorySavePayload {
   return {
-    code: record.code,
-    name: record.name,
-    parentId: record.parentId != null ? String(record.parentId) : undefined,
-    sort: record.sort ?? null,
-    status: record.status,
-  }
-}
-
-function toPayload(values: CategoryFormValues): CategorySavePayload {
-  return {
+    parent_id: isEdit
+      ? values.parent_id != null
+        ? Number(values.parent_id)
+        : 0
+      : values.parent_id != null
+        ? Number(values.parent_id)
+        : null,
     code: values.code.trim(),
     name: values.name.trim(),
-    parentId: values.parentId ?? null,
     sort: values.sort ?? undefined,
-    status: values.status,
   }
 }
 
-/** 商品分类（/categories，后端端点 /api/product-categories，backend-m1-plan §5.4） */
+/** 商品分类（/categories，后端端点 /api/product-categories，backend-m1-plan §5.4；
+ * 无删除接口——停用即生命周期终点，masterdata.go:22/66） */
 export default function CategoryListPage() {
   const [params, setParams] = useState<CategoryQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
@@ -93,14 +91,20 @@ export default function CategoryListPage() {
   const parentOptions = (categories.data?.items ?? [])
     .filter((item) => editing === null || String(item.id) !== String(editing.id))
     .map((item) => ({ label: `${item.name}（${item.code}）`, value: String(item.id) }))
+  // 后端 CategoryView 无 parent_name 装配字段（service_category.go:24-33），
+  // 列表「上级分类」用一次取全的数据源按 parent_id 兜底映射（同一 API 的真实数据）
+  const parentNameById = useMemo(
+    () => new Map((categories.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    [categories.data],
+  )
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ['masterdata', 'categories'] })
   }
 
   const saveMutation = useMutation({
-    mutationFn: (payload: CategorySavePayload) =>
-      editing
+    mutationFn: ({ payload, isEdit }: { payload: CategorySavePayload; isEdit: boolean }) =>
+      isEdit && editing
         ? masterdataApi.categories.update(editing.id, payload)
         : masterdataApi.categories.create(payload),
     onSuccess: () => {
@@ -110,9 +114,13 @@ export default function CategoryListPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
-  const removeMutation = useMutation({
-    mutationFn: (id: CategoryItem['id']) => masterdataApi.categories.remove(id),
-    onSuccess: invalidate,
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: CategoryItem['id']; status: EnabledStatus }) =>
+      masterdataApi.categories.setStatus(id, { status }),
+    onSuccess: (data) => {
+      messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
+      invalidate()
+    },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
@@ -127,13 +135,19 @@ export default function CategoryListPage() {
     saveMutation.reset()
     setEditing(record)
     setModalOpen(true)
-    form.setFieldsValue(toFormValues(record))
+    form.setFieldsValue({
+      code: record.code,
+      name: record.name,
+      parent_id: record.parent_id != null ? String(record.parent_id) : undefined,
+      sort: record.sort ?? null,
+    })
   }
 
   const handleSubmit = () => {
+    const isEdit = editing !== null
     form
       .validateFields()
-      .then((values) => saveMutation.mutate(toPayload(values)))
+      .then((values) => saveMutation.mutate({ payload: toPayload(values, isEdit), isEdit }))
       .catch(() => {
         // 表单校验失败：Form.Item 已内联提示
       })
@@ -150,11 +164,20 @@ export default function CategoryListPage() {
     },
     {
       title: '上级分类',
-      dataIndex: 'parentName',
+      key: 'parent_id',
       width: 180,
       ellipsis: true,
-      render: (v?: string) =>
-        v ? <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-',
+      render: (_: unknown, record: CategoryItem) => {
+        if (record.parent_id == null) return '-'
+        const name = parentNameById.get(String(record.parent_id))
+        return name ? (
+          <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          String(record.parent_id)
+        )
+      },
     },
     {
       title: '排序',
@@ -171,7 +194,7 @@ export default function CategoryListPage() {
     },
     {
       title: '更新时间',
-      dataIndex: 'updatedAt',
+      dataIndex: 'updated_at',
       width: 160,
       render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
     },
@@ -179,25 +202,34 @@ export default function CategoryListPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 110,
-      render: (_: unknown, record: CategoryItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除该分类？"
-            description="存在子分类或被商品引用时后端将拒绝删除。"
-            okText="删除"
-            okButtonProps={{ danger: true, loading: removeMutation.isPending }}
-            onConfirm={() => removeMutation.mutate(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      width: 120,
+      render: (_: unknown, record: CategoryItem) => {
+        const disabling = record.status === 'ENABLED'
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </span>
-      ),
+            <SfConfirm
+              title={disabling ? '确认停用该分类？' : '确认启用该分类？'}
+              description={
+                disabling
+                  ? '存在启用中的子分类或商品引用时后端将拒绝停用；建议先处理引用。'
+                  : '启用后分类可重新被商品引用。'
+              }
+              okText={disabling ? '停用' : '启用'}
+              confirming={statusMutation.isPending}
+              onConfirm={() =>
+                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
+              }
+            >
+              <Button type="link" size="small" danger={disabling}>
+                {disabling ? '停用' : '启用'}
+              </Button>
+            </SfConfirm>
+          </span>
+        )
+      },
     },
   ]
 
@@ -206,7 +238,7 @@ export default function CategoryListPage() {
       {contextHolder}
       <SfPageHeader
         title="商品分类"
-        subtitle="分类编码 / 名称 / 层级（parent_id）维护"
+        subtitle="分类编码 / 名称 / 层级（parent_id）维护；分类无删除，停用即终点"
         extra={
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建分类
@@ -237,7 +269,7 @@ export default function CategoryListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无商品分类，点击右上角「新建分类」创建"
-          scrollX={970}
+          scrollX={940}
         />
       </Card>
 
@@ -259,11 +291,16 @@ export default function CategoryListPage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Form<CategoryFormValues> form={form} layout="vertical" initialValues={{ status: 'ENABLED', sort: 0 }}>
+        <Form<CategoryFormValues> form={form} layout="vertical" initialValues={{ sort: 0 }}>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="code" label="分类编码" rules={[{ required: true, message: '请输入分类编码' }]}>
-                <Input placeholder="唯一编码" maxLength={64} />
+              <Form.Item
+                name="code"
+                label="分类编码"
+                rules={[{ required: true, message: '请输入分类编码' }]}
+                extra={editing ? '编码创建后不可修改' : undefined}
+              >
+                <Input placeholder="唯一编码" maxLength={64} disabled={editing !== null} />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -272,18 +309,13 @@ export default function CategoryListPage() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="parentId" label="上级分类">
+              <Form.Item name="parent_id" label="上级分类" extra={editing ? '清空并保存则提升为顶级' : undefined}>
                 <Select options={parentOptions} placeholder="不选则为顶级分类" allowClear />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item name="sort" label="排序">
                 <InputNumber min={0} precision={0} style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="状态">
-                <Select options={STATUS_OPTIONS} />
               </Form.Item>
             </Col>
           </Row>

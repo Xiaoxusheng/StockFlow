@@ -7,15 +7,14 @@ import {
   Form,
   Input,
   Modal,
-  Popconfirm,
   Row,
-  Select,
   Typography,
   message,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   masterdataApi,
   toStatusKey,
@@ -46,8 +45,7 @@ interface CustomerFormValues {
   phone?: string
   email?: string
   address?: string
-  shippingAddress?: string
-  status?: EnabledStatus
+  shipping_address?: string
 }
 
 function toFormValues(record: CustomerItem): CustomerFormValues {
@@ -58,11 +56,12 @@ function toFormValues(record: CustomerItem): CustomerFormValues {
     phone: record.phone,
     email: record.email,
     address: record.address,
-    shippingAddress: record.shippingAddress,
-    status: record.status,
+    shipping_address: record.shipping_address,
   }
 }
 
+/** 提交契约（CustomerCreateInput/CustomerUpdateInput，service_partner.go:108-126）：
+ * 后端无 status 字段——创建恒 ENABLED、启停走 PUT /customers/:id/status，编码创建后不可改 */
 function toPayload(values: CustomerFormValues): CustomerSavePayload {
   return {
     code: values.code.trim(),
@@ -71,8 +70,7 @@ function toPayload(values: CustomerFormValues): CustomerSavePayload {
     phone: values.phone,
     email: values.email,
     address: values.address,
-    shippingAddress: values.shippingAddress,
-    status: values.status,
+    shipping_address: values.shipping_address,
   }
 }
 
@@ -102,6 +100,16 @@ export default function CustomerListPage() {
         : masterdataApi.customers.create(payload),
     onSuccess: () => {
       setModalOpen(false)
+      invalidate()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: CustomerItem['id']; status: EnabledStatus }) =>
+      masterdataApi.customers.setStatus(id, { status }),
+    onSuccess: (data) => {
+      messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
       invalidate()
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
@@ -163,7 +171,7 @@ export default function CustomerListPage() {
     },
     {
       title: '收货地址',
-      dataIndex: 'shippingAddress',
+      dataIndex: 'shipping_address',
       width: 180,
       ellipsis: true,
       render: (v?: string) =>
@@ -177,7 +185,7 @@ export default function CustomerListPage() {
     },
     {
       title: '更新时间',
-      dataIndex: 'updatedAt',
+      dataIndex: 'updated_at',
       width: 160,
       render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
     },
@@ -185,25 +193,45 @@ export default function CustomerListPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 110,
-      render: (_: unknown, record: CustomerItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除该客户？"
-            description="已产生销售业务的客户后端将拒绝删除，建议改用停用。"
-            okText="删除"
-            okButtonProps={{ danger: true, loading: removeMutation.isPending }}
-            onConfirm={() => removeMutation.mutate(record.id)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      width: 150,
+      render: (_: unknown, record: CustomerItem) => {
+        const disabling = record.status === 'ENABLED'
+        return (
+          <span style={{ whiteSpace: 'nowrap' }}>
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </span>
-      ),
+            <SfConfirm
+              title={disabling ? '确认停用该客户？' : '确认启用该客户？'}
+              description={
+                disabling
+                  ? '停用后不可再被新销售业务引用，已有业务记录不受影响。'
+                  : '启用后客户可重新参与销售业务。'
+              }
+              okText={disabling ? '停用' : '启用'}
+              confirming={statusMutation.isPending}
+              onConfirm={() =>
+                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
+              }
+            >
+              <Button type="link" size="small" danger={disabling}>
+                {disabling ? '停用' : '启用'}
+              </Button>
+            </SfConfirm>
+            <SfConfirm
+              title="确认删除该客户？"
+              description="已产生销售业务的客户后端将拒绝删除，建议改用停用。"
+              okText="删除"
+              confirming={removeMutation.isPending}
+              onConfirm={() => removeMutation.mutate(record.id)}
+            >
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </SfConfirm>
+          </span>
+        )
+      },
     },
   ]
 
@@ -243,7 +271,7 @@ export default function CustomerListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无客户，点击右上角「新建客户」创建"
-          scrollX={1470}
+          scrollX={1510}
         />
       </Card>
 
@@ -265,11 +293,16 @@ export default function CustomerListPage() {
             style={{ marginBottom: 16 }}
           />
         )}
-        <Form<CustomerFormValues> form={form} layout="vertical" initialValues={{ status: 'ENABLED' }}>
+        <Form<CustomerFormValues> form={form} layout="vertical">
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="code" label="客户编码" rules={[{ required: true, message: '请输入客户编码' }]}>
-                <Input placeholder="唯一编码" maxLength={64} />
+              <Form.Item
+                name="code"
+                label="客户编码"
+                rules={[{ required: true, message: '请输入客户编码' }]}
+                extra={editing ? '编码创建后不可修改' : undefined}
+              >
+                <Input placeholder="唯一编码" maxLength={64} disabled={editing !== null} />
               </Form.Item>
             </Col>
             <Col span={12}>
@@ -296,18 +329,13 @@ export default function CustomerListPage() {
                 <Input placeholder="请输入邮箱" maxLength={128} />
               </Form.Item>
             </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="状态">
-                <Select options={STATUS_OPTIONS} />
-              </Form.Item>
-            </Col>
             <Col span={24}>
               <Form.Item name="address" label="地址">
                 <Input.TextArea rows={2} placeholder="请输入地址" maxLength={255} />
               </Form.Item>
             </Col>
             <Col span={24}>
-              <Form.Item name="shippingAddress" label="收货地址">
+              <Form.Item name="shipping_address" label="收货地址">
                 <Input.TextArea rows={2} placeholder="请输入收货地址" maxLength={255} />
               </Form.Item>
             </Col>
