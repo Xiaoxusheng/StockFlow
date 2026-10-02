@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router'
 import {
   inboundApi,
   type InboundItem,
@@ -102,11 +103,28 @@ const COLUMNS: ColumnsType<InboundItem> = [
 /** 入库管理（frontend.md F7 入库/出库流程；GET /api/inbounds，子路径未冻结） */
 export default function InboundPage() {
   const [params, setParams] = useState<InboundQuery>({})
+  const navigate = useNavigate()
   const list = usePagedList<InboundItem, InboundQuery>({
     queryKey: ['inbound', 'orders'],
     fetch: (q) => inboundApi.list(q),
     params,
   })
+
+  // 既有列保持不变，仅追加「详情」行入口（/inbound/:id，无菜单路由）
+  const columns: ColumnsType<InboundItem> = [
+    ...COLUMNS,
+    {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 80,
+      render: (_: unknown, record: InboundItem) => (
+        <Button type="link" size="small" onClick={() => navigate(`/inbound/${record.id}`)}>
+          详情
+        </Button>
+      ),
+    },
+  ]
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as InboundQuery)
@@ -140,7 +158,7 @@ export default function InboundPage() {
         <SfTable<InboundItem>
           storageKey="inbound-list"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -150,7 +168,7 @@ export default function InboundPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有入库单"
-          scrollX={1250}
+          scrollX={1330}
         />
       </Card>
     </div>

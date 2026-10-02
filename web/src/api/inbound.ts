@@ -51,8 +51,73 @@ export interface InboundItem {
   createdAt: string
 }
 
+// ---------- 入库单详情（GET /api/inbounds/{id}，前端先行契约：后端入库单据域未交付，冻结后回对字段） ----------
+
+/** 入库单商品明细行 */
+export interface InboundDetailItem {
+  id: number | string
+  skuCode: string
+  skuName?: string
+  /** 计量单位 */
+  unitName?: string
+  /** 计划数量 */
+  totalQty: number
+  /** 已收货数量（business-flow.md §3.3 支持部分收货） */
+  receivedQty?: number
+  /** 批次 */
+  batchNo?: string
+  /** 目的库位 */
+  binCode?: string
+  status?: string
+  remark?: string
+}
+
+/** 入库单详情：含明细与流程节点时间（business-flow.md §13.4） */
+export interface InboundDetail {
+  id: number | string
+  inboundNo: string
+  inboundType: string
+  /** 来源单号（采购单 / 退货单 / 调拨单等） */
+  sourceNo?: string
+  supplierName?: string
+  warehouseCode?: string
+  warehouseName: string
+  /** 计划数量合计 */
+  totalQty: number
+  /** 已收货数量合计 */
+  receivedQty?: number
+  status: string
+  /** 创建人 */
+  operatorName?: string
+  /** 创建时间 */
+  createdAt: string
+  /** 审核时间 */
+  reviewedAt?: string
+  /** 审核人 */
+  reviewedBy?: string
+  /** 收货完成时间 */
+  receivedAt?: string
+  /** 收货人 */
+  receivedBy?: string
+  /** 质检完成时间 */
+  inspectedAt?: string
+  /** 质检人 */
+  inspectedBy?: string
+  /** 上架完成时间 */
+  putawayAt?: string
+  /** 上架人 */
+  putawayBy?: string
+  /** 备注 */
+  remark?: string
+  /** 商品明细 */
+  items: InboundDetailItem[]
+}
+
 export const inboundApi = {
   /** 入库单列表（预置端点，后端未就绪时页面呈现统一错误态） */
   list: (query: InboundQuery) =>
     http.get<PageResult<InboundItem>>('/api/inbounds', { params: query }),
+  /** 入库单详情（前端先行契约，后端未交付时页面呈现统一错误态） */
+  get: (id: InboundItem['id']) =>
+    http.get<InboundDetail>(`/api/inbounds/${id}`),
 }

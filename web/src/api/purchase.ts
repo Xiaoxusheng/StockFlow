@@ -109,9 +109,85 @@ export interface PurchaseReturnItem {
   createdAt: string
 }
 
+// ---------- 采购订单详情（GET /api/purchases/{id}，前端先行契约：后端采购单据域未交付，冻结后回对字段） ----------
+
+/** 采购订单商品明细行（business-flow.md §2.3：明细保留四数量字段，收货时后端强校验） */
+export interface PurchaseDetailItem {
+  id: number | string
+  skuCode: string
+  skuName?: string
+  /** 计量单位 */
+  unitName?: string
+  /** 原始数量 */
+  totalQty: number
+  /** 累计收货数量（含合格 + 不合格待定，不得超过原始数量） */
+  receivedQty?: number
+  /** 待到货数量 */
+  pendingQty?: number
+  /** 拒收数量（单独记录） */
+  rejectedQty?: number
+  /** 单价 */
+  unitPrice?: number
+  /** 金额 */
+  amount?: number
+  remark?: string
+}
+
+/** 采购单关联收货单（部分收货进度展示用） */
+export interface PurchaseRelatedReceipt {
+  id: number | string
+  receiptNo: string
+  /** 本次收货数量 */
+  receivedQty?: number
+  status?: string
+}
+
+/** 采购订单详情：含明细与流程节点时间（business-flow.md §2.2/§2.3、§13.4） */
+export interface PurchaseDetail {
+  id: number | string
+  poNo: string
+  supplierCode?: string
+  supplierName: string
+  warehouseCode?: string
+  warehouseName: string
+  /** 原始数量合计 */
+  totalQty: number
+  /** 已收货数量合计 */
+  receivedQty?: number
+  /** 金额合计；草稿单可能缺失 */
+  totalAmount?: number
+  expectedArrivalDate?: string
+  status: string
+  /** 创建人 */
+  operatorName?: string
+  /** 创建时间 */
+  createdAt: string
+  /** 审核时间 */
+  reviewedAt?: string
+  /** 审核人 */
+  reviewedBy?: string
+  /** 收货完成时间（部分收货时为最后收货时间） */
+  receivedAt?: string
+  /** 收货人 */
+  receivedBy?: string
+  /** 完成时间 */
+  completedAt?: string
+  /** 完成操作人 */
+  completedBy?: string
+  /** 备注 */
+  remark?: string
+  /** 商品明细 */
+  items: PurchaseDetailItem[]
+  /** 关联收货单（部分收货进度，未产生收货时缺失） */
+  receipts?: PurchaseRelatedReceipt[]
+}
+
 export const purchaseApi = {
   list: (query: PurchaseQuery) =>
     http.get<PageResult<PurchaseItem>>('/api/purchases', { params: query }),
+  /** 采购订单详情（前端先行契约，后端未交付时页面呈现统一错误态） */
+  get: (id: PurchaseItem['id']) =>
+    http.get<PurchaseDetail>(`/api/purchases/${id}`),
   receipts: {
     list: (query: ReceiptQuery) =>
       http.get<PageResult<ReceiptItem>>('/api/purchases/receipts', { params: query }),

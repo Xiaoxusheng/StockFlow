@@ -44,6 +44,8 @@ export interface StockSummary {
 
 export interface LedgerQuery extends PageQuery {
   keyword?: string
+  /** 按 SKU 过滤（库存详情页「库存流水」页签复用本端点，frontend.md §10.3） */
+  skuCode?: string
   warehouseCode?: string
   bizType?: string
   direction?: 'in' | 'out'
@@ -104,6 +106,8 @@ export type InventoryLockType =
 
 export interface InventoryLockQuery extends PageQuery {
   keyword?: string
+  /** 按 SKU 过滤（库存详情页「库存锁定」页签复用本端点，frontend.md §10.3） */
+  skuCode?: string
   warehouseCode?: string
   lockType?: InventoryLockType
   status?: InventoryLockStatus
@@ -178,6 +182,8 @@ export interface InventoryAdjustmentItem {
 
 export interface BatchQuery extends PageQuery {
   keyword?: string
+  /** 按 SKU 过滤（库存详情页「批次库存」页签复用本端点，frontend.md §10.3） */
+  skuCode?: string
   batchNo?: string
   warehouseCode?: string
 }
@@ -208,6 +214,8 @@ export type SerialStatus = 'IN_STOCK' | 'LOCKED' | 'OUTBOUND' | 'RETURNED' | 'FR
 
 export interface SerialQuery extends PageQuery {
   keyword?: string
+  /** 按 SKU 过滤（库存详情页「序列号」页签复用本端点，frontend.md §10.3） */
+  skuCode?: string
   warehouseCode?: string
   status?: SerialStatus
 }
@@ -315,6 +323,78 @@ export interface TraceItem {
   remark?: string
 }
 
+// ---------- 库存详情（frontend.md §10.3；前端先行契约：后端 M1 库存查询面未含 SKU 汇总
+// （backend-m1-plan.md §13），就绪前详情页头部呈统一错误态） ----------
+
+/** SKU 维度库存汇总（§10.3 头部口径：总库存 / 可用 / 锁定 / 冻结 / 待检） */
+export interface StockDetailSummary {
+  skuCode: string
+  productName: string
+  barcode?: string
+  unitName?: string
+  /** 有货仓库数（跨仓聚合口径；契约未冻结，随 M1 库存查询面冻结） */
+  warehouseCount?: number
+  totalQty: number
+  availableQty: number
+  lockedQty: number
+  frozenQty: number
+  /** 待检（pending_inspect 状态库存；状态三态口径见 backend-m1-plan.md §8.4） */
+  pendingInspectQty: number
+}
+
+// ---------- 库存分布（frontend.md §10.4 层级视图：仓库 → 库区 → 库位，支持点击下钻） ----------
+
+/**
+ * 分布层级节点：仓库层（children=库区或库位）/ 库区层（children=库位）/ 库位层（叶子）。
+ * 仓库未划库区时允许后端直接返回「仓库 → 库位」两层（§10.4 示例即此形态）。
+ */
+export interface StockDistributionNode {
+  warehouseCode: string
+  warehouseName?: string
+  zoneCode?: string
+  binCode?: string
+  totalQty: number
+  availableQty?: number
+  children?: StockDistributionNode[]
+}
+
+// ---------- 库存分析（frontend.md §10.1 口径：库存金额 / 周转率 / 周转天数 / ABC 分析 / 库存趋势；
+// 前端先行契约：分析域后端 M2+ 交付（backend-m1-plan.md §13），就绪前页面呈统一错误态） ----------
+
+export interface InventoryAnalyticsQuery {
+  /** 趋势窗口天数（默认 30；仅影响 trend 字段） */
+  days?: number
+}
+
+/** ABC 分类项（按库存金额 80/15/5 阈值分档由后端计算，前端不得自行分档） */
+export interface AnalyticsAbcItem {
+  grade: 'A' | 'B' | 'C'
+  skuCount: number
+  valueAmount: number
+  /** 金额占比 0~100 */
+  valuePercent: number
+}
+
+/** 库存趋势点（date 为 YYYY-MM-DD） */
+export interface AnalyticsTrendPoint {
+  date: string
+  totalQty: number
+  stockValue: number
+}
+
+export interface InventoryAnalytics {
+  /** 库存金额（∑ 数量 × 成本价，口径以后端契约为准） */
+  totalStockValue: number
+  totalSkuCount: number
+  totalQty: number
+  /** 库存周转率（次 / 统计周期） */
+  turnoverRate: number
+  /** 库存周转天数（天） */
+  turnoverDays: number
+  abc: AnalyticsAbcItem[]
+  trend: AnalyticsTrendPoint[]
+}
+
 export const inventoryApi = {
   stock: (query: StockQuery) =>
     http.get<PageResult<StockItem>>('/api/inventory', { params: query }),
@@ -335,7 +415,20 @@ export const inventoryApi = {
     http.get<PageResult<InventoryTransferItem>>('/api/inventory/transfers', { params: query }),
   trace: (query: TraceQuery) =>
     http.get<PageResult<TraceItem>>('/api/inventory/trace', { params: query }),
+  /** SKU 库存汇总（frontend.md §10.3 详情头部；前端先行契约） */
+  stockDetail: (skuCode: string) =>
+    http.get<StockDetailSummary>(`/api/inventory/${encodeURIComponent(skuCode)}`),
+  /** SKU 层级分布（frontend.md §10.4 仓库 → 库区 → 库位；前端先行契约） */
+  stockDistribution: (skuCode: string) =>
+    http.get<StockDistributionNode[]>(
+      `/api/inventory/${encodeURIComponent(skuCode)}/distribution`,
+    ),
+  /** 库存分析汇总（frontend.md §10.1 口径；前端先行契约，后端 M2+ 交付） */
+  analytics: (query?: InventoryAnalyticsQuery) =>
+    http.get<InventoryAnalytics>('/api/inventory/analytics', { params: query }),
 }
 
-// 注：库存分析（/inventory/analytics，config/menu.tsx inventory:analytics:view）本轮预算裁剪不做，待 M2+ 补齐；
-//     库存盘点（/inventory/count）按约束 5 禁做（盘点由盘点中心 /counts 统一承载），本组不涉及。
+// 注：库存详情（/inventory/stock/:skuCode）为无菜单动态段路由（frontend.md §10.2「点击 SKU 进入库存详情」），
+//     由集成阶段挂接 router/index.tsx + IMPLEMENTED_PATHS，本文件只负责 API 契约。
+//     库存盘点（/inventory/count）按既有裁决由盘点中心 /counts 统一承载，不做库存盘点页签（frontend.md §10.5）。
+//     GET /api/inventory/{skuCode} 与既有静态段（/api/inventory/summary 等）存在路径并存，后端注册时静态段须优先。

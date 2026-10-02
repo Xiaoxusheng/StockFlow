@@ -66,6 +66,32 @@ const SalesReturnListPage = lazy(() => import('@/views/sales/SalesReturnListPage
 const ReceiptListPage = lazy(() => import('@/views/purchase/ReceiptListPage'))
 const PurchaseReturnListPage = lazy(() => import('@/views/purchase/PurchaseReturnListPage'))
 
+// 单据详情（入库/出库/采购订单动态段；后端单据域未交付，呈统一错误态）
+const InboundDetailPage = lazy(() => import('@/views/inbound/InboundDetailPage'))
+const OutboundDetailPage = lazy(() => import('@/views/outbound/OutboundDetailPage'))
+const PurchaseOrderDetailPage = lazy(() => import('@/views/purchase/PurchaseOrderDetailPage'))
+
+// 质量中心（前端先行契约：后端质量域未交付，呈统一错误态）
+const QualityInspectionListPage = lazy(() => import('@/views/quality/QualityInspectionListPage'))
+const NonconformingListPage = lazy(() => import('@/views/quality/NonconformingListPage'))
+const QualityTracePage = lazy(() => import('@/views/quality/QualityTracePage'))
+
+// 调拨单（仓库中心，/api/transfers 单据流，与 /inventory/transfers 库存转移作业语义区分）+ 异常中心
+const TransferListPage = lazy(() => import('@/views/warehouse/TransferListPage'))
+const ExceptionCenterPage = lazy(() => import('@/views/exception/ExceptionCenterPage'))
+
+// 库存中心（库存分析 + SKU 库存详情动态段；分析端点 M2+，详情页部分页签呈统一错误态）
+const AnalyticsPage = lazy(() => import('@/views/inventory/AnalyticsPage'))
+const StockDetailPage = lazy(() => import('@/views/inventory/StockDetailPage'))
+
+// 盘点中心（F9；后端盘点域未交付，呈统一错误态）
+const CountTaskListPage = lazy(() => import('@/views/count/CountTaskListPage'))
+const CountDetailPage = lazy(() => import('@/views/count/CountDetailPage'))
+
+// 数据中心（F11：Excel 导入/导出；后端数据域未交付，呈统一错误态）
+const ImportWizardPage = lazy(() => import('@/views/data/ImportWizardPage'))
+const ExportTaskPage = lazy(() => import('@/views/data/ExportTaskPage'))
+
 /** 已有真实页面的路由；其余菜单路径统一落到 ModulePlaceholder */
 const IMPLEMENTED_PATHS = new Set([
   '/dashboard',
@@ -82,6 +108,10 @@ const IMPLEMENTED_PATHS = new Set([
   '/inventory/serials',
   '/inventory/transfers',
   '/inventory/trace',
+  // 库存分析（F10）
+  '/inventory/analytics',
+  // 库存详情 /inbound/:id、/outbound/:id、/purchases/:id、/counts/:id、/inventory/stock/:skuCode
+  // 为动态段路由，无菜单路径，不参与占位匹配，不加入本 Set
   // 基础资料
   '/products',
   '/skus',
@@ -95,6 +125,8 @@ const IMPLEMENTED_PATHS = new Set([
   '/shelves',
   '/bins',
   '/warehouse-map',
+  // 调拨单（仓库中心；与库存转移 /inventory/transfers 语义区分）
+  '/transfers',
   // 系统管理
   '/system/users',
   '/system/roles',
@@ -104,6 +136,8 @@ const IMPLEMENTED_PATHS = new Set([
   '/inbound',
   '/outbound',
   '/purchases',
+  // 异常中心
+  '/exceptions',
   // 出库作业（P0）
   '/picking',
   '/checking',
@@ -116,6 +150,15 @@ const IMPLEMENTED_PATHS = new Set([
   '/sales',
   '/sales/outbounds',
   '/sales/returns',
+  // 质量中心（前端先行契约）
+  '/quality/inspections',
+  '/quality/nonconforming',
+  '/quality/trace',
+  // 盘点中心（F9）
+  '/counts',
+  // 数据中心（F11：Excel 导入/导出）
+  '/data/imports',
+  '/data/exports',
 ])
 
 function menuPaths(): string[] {
@@ -184,6 +227,11 @@ export const router = createBrowserRouter([
         path: 'inventory/stock',
         element: <LazyPage><StockListPage /></LazyPage>,
       },
+      // SKU 库存详情（frontend.md §10.2：列表点击 SKU 进入；动态段无菜单，与静态段共存静态优先）
+      {
+        path: 'inventory/stock/:skuCode',
+        element: <LazyPage><StockDetailPage /></LazyPage>,
+      },
       {
         path: 'inventory/ledger',
         element: <LazyPage><LedgerPage /></LazyPage>,
@@ -217,14 +265,34 @@ export const router = createBrowserRouter([
         path: 'inventory/trace',
         element: <LazyPage><TracePage /></LazyPage>,
       },
+      // 库存分析（F10：§10.1 口径；分析端点后端 M2+ 交付，当前呈统一错误态）
+      {
+        path: 'inventory/analytics',
+        element: <LazyPage><AnalyticsPage /></LazyPage>,
+      },
       // 仓储作业（M2+ 骨架）
       {
         path: 'inbound',
         element: <LazyPage><InboundPage /></LazyPage>,
       },
+      // 入库单详情（列表「详情」列进入；动态段无菜单）
+      {
+        path: 'inbound/:id',
+        element: <LazyPage><InboundDetailPage /></LazyPage>,
+      },
       {
         path: 'outbound',
         element: <LazyPage><OutboundPage /></LazyPage>,
+      },
+      // 出库单详情（动态段无菜单）
+      {
+        path: 'outbound/:id',
+        element: <LazyPage><OutboundDetailPage /></LazyPage>,
+      },
+      // 异常中心（business-flow.md §11.2 九类异常；前端先行契约）
+      {
+        path: 'exceptions',
+        element: <LazyPage><ExceptionCenterPage /></LazyPage>,
       },
       // 出库作业（P0：拣货/复核/打包/发货）
       {
@@ -264,10 +332,20 @@ export const router = createBrowserRouter([
         path: 'warehouse-map',
         element: <LazyPage><WarehouseMapPage /></LazyPage>,
       },
+      // 调拨单（仓库中心菜单组；两维度 + 7 态状态机，与库存转移 /inventory/transfers 语义区分）
+      {
+        path: 'transfers',
+        element: <LazyPage><TransferListPage /></LazyPage>,
+      },
       // 采购
       {
         path: 'purchases',
         element: <LazyPage><PurchaseListPage /></LazyPage>,
+      },
+      // 采购订单详情（Timeline 含部分收货进度；动态段无菜单，与 receipts/returns 静态段共存静态优先）
+      {
+        path: 'purchases/:id',
+        element: <LazyPage><PurchaseOrderDetailPage /></LazyPage>,
       },
       // 采购收货 / 退货（P0 单据域）
       {
@@ -315,6 +393,37 @@ export const router = createBrowserRouter([
       {
         path: 'customers',
         element: <LazyPage><CustomerListPage /></LazyPage>,
+      },
+      // 质量中心（前端先行契约：后端质量域未交付，呈统一错误态）
+      {
+        path: 'quality/inspections',
+        element: <LazyPage><QualityInspectionListPage /></LazyPage>,
+      },
+      {
+        path: 'quality/nonconforming',
+        element: <LazyPage><NonconformingListPage /></LazyPage>,
+      },
+      {
+        path: 'quality/trace',
+        element: <LazyPage><QualityTracePage /></LazyPage>,
+      },
+      // 盘点中心（F9：七态状态机 + 实盘登记；详情为动态段无菜单）
+      {
+        path: 'counts',
+        element: <LazyPage><CountTaskListPage /></LazyPage>,
+      },
+      {
+        path: 'counts/:id',
+        element: <LazyPage><CountDetailPage /></LazyPage>,
+      },
+      // 数据中心（F11：Excel 导入/导出；/data/printing、/data/files 保持占位）
+      {
+        path: 'data/imports',
+        element: <LazyPage><ImportWizardPage /></LazyPage>,
+      },
+      {
+        path: 'data/exports',
+        element: <LazyPage><ExportTaskPage /></LazyPage>,
       },
       // 系统管理
       {

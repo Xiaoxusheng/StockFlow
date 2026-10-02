@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router'
 import { purchaseApi, type PurchaseItem, type PurchaseQuery, type PurchaseStatus } from '@/api/purchase'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -77,11 +78,28 @@ const COLUMNS: ColumnsType<PurchaseItem> = [
 /** 采购订单列表（frontend.md 采购中心 /purchases；GET /api/purchases，子路径未冻结） */
 export default function PurchaseListPage() {
   const [params, setParams] = useState<PurchaseQuery>({})
+  const navigate = useNavigate()
   const list = usePagedList<PurchaseItem, PurchaseQuery>({
     queryKey: ['purchase', 'orders'],
     fetch: (q) => purchaseApi.list(q),
     params,
   })
+
+  // 既有列保持不变，仅追加「详情」行入口（/purchases/:id，无菜单路由）
+  const columns: ColumnsType<PurchaseItem> = [
+    ...COLUMNS,
+    {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 80,
+      render: (_: unknown, record: PurchaseItem) => (
+        <Button type="link" size="small" onClick={() => navigate(`/purchases/${record.id}`)}>
+          详情
+        </Button>
+      ),
+    },
+  ]
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as PurchaseQuery)
@@ -114,7 +132,7 @@ export default function PurchaseListPage() {
         <SfTable<PurchaseItem>
           storageKey="purchase-orders"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -124,7 +142,7 @@ export default function PurchaseListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购订单"
-          scrollX={1140}
+          scrollX={1220}
         />
       </Card>
     </div>

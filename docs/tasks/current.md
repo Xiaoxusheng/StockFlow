@@ -45,13 +45,27 @@
 
 集成收口（router/index.tsx）：注册 15 条 lazy 路由（/workbench /tasks /inventory/batches /inventory/serials /inventory/transfers /inventory/trace /picking /checking /packing /shipment /purchases/receipts /purchases/returns /sales /sales/outbounds /sales/returns），IMPLEMENTED_PATHS 同步增补 15 条，程序化比对集合与 children 静态路由 39↔39 完全一致、无重复注册；菜单路径与各页路由逐条对齐，config/menu.tsx 零改动。跨文件一致性：15 页均 default export、六个 api 模块导出标识符无重名、页面调用与 api 方法定义逐一比对通过；SfStatusTag 未知状态沿用注册表优先 + label/semantic 三参兜底（本轮沿用前一轮决策：后端未冻结的前端先行枚举暂不补录 types/status.ts，列入 changelog 遗留清单）。后端任务/单据/outbound 域未交付，相关页面呈统一错误态（预期行为）；先行契约与遗留清单见 changelog 同日集成记录。验证：`npx tsc --noEmit -p tsconfig.app.json` EXIT=0、`npx eslint src/router/index.tsx` EXIT=0（全局构建留门禁阶段）。
 
+## 2026-10-02 并行交付：前端页面第三批（五组并行开发 + 集成收口）
+
+| 模块 | 内容 | 状态 |
+|---|---|---|
+| 质量中心 | 质检单/不合格品/质量追溯 三列表页（api/quality.ts 前端先行契约：检验方式三值、处理结果九值、去向六值，对齐 business-flow §4.1–§4.3 + QC- 前缀 §13.1） | ✅ 已接入路由 |
+| 调拨单 | /transfers 两维度 + 7 态状态机列表页（api/transfer.ts 对齐 §10.1 TR- 前缀；与库存转移 /inventory/transfers 注释明确语义区分） | ✅ 已接入路由 |
+| 异常中心 | /exceptions 九类异常 + 生命周期 7 态列表页（api/exception.ts 对齐 §11.2） | ✅ 已接入路由 |
+| 库存分析 + 库存详情 | /inventory/analytics（§10.1 口径 + @ant-design/plots）+ /inventory/stock/:skuCode 六页签详情（§10.3 头部五指标 + §10.4 层级下钻）；StockListPage 行点击进入、筛选/分页 sessionStorage 持久化（§26.3）；api/inventory.ts 纯追加三端点 + 四 Query 增 skuCode 筛选 | ✅ 已接入路由 |
+| 单据详情 F7 | 入库/出库/采购订单 三详情页（新组件 SfDetailHeader/SfTimeline；Timeline 状态三规则推演，§13.4 环节时间；api/inbound.ts、api/outbound.ts、api/purchase.ts 各纯追加 GET /{id}；三个列表页最小改动加「详情」列） | ✅ 已接入路由 |
+| 盘点中心 F9 | 盘点任务列表 + 详情（api/count.ts 四端点：列表/详情/明细/实盘登记 PUT；七态状态机 + 差异走库存调整单链路提示，无修改库存入口，§10.2/§10.5） | ✅ 已接入路由 |
+| 数据中心 F11 | Excel 导入六步向导（multipart 上传/校验逐行定位/预览/确认/初始化库存高危二次确认）+ 导出任务列表（5s 在途轮询、downloadFile 认证下载，excel.md §1–§4/§6）；api/data.ts 前端先行契约 | ✅ 已接入路由 |
+
+集成收口（router/index.tsx）：注册 14 条 lazy 路由（静态 9 条：/quality/inspections /quality/nonconforming /quality/trace /transfers /exceptions /inventory/analytics /counts /data/imports /data/exports；动态段 5 条：/inventory/stock/:skuCode /inbound/:id /outbound/:id /purchases/:id /counts/:id，均无菜单路径不入 IMPLEMENTED_PATHS，与静态段共存静态优先），IMPLEMENTED_PATHS 增补 9 条，程序化检查无重复注册；9 条静态路径与 config/menu.tsx（:47/:65/:78/:106-108/:111/:131-132）逐条一致，menu.tsx 零改动。跨文件一致性：14 页均 default export；28 个新页面 api 调用点与模块定义逐一比对通过；导出标识符全库查重仅 toStatusKey 重复（既有 F6 问题，无同文件双导入，保留）。**types/status.ts 本轮补注册 22 个状态键**（替代上一轮「前端先行枚举暂不补录」决策：调拨 3、异常生命周期 5、锁定 3、序列号 3、executed、counted、质检处置 6，label/semantic 与页面既有兜底逐键一致，渲染行为不变），并修复盘点页 PENDING_REVIEW 走 pending_review 被注册表「待审核」覆盖的显示 bug（改 pending_recheck）。后端质量/调拨/异常/盘点/数据/库存分析域未交付，相关页面呈统一错误态（预期行为）；先行契约与遗留清单见 changelog 同日集成记录。验证：`npx tsc --noEmit -p tsconfig.app.json` EXIT=0、`npx eslint`（本轮修改的 4 文件）EXIT=0（全局构建留门禁阶段）。
+
 ## 下一步（按 frontend.md §29 顺序）
 
-1. **F6 库存中心全量页面（余量）**：✅ 批次库存、序列号、库存转移、库存追溯已交付（2026-10-02 第二批）；剩库存分析（本轮预算裁剪，待 M2+）、库存盘点（按约束由盘点中心 /counts 承载，不在库存中心做）
-2. **F7 入库/出库流程（余量）**：入库单/出库单详情（Timeline）、收货/质检/上架状态接入；采购单详情同理（列表骨架已交付）
+1. **F6 库存中心全量页面**：✅ 批次库存、序列号、库存转移、库存追溯（第二批）+ ✅ 库存分析、SKU 库存详情（2026-10-02 第三批，三个新端点为前端先行契约待后端 M1/M2 冻结回对）；库存盘点按既有裁决由盘点中心 /counts 承载
+2. **F7 单据详情**：✅ 入库单/出库单/采购订单三详情页已交付（2026-10-02 第三批，SfDetailHeader/SfTimeline 新组件；详情端点为前端先行契约）；行级状态列、打印/导出真实动作待后端单据域契约冻结后补
 3. **F8 任务中心**：✅ 我的工作台、我的任务已交付（2026-10-02 第二批，前端先行契约待后端任务域对齐）；「我的待办」「我的审批」入口待审批/待办菜单（如 /approvals）落地后补 path
-4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → 基础资料（T3）→ 仓库（T4）→ 库存核心（T5）；T6 补 router 跨域 Checker 注入与 swag 汇总（实现时需核对前端先行契约，清单见 changelog 2026-10-02 集成记录）
-5. F9 盘点、F11 Excel、F12 打印、F13 设备、F14 Pad、F15–F16 Scan（库位地图已交付）
+4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → 基础资料（T3）→ 仓库（T4）→ 库存核心（T5）；T6 补 router 跨域 Checker 注入与 swag 汇总（实现时需核对前端先行契约，两批清单均见 changelog 2026-10-02 集成记录；注意 /api/inventory 静态段须先于 {skuCode} 参数段注册）
+5. ✅ F9 盘点、F11 Excel 导入导出（2026-10-02 第三批交付；/data/printing 打印中心、/data/files 文件中心仍为占位）；剩 F12 打印、F13 设备、F14 Pad、F15–F16 Scan（库位地图已交付）
 
 ## 关键上下文
 

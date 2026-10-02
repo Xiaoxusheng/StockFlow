@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router'
 import {
   outboundApi,
   type OutboundItem,
@@ -105,11 +106,28 @@ const COLUMNS: ColumnsType<OutboundItem> = [
 /** 出库管理（frontend.md F7 入库/出库流程；GET /api/outbounds，子路径未冻结） */
 export default function OutboundPage() {
   const [params, setParams] = useState<OutboundQuery>({})
+  const navigate = useNavigate()
   const list = usePagedList<OutboundItem, OutboundQuery>({
     queryKey: ['outbound', 'orders'],
     fetch: (q) => outboundApi.list(q),
     params,
   })
+
+  // 既有列保持不变，仅追加「详情」行入口（/outbound/:id，无菜单路由）
+  const columns: ColumnsType<OutboundItem> = [
+    ...COLUMNS,
+    {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 80,
+      render: (_: unknown, record: OutboundItem) => (
+        <Button type="link" size="small" onClick={() => navigate(`/outbound/${record.id}`)}>
+          详情
+        </Button>
+      ),
+    },
+  ]
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as OutboundQuery)
@@ -143,7 +161,7 @@ export default function OutboundPage() {
         <SfTable<OutboundItem>
           storageKey="outbound-list"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -153,7 +171,7 @@ export default function OutboundPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有出库单"
-          scrollX={1250}
+          scrollX={1330}
         />
       </Card>
     </div>

@@ -190,10 +190,83 @@ export interface ShipmentItem {
   createdAt: string
 }
 
+// ---------- 出库单详情（GET /api/outbounds/{id}，前端先行契约：后端 outbound 单据域未交付，冻结后回对字段） ----------
+
+/** 出库单商品明细行 */
+export interface OutboundDetailItem {
+  id: number | string
+  skuCode: string
+  skuName?: string
+  /** 计量单位 */
+  unitName?: string
+  /** 需求数量 */
+  totalQty: number
+  /** 已拣数量 */
+  pickedQty?: number
+  /** 来源库位 */
+  fromBinCode?: string
+  /** 批次 */
+  batchNo?: string
+  status?: string
+  remark?: string
+}
+
+/** 出库单详情：含明细与流程节点时间（business-flow.md §7.2/§8、§13.4） */
+export interface OutboundDetail {
+  id: number | string
+  outboundNo: string
+  outboundType: string
+  /** 来源单号（销售订单号等） */
+  sourceNo?: string
+  customerName?: string
+  warehouseCode?: string
+  warehouseName: string
+  /** 需求数量合计 */
+  totalQty: number
+  /** 已拣数量合计 */
+  pickedQty?: number
+  status: string
+  /** 创建人 */
+  operatorName?: string
+  /** 创建时间 */
+  createdAt: string
+  /** 库存分配时间 */
+  allocatedAt?: string
+  /** 分配人 */
+  allocatedBy?: string
+  /** 拣货完成时间 */
+  pickedAt?: string
+  /** 拣货人 */
+  pickedBy?: string
+  /** 复核完成时间 */
+  checkedAt?: string
+  /** 复核人 */
+  checkedBy?: string
+  /** 打包完成时间 */
+  packedAt?: string
+  /** 打包人 */
+  packedBy?: string
+  /** 发货时间（发货完成触发库存正式扣减，business-flow.md §7.2） */
+  shippedAt?: string
+  /** 发货人 */
+  shippedBy?: string
+  /** 物流公司（business-flow.md §8.5 发货信息） */
+  carrierName?: string
+  /** 物流单号 */
+  trackingNo?: string
+  /** 备注 */
+  remark?: string
+  /** 商品明细 */
+  items: OutboundDetailItem[]
+}
+
 export const outboundApi = {
   /** 出库单列表（预置端点，后端未就绪时页面呈现统一错误态） */
   list: (query: OutboundQuery) =>
     http.get<PageResult<OutboundItem>>('/api/outbounds', { params: query }),
+  /** 出库单详情（前端先行契约，后端未交付时页面呈现统一错误态） */
+  get: (id: OutboundItem['id']) =>
+    http.get<OutboundDetail>(`/api/outbounds/${id}`),
   /** 拣货任务列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
   pickingTasks: (query: PickingTaskQuery) =>
     http.get<PageResult<PickingTaskItem>>('/api/outbound/picking-tasks', { params: query }),

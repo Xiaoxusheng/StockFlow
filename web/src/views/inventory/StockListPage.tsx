@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Flex, Skeleton, Statistic, Typography } from 'antd'
 import { ExportOutlined, PlusOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { inventoryApi, type StockItem, type StockQuery } from '@/api/inventory'
@@ -19,6 +20,28 @@ const STATUS_OPTIONS = [
   { label: '锁定', value: 'locked' },
   { label: '冻结', value: 'frozen' },
 ]
+
+/** §26.3 页面状态保留：筛选 + 分页持久化 key（详情返回后恢复） */
+const LIST_STATE_KEY = 'sf.page.inventory-stock'
+const DEFAULT_PAGE_SIZE = 20
+
+interface StockListState {
+  params: StockQuery
+  page: number
+  pageSize: number
+}
+
+function readListState(): StockListState | null {
+  try {
+    const raw = sessionStorage.getItem(LIST_STATE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as StockListState
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.page !== 'number') return null
+    return parsed
+  } catch {
+    return null
+  }
+}
 
 const COLUMNS: ColumnsType<StockItem> = [
   { title: 'SKU 编码', dataIndex: 'skuCode', width: 130, fixed: 'left' },
@@ -76,9 +99,12 @@ const COLUMNS: ColumnsType<StockItem> = [
   },
 ]
 
-/** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格 */
+/** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格；点击行进入 SKU 库存详情（§10.2/§10.3） */
 export default function StockListPage() {
-  const [params, setParams] = useState<StockQuery>({})
+  const navigate = useNavigate()
+  // §26.3：进入详情再返回时恢复离开前的筛选与分页
+  const savedState = useRef<StockListState | null>(readListState())
+  const [params, setParams] = useState<StockQuery>(() => savedState.current?.params ?? {})
   const list = usePagedList<StockItem, StockQuery>({
     queryKey: ['inventory', 'stock'],
     fetch: (q) => inventoryApi.stock(q),
@@ -88,6 +114,34 @@ export default function StockListPage() {
     queryKey: ['inventory', 'stock', 'summary'],
     queryFn: inventoryApi.stockSummary,
   })
+
+  // §26.3：恢复离开前的分页（筛选已由 params 初始值恢复；只跑一次）
+  const restoredRef = useRef(false)
+  const onPageChange = list.onPageChange
+  useEffect(() => {
+    if (restoredRef.current) return
+    restoredRef.current = true
+    const state = savedState.current
+    if (state && (state.page !== 1 || state.pageSize !== DEFAULT_PAGE_SIZE)) {
+      onPageChange(state.page, state.pageSize)
+    }
+  }, [onPageChange])
+
+  // §26.3：筛选 / 分页变化即持久化，供详情返回后恢复
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        LIST_STATE_KEY,
+        JSON.stringify({
+          params,
+          page: list.pagination.current,
+          pageSize: list.pagination.pageSize,
+        } satisfies StockListState),
+      )
+    } catch {
+      // 存储不可用时降级为不保留
+    }
+  }, [params, list.pagination])
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as StockQuery)
@@ -170,6 +224,10 @@ export default function StockListPage() {
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存"
           scrollX={1460}
+          onRow={(record: StockItem) => ({
+            onClick: () => navigate(`/inventory/stock/${encodeURIComponent(record.skuCode)}`),
+            style: { cursor: 'pointer' },
+          })}
         />
       </Card>
     </div>
