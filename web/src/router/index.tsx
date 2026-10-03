@@ -100,6 +100,21 @@ const ExportTaskPage = lazy(() => import('@/views/data/ExportTaskPage'))
 // 报表中心（前端先行契约：后端报表域阶段 17–18 交付，目录呈统一错误态；页面为已交付真实页面聚合入口）
 const ReportsPage = lazy(() => import('@/views/reports/ReportsPage'))
 
+// 打印中心（F12 前端先行契约；react-to-print 独立渲染层 + 独立预览页）
+const PrintingCenterPage = lazy(() => import('@/views/printing/PrintingCenterPage'))
+const PrintPreviewPage = lazy(() => import('@/views/printing/PrintPreviewPage'))
+// 文件中心（F11 余量：附件上传/预览/下载/删除）
+const FileCenterPage = lazy(() => import('@/views/data/FileCenterPage'))
+// 设备中心（四类型列表复用同一组件，deviceType 由 pathname 解析，见 api/device.ts DEVICE_TYPE_BY_PATH）
+const DeviceListPage = lazy(() => import('@/views/device/DeviceListPage'))
+const DeviceCreatePage = lazy(() => import('@/views/device/DeviceCreatePage'))
+const DeviceDetailPage = lazy(() => import('@/views/device/DeviceDetailPage'))
+// 系统管理余量（日志/定时任务/系统配置/系统监控）
+const LogPage = lazy(() => import('@/views/system/LogPage'))
+const JobPage = lazy(() => import('@/views/system/JobPage'))
+const SettingsPage = lazy(() => import('@/views/system/SettingsPage'))
+const MonitorPage = lazy(() => import('@/views/system/MonitorPage'))
+
 /** 已有真实页面的路由；其余菜单路径统一落到 ModulePlaceholder */
 const IMPLEMENTED_PATHS = new Set([
   '/dashboard',
@@ -118,9 +133,10 @@ const IMPLEMENTED_PATHS = new Set([
   '/inventory/trace',
   // 库存分析（F10）
   '/inventory/analytics',
-  // 库存详情 /inbound/:id、/outbound/:id、/purchases/:id、/counts/:id、/sales/:id、/inventory/stock/:skuCode
+  // 库存详情 /inbound/:id、/outbound/:id、/purchases/:id、/counts/:id、/sales/:id、/devices/:id、/inventory/stock/:skuCode
   // 为动态段路由，无菜单路径，不参与占位匹配，不加入本 Set
-  // /sales/new、/counts/new 为组5 新建页的无菜单静态路径，同样不参与占位匹配、不加入本 Set
+  // /sales/new、/counts/new、/devices/new、/data/printing/preview 为新建页/预览页的无菜单静态路径，
+  // 同样不参与占位匹配、不加入本 Set
   // 基础资料
   '/products',
   '/skus',
@@ -170,6 +186,20 @@ const IMPLEMENTED_PATHS = new Set([
   // 数据中心（F11：Excel 导入/导出）
   '/data/imports',
   '/data/exports',
+  // 打印中心（F12）
+  '/data/printing',
+  // 文件中心（F11 余量）
+  '/data/files',
+  // 设备中心（F13：四类型列表）
+  '/devices/scanners',
+  '/devices/pda',
+  '/devices/pads',
+  '/devices/printers',
+  // 系统管理余量（日志/定时任务/系统配置/系统监控）
+  '/system/logs',
+  '/system/jobs',
+  '/system/settings',
+  '/system/monitor',
 ])
 
 function menuPaths(): string[] {
@@ -447,7 +477,7 @@ export const router = createBrowserRouter([
         path: 'reports',
         element: <LazyPage><ReportsPage /></LazyPage>,
       },
-      // 数据中心（F11：Excel 导入/导出；/data/printing、/data/files 保持占位）
+      // 数据中心（F11：Excel 导入/导出 + 打印中心 + 文件中心）
       {
         path: 'data/imports',
         element: <LazyPage><ImportWizardPage /></LazyPage>,
@@ -455,6 +485,48 @@ export const router = createBrowserRouter([
       {
         path: 'data/exports',
         element: <LazyPage><ExportTaskPage /></LazyPage>,
+      },
+      // 打印中心（F12：§13 打印前端，react-to-print 独立渲染层，禁止 window.print）
+      {
+        path: 'data/printing',
+        element: <LazyPage><PrintingCenterPage /></LazyPage>,
+      },
+      // 打印预览（无菜单静态路径，独立 Preview 页：缩放/翻页/打印/下载 PDF）
+      {
+        path: 'data/printing/preview',
+        element: <LazyPage><PrintPreviewPage /></LazyPage>,
+      },
+      // 文件中心（F11 余量：附件上传/预览/下载/删除）
+      {
+        path: 'data/files',
+        element: <LazyPage><FileCenterPage /></LazyPage>,
+      },
+      // 设备中心（F13：四类型列表复用 DeviceListPage，deviceType 按 pathname 解析）
+      {
+        path: 'devices/scanners',
+        element: <LazyPage><DeviceListPage /></LazyPage>,
+      },
+      {
+        path: 'devices/pda',
+        element: <LazyPage><DeviceListPage /></LazyPage>,
+      },
+      {
+        path: 'devices/pads',
+        element: <LazyPage><DeviceListPage /></LazyPage>,
+      },
+      {
+        path: 'devices/printers',
+        element: <LazyPage><DeviceListPage /></LazyPage>,
+      },
+      // 设备新建（无菜单路径，静态段先于动态段）
+      {
+        path: 'devices/new',
+        element: <LazyPage><DeviceCreatePage /></LazyPage>,
+      },
+      // 设备详情（动态段无菜单，殿后注册）
+      {
+        path: 'devices/:id',
+        element: <LazyPage><DeviceDetailPage /></LazyPage>,
       },
       // 系统管理
       {
@@ -472,6 +544,23 @@ export const router = createBrowserRouter([
       {
         path: 'system/departments',
         element: <LazyPage><DepartmentPage /></LazyPage>,
+      },
+      // 系统管理余量（日志/定时任务/系统配置/系统监控；/system/notifications 仍占位）
+      {
+        path: 'system/logs',
+        element: <LazyPage><LogPage /></LazyPage>,
+      },
+      {
+        path: 'system/jobs',
+        element: <LazyPage><JobPage /></LazyPage>,
+      },
+      {
+        path: 'system/settings',
+        element: <LazyPage><SettingsPage /></LazyPage>,
+      },
+      {
+        path: 'system/monitor',
+        element: <LazyPage><MonitorPage /></LazyPage>,
       },
       ...placeholderRoutes(),
     ],

@@ -97,13 +97,26 @@
 | 平台层修复（internal/config·middleware·router·health·database/seed.go·cmd·config.example.yaml） | S2 server.mode 默认 release（本地开发显式设 debug）、S3 初始管理员密码 ≥12 位三类字符、S4 /api/auth IP 限流（SF_AUTH_RATE_LIMIT_IP_PER_MINUTE 默认 30）、S5 SetTrustedProxies（SF_SERVER_TRUSTED_PROXIES，默认不信任任何代理）、S6 请求体上限（SF_SERVER_MAX_BODY_BYTES 默认 1MB）+ MaxHeaderBytes、S7 入口截断 request_id/UA/IP 对齐审计列宽、S9 viewer 映射剔除 auth:user:list/read、S12 release 下 sslmode=disable 启动告警、S13 /ready 就绪结果 1s 缓存 | 🔄 并行实施中（同上） |
 | 部署文档（S11） | docs/deployment.md 升 v1.1：§1.1 环境变量清单（作用/默认值/必填/生成方式）、§2.1 grants 执行步骤与纪律（新审计表人工重跑、生产禁 auto_migrate=true、app_grants.sql 尾注悬空指向勘误）、§7.1 发布检查单、§9 反向代理与网络安全基线（XFF 覆写/可信代理/8080 仅内网/HTTPS 反代终结/探针仅 LB 内网）；§3/§6 与实现对齐（/ready 检 DB+Redis、初始管理员强口令与首启立即改密必做）；决策记录见 changelog 同日条目，plan §7.3 已按防枚举决策修订 | ✅ 已交付（环境变量名/默认值与代码逐项核对） |
 
+## 2026-10-03 并行交付：打印/文件/设备/系统扩展轮（组A–E 页面 + 组F 集成收口）
+
+| 模块 | 内容 | 状态 |
+|---|---|---|
+| 打印中心（F12） | views/printing/PrintingCenterPage.tsx 聚合页 + PrintPreviewPage.tsx 独立预览（真实数据渲染/缩放/翻页/react-to-print 打印/下载 PDF 后端未交付呈统一错误态）+ components/print/ 五组件（SfPrintButton 统一封装，禁用 window.print）+ api/printing.ts（/api/prints 前端先行契约） | ✅ 已交付并注册路由 |
+| 文件中心（F11 余量） | views/data/FileCenterPage.tsx 附件中心（上传/预览/下载/删除）+ components/common/SfAttachment.tsx + api/file.ts 前端先行契约 | ✅ 已交付并注册路由 |
+| 设备中心（F13） | views/device/DeviceListPage.tsx 四类型列表复用组件（deviceType 按 pathname 解析，api/device.ts DEVICE_TYPE_BY_PATH）+ DeviceCreatePage.tsx（新建 + 激活二维码）+ DeviceDetailPage.tsx + components/device/SfDeviceStatus.tsx + api/device.ts（/api/devices 前端先行契约） | ✅ 已交付并注册路由 |
+| 系统管理余量 | views/system/ LogPage/JobPage/SettingsPage/MonitorPage 四页 + api/system.ts（/api/logs + /api/system 前端先行契约）；/system/notifications 无交付页面仍占位 | ✅ 已交付并注册路由 |
+| Dashboard 增强 | DashboardPage 拆分 DashboardCharts/DashboardLists/DashboardMetricStrip/dashboardView + api/dashboard.ts 对齐 + 新增 SfInventorySummary/SfInventoryTable 组件 + usePagedList/NotificationDrawer/CountCreatePage/库存三页/ReportsPage 波及修改 | ✅ 已交付 |
+| 集成收口（组F） | web/src/router/index.tsx（唯一归属文件）注册 13 条路径：10 条菜单静态入 IMPLEMENTED_PATHS（49→59）消除占位、/data/printing/preview 与 /devices/new 无菜单静态、/devices/:id 殿后（静态先行）；config/menu.tsx 零改动；程序化门禁全绿：路由比对 10/10 断言（无重复/一一对应/占位零重叠/new 先于 :id/lazy import 目标全存在）、死按钮 0（101 文件）、window.print() 调用 0、跨文件重复导出 0、api 符号比对 115 语句 470 符号 0 不匹配、直连 axios 0 | ✅ 全绿（tsc / eslint EXIT=0；浏览器运行时实测未执行，待联调） |
+
+集成收口复核（组F 后二次独立验证）：路由比对脚本重跑 ALL PASS（68 lazy 目标文件存在、IMPLEMENTED_PATHS=59、children 静态 63 条无重复、13 条新路径逐条在位、/devices/new 先于 /devices/:id）；`npx tsc --noEmit -p tsconfig.app.json` EXIT=0（组A 报告的 DeviceDetailPage/LogPage 3 个 tsc 错误已由并行组修复归零）；`npx eslint` 本批 27 文件 EXIT=0；死按钮复查（145 Button 块）真实死按钮=0（2 处初报均误报：PrintingCenterPage:559 为非 SUCCESS 态 disabled 占位、SfConfirm.tsx 内部透传 onConfirm）；api 调用比对（115 语句/470 符号/119 调用点）=0 不匹配；menu.tsx 与路由逐条一致零改动。修正记录：跨文件同名导出复查=1（toStatusKey，api/masterdata.ts:20 与 api/warehouse.ts:21，第三批已记录既有项、无双导入、保留），组F 报告「同名导出=0」系扫描口径未含既有 api 域。前端先行契约与遗留清单见 changelog 同日集成收口条目。
+
 ## 下一步（按 frontend.md §29 顺序）
 
 1. **F6 库存中心全量页面**：✅ 批次库存、序列号、库存转移、库存追溯（第二批）+ ✅ 库存分析、SKU 库存详情（2026-10-02 第三批，三个新端点为前端先行契约待后端 M1/M2 冻结回对）；库存盘点按既有裁决由盘点中心 /counts 承载
 2. **F7 单据详情**：✅ 入库单/出库单/采购订单三详情页已交付（2026-10-02 第三批，SfDetailHeader/SfTimeline 新组件；详情端点为前端先行契约）；行级状态列、打印/导出真实动作待后端单据域契约冻结后补
 3. **F8 任务中心**：✅ 我的工作台、我的任务已交付（2026-10-02 第二批，前端先行契约待后端任务域对齐）；「我的待办」「我的审批」入口待审批/待办菜单（如 /approvals）落地后补 path
 4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → ✅ **基础资料（T3）/ 仓库（T4）/ 库存核心（T5），2026-10-02 交付（三域 62 条路由 + 九个库存变更原语，详见 changelog 当日三条交付记录）**；T6 补 router 跨域 Checker 注入与 swag 汇总（实现时需核对前端先行契约，两批清单均见 changelog 2026-10-02 集成记录；注意 /api/inventory 静态段须先于 {skuCode} 参数段注册）
-5. ✅ F9 盘点、F11 Excel 导入导出（2026-10-02 第三批交付；/data/printing 打印中心、/data/files 文件中心仍为占位）；剩 F12 打印、F13 设备、F14 Pad、F15–F16 Scan（库位地图已交付）
+5. ✅ F9 盘点、F11 Excel 导入导出与文件中心（2026-10-02 第三批 + 2026-10-03 本轮文件中心交付）、✅ F12 打印、F13 设备（PC 端，2026-10-03 本轮交付并注册路由；打印/文件/设备/系统运行域端点为前端先行契约待后端交付回对）；剩 F14 Pad、F15–F16 Scan（库位地图已交付）
 
 ## 关键上下文
 

@@ -10,7 +10,7 @@ import {
   type CountScopeType,
   type CountType,
 } from '@/api/count'
-import { OPTIONS_PAGE_SIZE } from '@/api/masterdata'
+import { masterdataApi, OPTIONS_PAGE_SIZE } from '@/api/masterdata'
 import { binApi, shelfApi, warehouseApi, zoneApi } from '@/api/warehouse'
 import { userApi } from '@/api/user'
 import { resolveErrorMessage } from '@/api/client'
@@ -88,6 +88,12 @@ export default function CountCreatePage() {
     queryFn: () => binApi.list({ ...LIST_OPTIONS, warehouseId: selectedWarehouse?.id as string }),
     enabled: watchedScopeType === 'BIN' && Boolean(selectedWarehouse),
   })
+  // SKU 下拉按需加载（scopeType=SKU 时），数据源 GET /api/skus 一次取全（模式对齐 SalesOrderCreatePage）
+  const skus = useQuery({
+    queryKey: ['masterdata', 'skus', 'options'],
+    queryFn: () => masterdataApi.skus.list({ ...LIST_OPTIONS }),
+    enabled: watchedScopeType === 'SKU',
+  })
 
   const warehouseOptions = (warehouses.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
@@ -103,6 +109,10 @@ export default function CountCreatePage() {
   }))
   const shelfOptions = (shelves.data?.items ?? []).map((item) => ({ label: item.code, value: item.code }))
   const binOptions = (bins.data?.items ?? []).map((item) => ({ label: item.code, value: item.code }))
+  const skuOptions = (skus.data?.items ?? []).map((item) => ({
+    label: item.product_name ? `${item.code} ${item.product_name}` : item.code,
+    value: item.code,
+  }))
 
   const submitMutation = useMutation({
     mutationFn: (payload: CountCreatePayload) => countApi.create(payload),
@@ -218,7 +228,7 @@ export default function CountCreatePage() {
               rules={[{ required: true, message: '请填写范围明细' }]}
               extra={
                 watchedScopeType === 'SKU'
-                  ? '请输入需要盘点的 SKU 编码'
+                  ? '下拉选择需要盘点的 SKU，提交值为 SKU 编码'
                   : '下拉按所选仓库过滤（M1 仓库空间契约）'
               }
             >
@@ -247,7 +257,13 @@ export default function CountCreatePage() {
                   loading={bins.isLoading}
                 />
               ) : (
-                <Input placeholder="请输入 SKU 编码" maxLength={64} />
+                <Select
+                  showSearch
+                  optionFilterProp="label"
+                  options={skuOptions}
+                  placeholder="请选择 SKU"
+                  loading={skus.isLoading}
+                />
               )}
             </Form.Item>
           )}

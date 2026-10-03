@@ -71,6 +71,8 @@ export default function AlertsPage() {
     queryKey: ['inventory', 'alerts'],
     fetch: (q) => inventoryApi.alerts(q),
     params,
+    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
+    persistKey: 'inventory-alerts',
   })
 
   const handleSearch = (values: Record<string, unknown>) => {

@@ -1,5 +1,5 @@
 import { Card, Col, Flex, List, Row, Tag, Typography } from 'antd'
-import { BarChartOutlined, DatabaseOutlined, FileSyncOutlined } from '@ant-design/icons'
+import { BarChartOutlined, DatabaseOutlined, FileSyncOutlined, PrinterOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -42,6 +42,13 @@ const REAL_ENTRIES: ReportEntry[] = [
     icon: <FileSyncOutlined />,
     path: '/data/exports',
   },
+  {
+    key: 'printing',
+    title: '打印中心',
+    description: '打印模板 / 打印任务 / 打印历史 / 打印预览',
+    icon: <PrinterOutlined />,
+    path: '/data/printing',
+  },
 ]
 
 /** 报表中心（/reports，menu.tsx 既有菜单；GET /api/reports 前端先行契约，后端报表域阶段 17–18 交付） */
@@ -57,7 +64,7 @@ export default function ReportsPage() {
       <Card size="small" title="库存分析与数据工具" style={{ marginBottom: 16 }}>
         <Row gutter={[16, 16]}>
           {REAL_ENTRIES.map((entry) => (
-            <Col key={entry.key} xs={24} md={8}>
+            <Col key={entry.key} xs={24} md={12} lg={6}>
               <Card
                 size="small"
                 hoverable

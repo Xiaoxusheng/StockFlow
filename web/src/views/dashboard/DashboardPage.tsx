@@ -1,77 +1,162 @@
-import { lazy, Suspense, useState } from 'react'
-import { Card, Col, Flex, Progress, Row, Skeleton, Segmented, Statistic, Typography } from 'antd'
-import { useNavigate } from 'react-router'
+import { useState } from 'react'
+import { Card, Col, DatePicker, Flex, Row, Segmented, Skeleton, Tag, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import type { DashboardTaskItem, TrendPoint } from '@/api/dashboard'
-import { dashboardApi, type TrendRange } from '@/api/dashboard'
+import type { Dayjs } from 'dayjs'
+import { dashboardApi, type DashboardTodayMetrics, type TrendRange } from '@/api/dashboard'
+import { useAuthStore } from '@/stores/auth'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { formatDateTime, formatNumber, formatPercent } from '@/utils/format'
-
-const Line = lazy(() => import('@ant-design/plots').then((m) => ({ default: m.Line })))
-const Bar = lazy(() => import('@ant-design/plots').then((m) => ({ default: m.Bar })))
+import { resolveDashboardView } from './dashboardView'
+import { DashboardMetricStrip, type DashboardMetric } from './DashboardMetricStrip'
+import {
+  BinUtilizationList,
+  TrendChartSkeleton,
+  TrendCharts,
+  WarehouseBar,
+} from './DashboardCharts'
+import { AlertList, TaskList } from './DashboardLists'
 
 const { Text } = Typography
 
-const RANGE_OPTIONS = [
+const RANGE_OPTIONS: Array<{ label: string; value: TrendRange }> = [
   { label: '近7天', value: '7d' },
   { label: '近30天', value: '30d' },
   { label: '近90天', value: '90d' },
+  { label: '自定义', value: 'custom' },
 ]
+
+/** 管理层视图指标（requirements.md §2.1：仓库/SKU/总库存/金额 + 今日进出 + 订单 + 预警/临期/积压 + 审核与异常） */
+function buildManagementMetrics(data: DashboardTodayMetrics | undefined): DashboardMetric[] {
+  return [
+    { label: '仓库总数', value: data?.warehouseCount, link: '/warehouses' },
+    { label: 'SKU 总数', value: data?.skuCount, link: '/skus' },
+    { label: '总库存', value: data?.totalQty, link: '/inventory/stock' },
+    { label: '库存金额', value: data?.stockValue, link: '/inventory/analytics' },
+    { label: '今日入库', value: data?.todayInboundCount, link: '/inbound' },
+    { label: '今日出库', value: data?.todayOutboundCount, link: '/outbound' },
+    { label: '订单数量', value: data?.orderCount, link: '/sales' },
+    { label: '库存预警', value: data?.stockAlertCount, link: '/inventory/alerts', danger: true },
+    { label: '临期商品', value: data?.nearExpiryQty, link: '/inventory/batches', danger: true },
+    { label: '积压商品', value: data?.slowMovingQty, link: '/inventory/alerts', danger: true },
+    { label: '待审核单据', value: data?.pendingApprovalCount, link: '/tasks' },
+    { label: '待处理异常', value: data?.pendingExceptionCount, link: '/exceptions', danger: true },
+  ]
+}
+
+/** 仓库人员视图指标（requirements.md §2.1：收货→上架→拣货→复核→打包→发货→盘点→异常 作业链路） */
+function buildOperatorMetrics(data: DashboardTodayMetrics | undefined): DashboardMetric[] {
+  return [
+    { label: '待收货', value: data?.pendingReceiveCount, link: '/purchases/receipts' },
+    { label: '待上架', value: data?.pendingPutawayCount, link: '/inbound' },
+    { label: '待拣货', value: data?.pendingPickCount, link: '/picking' },
+    { label: '待复核', value: data?.pendingCheckCount, link: '/checking' },
+    { label: '待打包', value: data?.pendingPackCount, link: '/packing' },
+    { label: '待发货', value: data?.pendingShipmentCount, link: '/shipment' },
+    { label: '待盘点', value: data?.pendingCountCount, link: '/counts' },
+    { label: '待处理异常', value: data?.pendingExceptionCount, link: '/exceptions', danger: true },
+  ]
+}
 
 /**
  * Dashboard（frontend.md §5 四层结构，不做巨大 KPI 卡片）：
- * L1 今日业务指标 → L2 入库/出库/库存趋势 → L3 任务+预警 → L4 仓库与库存分析
+ * L1 今日业务指标（按 auth 权限 fail-closed 分管理层/仓库人员两套，requirements.md §2.1）
+ * → L2 入库/出库/库存趋势（7d/30d/90d/自定义 from→to）→ L3 任务+预警 → L4 仓库与库存分析。
+ * 数据全部来自 /api/reports/dashboard/*，禁止写死。
  */
 export default function DashboardPage() {
-  const [range, setRange] = useState<TrendRange>('7d')
+  const user = useAuthStore((s) => s.user)
+  // 视图判定 fail-closed：无管理层职能权限一律落仓库人员视图（dashboardView.ts）
+  const view = resolveDashboardView(user)
+  const scope = { view } as const
 
-  const today = useQuery({ queryKey: ['dashboard', 'today'], queryFn: dashboardApi.todayMetrics })
+  const [range, setRange] = useState<TrendRange>('7d')
+  const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
+
+  // 自定义档：RangePicker 选定后才发请求，from/to 真实传参（YYYY-MM-DD）
+  const trendFrom = range === 'custom' ? customRange?.[0]?.format('YYYY-MM-DD') : undefined
+  const trendTo = range === 'custom' ? customRange?.[1]?.format('YYYY-MM-DD') : undefined
+  const trendReady = range !== 'custom' || Boolean(trendFrom && trendTo)
+
+  const today = useQuery({
+    queryKey: ['dashboard', 'today', view],
+    queryFn: () => dashboardApi.todayMetrics(scope),
+  })
   const trend = useQuery({
-    queryKey: ['dashboard', 'trend', range],
-    queryFn: () => dashboardApi.trend(range),
+    queryKey: ['dashboard', 'trend', view, range, trendFrom, trendTo],
+    queryFn: () => dashboardApi.trend(range, { ...scope, from: trendFrom, to: trendTo }),
+    enabled: trendReady,
   })
-  const tasks = useQuery({ queryKey: ['dashboard', 'tasks'], queryFn: dashboardApi.tasks })
-  const alerts = useQuery({ queryKey: ['dashboard', 'alerts'], queryFn: dashboardApi.alerts })
+  const tasks = useQuery({
+    queryKey: ['dashboard', 'tasks', view],
+    queryFn: () => dashboardApi.tasks(scope),
+  })
+  const alerts = useQuery({
+    queryKey: ['dashboard', 'alerts', view],
+    queryFn: () => dashboardApi.alerts(scope),
+  })
   const warehouseStock = useQuery({
-    queryKey: ['dashboard', 'warehouse-stock'],
-    queryFn: dashboardApi.warehouseStock,
+    queryKey: ['dashboard', 'warehouse-stock', view],
+    queryFn: () => dashboardApi.warehouseStock(scope),
   })
+
+  const metrics =
+    view === 'management' ? buildManagementMetrics(today.data) : buildOperatorMetrics(today.data)
 
   return (
     <div className="sf-page">
-      <SfPageHeader title="Dashboard" subtitle="今日业务与库存总览" />
+      <SfPageHeader
+        title="Dashboard"
+        subtitle="今日业务与库存总览"
+        extra={
+          <Tag color={view === 'management' ? 'geekblue' : 'green'} style={{ marginInlineEnd: 0 }}>
+            {view === 'management' ? '管理层视图' : '仓库人员视图'}
+          </Tag>
+        }
+      />
 
       <Flex vertical gap={16}>
-        {/* L1 今日业务指标 */}
-        <MetricStrip
+        {/* L1 今日业务指标（两套指标按视图分列） */}
+        <DashboardMetricStrip
+          metrics={metrics}
           loading={today.isPending}
           error={today.error}
           onRetry={today.refetch}
-          metrics={[
-            { label: '今日入库单', value: today.data?.todayInboundCount, link: '/inbound' },
-            { label: '今日出库单', value: today.data?.todayOutboundCount, link: '/outbound' },
-            { label: '待处理任务', value: today.data?.pendingTaskCount, link: '/tasks' },
-            { label: '库存预警', value: today.data?.stockAlertCount, link: '/inventory/alerts', danger: true },
-          ]}
         />
 
-        {/* L2 趋势 */}
+        {/* L2 趋势（预设档 + 自定义时间段） */}
         <Card
           size="small"
           title="业务趋势"
           extra={
-            <Segmented size="small" options={RANGE_OPTIONS} value={range} onChange={(v) => setRange(v as TrendRange)} />
+            <Flex gap={8} wrap="wrap" align="center">
+              <Segmented
+                size="small"
+                options={RANGE_OPTIONS}
+                value={range}
+                onChange={(v) => setRange(v as TrendRange)}
+              />
+              {range === 'custom' && (
+                <DatePicker.RangePicker
+                  size="small"
+                  value={customRange}
+                  onChange={(values) =>
+                    setCustomRange(values && values[0] && values[1] ? [values[0], values[1]] : null)
+                  }
+                  allowClear={false}
+                  placeholder={['开始日期', '结束日期']}
+                />
+              )}
+            </Flex>
           }
         >
-          {trend.isPending ? (
-            <Skeleton active paragraph={{ rows: 5 }} />
+          {!trendReady ? (
+            <Text type="secondary">请选择自定义时间段后查看趋势</Text>
+          ) : trend.isPending ? (
+            <TrendChartSkeleton />
           ) : trend.error ? (
             <SfError error={trend.error} onRetry={trend.refetch} />
           ) : (
-            <Suspense fallback={<Skeleton active paragraph={{ rows: 5 }} />}>
-              <TrendCharts points={trend.data ?? []} />
-            </Suspense>
+            <TrendCharts points={trend.data ?? []} />
           )}
         </Card>
 
@@ -112,9 +197,7 @@ export default function DashboardPage() {
               ) : warehouseStock.error ? (
                 <SfError error={warehouseStock.error} onRetry={warehouseStock.refetch} />
               ) : (
-                <Suspense fallback={<Skeleton active paragraph={{ rows: 4 }} />}>
-                  <WarehouseBar items={warehouseStock.data ?? []} />
-                </Suspense>
+                <WarehouseBar items={warehouseStock.data ?? []} />
               )}
             </Card>
           </Col>
@@ -124,175 +207,13 @@ export default function DashboardPage() {
                 <Skeleton active paragraph={{ rows: 4 }} />
               ) : warehouseStock.error ? (
                 <SfError error={warehouseStock.error} onRetry={warehouseStock.refetch} />
-              ) : (warehouseStock.data?.length ?? 0) === 0 ? (
-                <Text type="secondary">暂无仓库数据</Text>
               ) : (
-                <Flex vertical gap={12}>
-                  {(warehouseStock.data ?? []).map((w) => (
-                    <Flex key={w.warehouseCode} align="center" gap={12}>
-                      <Text style={{ width: 80 }} ellipsis>
-                        {w.warehouseName}
-                      </Text>
-                      <Progress
-                        percent={w.binUtilization}
-                        size="small"
-                        style={{ flex: 1, marginBottom: 0 }}
-                        format={(p) => formatPercent(p ?? 0, 0)}
-                      />
-                    </Flex>
-                  ))}
-                </Flex>
+                <BinUtilizationList items={warehouseStock.data ?? []} />
               )}
             </Card>
           </Col>
         </Row>
       </Flex>
     </div>
-  )
-}
-
-function MetricStrip({
-  metrics,
-  loading,
-  error,
-  onRetry,
-}: {
-  metrics: Array<{ label: string; value?: number; link: string; danger?: boolean }>
-  loading: boolean
-  error: unknown
-  onRetry: () => void
-}) {
-  const navigate = useNavigate()
-  return (
-    <Card size="small" styles={{ body: { padding: '12px 8px' } }}>
-      {error ? (
-        <SfError error={error} onRetry={onRetry} />
-      ) : (
-        <Row gutter={8}>
-          {metrics.map((metric, index) => (
-            <Col key={metric.label} xs={12} md={6}>
-              <Flex
-                vertical
-                align="center"
-                gap={2}
-                style={{ cursor: 'pointer', borderRight: index < metrics.length - 1 ? '1px solid var(--sf-border-subtle)' : undefined }}
-                onClick={() => navigate(metric.link)}
-              >
-                <Statistic
-                  title={<Text type="secondary" style={{ fontSize: 13 }}>{metric.label}</Text>}
-                  value={loading ? '-' : formatNumber(metric.value ?? 0)}
-                  valueStyle={metric.danger ? { color: 'var(--sf-danger)' } : undefined}
-                />
-              </Flex>
-            </Col>
-          ))}
-        </Row>
-      )}
-    </Card>
-  )
-}
-
-function TrendCharts({ points }: { points: TrendPoint[] }) {
-  const bizData = points.flatMap((p) => [
-    { date: p.date, type: '入库', qty: p.inbound },
-    { date: p.date, type: '出库', qty: p.outbound },
-  ])
-  const stockData = points.map((p) => ({ date: p.date, qty: p.stockQty }))
-
-  return (
-    <Row gutter={[16, 16]}>
-      <Col xs={24} lg={12}>
-        <Text type="secondary">入库 / 出库趋势</Text>
-        <Line
-          data={bizData}
-          xField="date"
-          yField="qty"
-          colorField="type"
-          shapeField="smooth"
-          height={220}
-          style={{ maxWidth: '100%' }}
-        />
-      </Col>
-      <Col xs={24} lg={12}>
-        <Text type="secondary">库存趋势</Text>
-        <Line
-          data={stockData}
-          xField="date"
-          yField="qty"
-          shapeField="smooth"
-          height={220}
-          style={{ maxWidth: '100%' }}
-        />
-      </Col>
-    </Row>
-  )
-}
-
-function TaskList({ items }: { items: DashboardTaskItem[] }) {
-  const navigate = useNavigate()
-  if (items.length === 0) {
-    return <Text type="secondary">当前没有待处理任务</Text>
-  }
-  return (
-    <Flex vertical>
-      {items.map((item) => (
-        <Flex
-          key={item.type}
-          align="center"
-          justify="space-between"
-          style={{ padding: '8px 4px', borderBottom: '1px solid var(--sf-border-subtle)', cursor: 'pointer' }}
-          onClick={() => navigate(item.link)}
-        >
-          <Text>{item.label}</Text>
-          <Text strong className="sf-num">
-            {formatNumber(item.count)}
-          </Text>
-        </Flex>
-      ))}
-    </Flex>
-  )
-}
-
-function AlertList({ items }: { items: Array<{ id: number | string; skuCode: string; productName: string; message: string; createdAt: string }> }) {
-  const navigate = useNavigate()
-  return (
-    <Flex vertical>
-      {items.slice(0, 8).map((item) => (
-        <Flex
-          key={item.id}
-          vertical
-          gap={2}
-          style={{ padding: '8px 4px', borderBottom: '1px solid var(--sf-border-subtle)', cursor: 'pointer' }}
-          onClick={() => navigate('/inventory/alerts')}
-        >
-          <Flex justify="space-between" gap={12}>
-            <Text strong style={{ fontSize: 13 }}>
-              {item.skuCode} · {item.productName}
-            </Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {formatDateTime(item.createdAt)}
-            </Text>
-          </Flex>
-          <Text type="secondary" style={{ fontSize: 12 }}>
-            {item.message}
-          </Text>
-        </Flex>
-      ))}
-    </Flex>
-  )
-}
-
-function WarehouseBar({ items }: { items: Array<{ warehouseCode: string; warehouseName: string; totalQty: number }> }) {
-  if (items.length === 0) {
-    return <Text type="secondary">暂无仓库数据</Text>
-  }
-  return (
-    <Bar
-      data={items.map((w) => ({ warehouse: w.warehouseName, 库存量: w.totalQty }))}
-      xField="warehouse"
-      yField="库存量"
-      height={240}
-      style={{ maxWidth: '100%' }}
-    />
   )
 }
