@@ -1,0 +1,53 @@
+# StockFlow 后端配置样例。
+# 用法：复制为 config.yaml 后按环境修改（config.yaml 已被 .gitignore 排除，禁止提交真实密钥）。
+# 所有键均可用环境变量覆盖：SF_ 前缀 + 键路径大写（. → _），
+#   如 server.port → SF_SERVER_PORT、database.password → SF_DATABASE_PASSWORD；
+# 列表类配置用逗号分隔：SF_CORS_ALLOWED_ORIGINS=https://a.example.com,https://b.example.com
+# 生产环境密钥一律走环境变量/Secret 注入（deployment.md §1，禁止写死）。
+
+server:
+  mode: release          # debug | release | test（透传 gin.SetMode）；默认收紧为 release（S2）
+                         # 本地开发请设 SF_SERVER_MODE=debug（release 下 JWT 密钥缺失将拒绝启动）
+  port: 8080             # 默认 8080，与前端 Vite 代理对齐（backend-m1-plan §1）
+  read_timeout: 15s
+  write_timeout: 15s
+  shutdown_timeout: 10s
+  trusted_proxies: []    # 受信反向代理网段（IP/CIDR，逗号分隔走 SF_SERVER_TRUSTED_PROXIES）；
+                         # 空 = 不信任任何代理、客户端 IP 取直连 RemoteAddr（S5，防 XFF 伪造）；
+                         # 使用反代时必填，如同机 nginx：[ "127.0.0.1/32" ]，跨机再加 "10.0.0.0/8"
+  max_body_bytes: 1048576  # 全局请求体上限 1MB，超限返回 413（S6）；SF_SERVER_MAX_BODY_BYTES 可覆盖
+
+log:
+  level: info            # debug | info | warn | error
+  format: json           # json | console
+
+database:
+  host: 127.0.0.1
+  port: 5432
+  user: postgres
+  password: ""           # 禁止提交真实密码：用 SF_DATABASE_PASSWORD 注入
+  name: stockflow
+  sslmode: disable       # 生产环境必须 verify-full（证书 + 主机名校验，deployment.md §1.1）；
+                         # release 模式下 disable 会产生启动告警（不阻断，同机 loopback 场景可接受）
+  auto_migrate: false    # true 时启动执行 golang-migrate（迁移文件归 DB 工程师，交付于 db/migrations）
+  # 连接池参数显式可配（architecture.md §11.4：禁止默认值上线）
+  max_open_conns: 50
+  max_idle_conns: 10
+  conn_max_lifetime: 1h
+  conn_max_idle_time: 10m
+
+redis:
+  enabled: true          # 可配置开关；false 时 /ready 的 redis 项计 DISABLED（且认证/限流不可用）
+  addr: 127.0.0.1:6379
+  password: ""           # 禁止提交真实密码：用 SF_REDIS_PASSWORD 注入
+  db: 0
+  pool_size: 50
+  min_idle_conns: 5
+
+auth:
+  rate_limit_ip_per_minute: 30  # /api/auth 公开组 IP 维度滑动窗口限流（S4，Redis 计数；
+                                # Redis 故障 fail-open 并记 error 日志）；用户名维度限流在 auth 域内实现
+
+cors:
+  allowed_origins:       # 白名单（architecture.md §6）；生产环境用 SF_CORS_ALLOWED_ORIGINS 覆盖
+    - http://localhost:5173
