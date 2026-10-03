@@ -18,6 +18,8 @@ build/
 .idea/
 .DS_Store
 Thumbs.db
+*.swp
+nul
 
 # Logs
 logs/
@@ -29,6 +31,8 @@ pnpm-debug.log*
 
 # Test / coverage
 coverage/
+coverage.txt
+coverage.html
 
 # Go
 *.exe
@@ -36,3 +40,8 @@ coverage/
 *.out
 bin/
 tmp/
+
+# Go 后端本地配置（可能含密钥：deployment.md §1 禁止写死密钥，只提交 config.example.yaml）
+config.yaml
+config.*.yaml
+!config.example.yaml
