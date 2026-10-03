@@ -1,0 +1,14 @@
+# Docker 构建上下文排除（镜像只装后端；前端由 web/Dockerfile 单独构建）
+.git
+.gitignore
+.zcode
+.zcode*
+.zcodeignore
+docs
+web
+*.md
+.env
+.env.*
+Makefile
+config.yaml
+config.example.yaml

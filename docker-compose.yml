@@ -1,0 +1,127 @@
+# StockFlow 单机 Docker Compose 部署（目标目录：服务器 /home/stockflow）
+# 用法见 docs/deployment.md §10。必填项集中在 .env（复制 .env.example）。
+# 拓扑：postgres + redis + migrate(一次性) + app；可选 --profile web 增加前端反代容器。
+name: stockflow
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-stockflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-stockflow}
+      TZ: Asia/Shanghai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks: [stockflow]
+    # 仅容器网络内访问。确需从宿主机连接（如本机 psql 调试）再放开：
+    # ports: ["127.0.0.1:5432:5432"]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:?请在 .env 中设置 REDIS_PASSWORD}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$${REDIS_PASSWORD}\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks: [stockflow]
+
+  # 一次性迁移任务（database.md §9：迁移显式执行，幂等可重跑）。
+  # 迁移文件挂载自仓库 db/migrations；应用默认 SF_DATABASE_AUTO_MIGRATE=false。
+  migrate:
+    image: migrate/migrate:v4.20.1
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command:
+      - "-path=/migrations"
+      - "-database"
+      - "postgres://${POSTGRES_USER:-stockflow}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-stockflow}?sslmode=disable&x-statement-timeout=60000"
+      - "up"
+    networks: [stockflow]
+
+  app:
+    build: .
+    image: stockflow-server:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      TZ: Asia/Shanghai
+      # 服务模式：release 强制（缺 SF_AUTH_JWT_SECRET 会启动失败，S2 修复语义）
+      SF_SERVER_MODE: release
+      SF_SERVER_PORT: "8080"
+      # 反代网段：使用下方 web 容器或外置 nginx 时设为 Docker 内网段（如 172.16.0.0/12），直连留空
+      SF_SERVER_TRUSTED_PROXIES: ${SF_SERVER_TRUSTED_PROXIES:-}
+      SF_DATABASE_HOST: postgres
+      SF_DATABASE_PORT: "5432"
+      SF_DATABASE_USER: ${POSTGRES_USER:-stockflow}
+      SF_DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      SF_DATABASE_NAME: ${POSTGRES_DB:-stockflow}
+      # 单机 compose 内网不出主机，可 disable；跨机部署必须 verify-full
+      SF_DATABASE_SSLMODE: ${SF_DATABASE_SSLMODE:-disable}
+      # 迁移由上方 migrate 服务显式执行；如希望随启动迁移可改 "true"（不推荐生产）
+      SF_DATABASE_AUTO_MIGRATE: "false"
+      SF_REDIS_ENABLED: "true"
+      SF_REDIS_ADDR: redis:6379
+      SF_REDIS_PASSWORD: ${REDIS_PASSWORD}
+      SF_CORS_ALLOWED_ORIGINS: ${SF_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      # 空库首次启动必填（≥12 位且含大小写字母/数字/符号中至少三类）；
+      # 首次登录后立即改密，公网放行前确认已改密（deployment.md §7.1）
+      SF_ADMIN_INITIAL_PASSWORD: ${SF_ADMIN_INITIAL_PASSWORD:?请在 .env 中设置 SF_ADMIN_INITIAL_PASSWORD}
+      SF_AUTH_JWT_SECRET: ${SF_AUTH_JWT_SECRET:?请在 .env 中设置 SF_AUTH_JWT_SECRET}
+    ports:
+      # 默认只绑回环（配合反代）；临时直连验证改 "0.0.0.0:8080:8080"
+      - "${APP_BIND:-127.0.0.1}:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 15s
+    networks: [stockflow]
+
+  # 可选：前端静态站 + /api 反代（docker compose --profile web up -d）
+  web:
+    profiles: ["web"]
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: stockflow-web:latest
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+    ports:
+      - "${WEB_BIND:-127.0.0.1}:80:80"
+    networks: [stockflow]
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  stockflow:
+    driver: bridge
