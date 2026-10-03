@@ -1,0 +1,494 @@
+/**
+ * Pad 端样式（frontend.md §20）——随 PadLayout 引入一次，页面无需重复 import。
+ *
+ * 规则（AGENTS.md 硬性规则 3 / frontend.md §20.9）：
+ * - 本文件只扩展 --sf-pad-* 局部 Token：仅含尺寸 / 字号 / 安全区，作用域挂在 .sf-pad-root，
+ *   不污染 PC 端；颜色、间距、圆角一律引用既有 --sf-*（styles/tokens.css），禁止另起色板。
+ * - 结构性切换（三栏 vs 堆叠）由 JS orientation 状态驱动 DOM（PadPageShell/PadLayout）；
+ *   @media (orientation: ...) 只承担纯视觉差异（栏间距 / 字号微调），双轨兜底（§20.8）。
+ * - 触摸目标 ≥ 44px；卡片行高 ≥ 64px；底部操作栏 padding-bottom 含安全区，不挡手势区（§20.7）。
+ */
+
+.sf-pad-root {
+  /* --sf-pad-* 局部 Token（frontend.md §20.9）：只含尺寸/字号/安全区，颜色一律引用 --sf-* */
+  --sf-pad-touch-min: 44px;          /* 最小触摸目标 */
+  --sf-pad-action-height: 52px;      /* 底部操作栏按钮高 */
+  --sf-pad-font-body: 16px;          /* 正文 */
+  --sf-pad-font-title: 20px;         /* 标题 */
+  --sf-pad-font-metric: 28px;        /* 关键数量大字 */
+  --sf-pad-font-label: 14px;         /* 辅助标签 */
+  --sf-pad-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --sf-pad-header-height: 56px;
+  --sf-pad-dot-size: 10px;
+  --sf-pad-scan-zone-height: 96px;
+  --sf-pad-card-min-height: 64px;    /* 卡片行高下限 */
+
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font-size: var(--sf-pad-font-body);
+}
+
+/* ---------- Header（§20.3 顶部常驻） ---------- */
+
+.sf-pad-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-2);
+  min-height: var(--sf-pad-header-height);
+  padding: 0 var(--sf-space-4);
+  background: var(--sf-surface);
+  border-bottom: 1px solid var(--sf-border);
+}
+
+.sf-pad-header-brand {
+  font-size: var(--sf-pad-font-title);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sf-pad-header-warehouse {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+  height: var(--sf-pad-touch-min);
+  padding: 0 var(--sf-space-3);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  background: var(--sf-bg);
+  color: var(--sf-text-secondary);
+  white-space: nowrap;
+}
+
+.sf-pad-header-user {
+  color: var(--sf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-pad-header-spacer {
+  flex: 1 1 0;
+}
+
+.sf-pad-dot {
+  flex: none;
+  width: var(--sf-pad-dot-size);
+  height: var(--sf-pad-dot-size);
+  border-radius: 50%;
+  background: var(--sf-text-muted);
+}
+
+.sf-pad-dot--online {
+  background: var(--sf-success);
+}
+
+.sf-pad-header-online {
+  font-size: var(--sf-pad-font-label);
+  color: var(--sf-text-secondary);
+  white-space: nowrap;
+}
+
+/* ---------- 快捷导航条（Header 下横滑 chip，高 ≥ 44px） ---------- */
+
+.sf-pad-navbar {
+  flex: none;
+  display: flex;
+  gap: var(--sf-space-2);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  background: var(--sf-surface);
+  border-bottom: 1px solid var(--sf-border);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sf-pad-navbar::-webkit-scrollbar {
+  display: none;
+}
+
+.sf-pad-root .sf-pad-nav-chip {
+  flex: none;
+  height: var(--sf-pad-touch-min);
+  padding: 0 var(--sf-space-4);
+  font-size: var(--sf-pad-font-body);
+  border-radius: var(--sf-radius-lg);
+}
+
+/* ---------- 主区容器 ---------- */
+
+.sf-pad-main {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- PadPageShell（§20.3 横屏三栏 / §20.4 竖屏堆叠） ----------
+   结构由 JS orientation 状态切换 DOM（--landscape / --portrait 修饰类）；
+   @media 只做视觉微调，见文件尾部。 */
+
+.sf-pad-shell {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  gap: var(--sf-space-3);
+  padding: var(--sf-space-3);
+}
+
+.sf-pad-shell--landscape {
+  flex-direction: row;
+}
+
+.sf-pad-shell--portrait {
+  flex-direction: column;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 底部预留 PadActionBar（fixed 底栏高度 + 安全区），不挡手势区（§20.7） */
+.sf-pad-shell--reserve {
+  padding-bottom: calc(var(--sf-pad-action-height) + var(--sf-pad-safe-bottom) + var(--sf-space-4));
+}
+
+.sf-pad-shell-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-3);
+  min-width: 0;
+  min-height: 0;
+}
+
+.sf-pad-shell--landscape .sf-pad-shell-col {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- 首页（§20.5：任务 / 快速作业 / 预警 / 最近操作，2×2 → 竖屏单列） ---------- */
+
+.sf-pad-home {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  display: grid;
+  gap: var(--sf-space-3);
+  padding: var(--sf-space-3);
+  align-content: start;
+  /* 首帧默认横屏 2×2（§20.2 横屏优先）；竖屏由文件尾部 @media 切单列 */
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sf-pad-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sf-space-3);
+}
+
+.sf-pad-metric-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  min-height: var(--sf-pad-card-min-height);
+  justify-content: center;
+  padding: var(--sf-space-2) var(--sf-space-3);
+  background: var(--sf-bg);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-root .sf-pad-quick-cell {
+  min-height: var(--sf-pad-card-min-height);
+  justify-content: flex-start;
+  font-size: var(--sf-pad-font-body);
+  border-radius: var(--sf-radius-lg);
+}
+
+/* ---------- 卡片基元 ---------- */
+
+.sf-pad-card {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  box-shadow: var(--sf-shadow-sm);
+  padding: var(--sf-space-3) var(--sf-space-4);
+}
+
+.sf-pad-card-title {
+  margin: 0 0 var(--sf-space-3);
+  font-size: var(--sf-pad-font-title);
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.sf-pad-info-grid {
+  display: grid;
+  gap: var(--sf-space-3) var(--sf-space-4);
+}
+
+.sf-pad-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--sf-space-1) / 2);
+  min-width: 0;
+}
+
+.sf-pad-info-label {
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-info-value {
+  font-size: var(--sf-pad-font-body);
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-metric {
+  font-size: var(--sf-pad-font-metric);
+  font-weight: 600;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 任务卡（整卡可点，≥ 64px 热区） ---------- */
+
+.sf-pad-task-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  width: 100%;
+  min-height: var(--sf-pad-card-min-height);
+  padding: var(--sf-space-3);
+  text-align: left;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  color: var(--sf-text);
+  font-size: var(--sf-pad-font-body);
+  cursor: pointer;
+}
+
+.sf-pad-task-card:active {
+  background: var(--sf-bg);
+}
+
+.sf-pad-task-card--selected {
+  border-color: var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+.sf-pad-task-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-task-card__no {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-task-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sf-space-2);
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-task-card__qty {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-task-card__qty-unit {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-task-card__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-tasks-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-group-title {
+  margin: var(--sf-space-2) 0 var(--sf-space-1);
+  font-size: var(--sf-pad-font-body);
+  font-weight: 600;
+  color: var(--sf-text-secondary);
+}
+
+/* ---------- 大触摸筛选 chip（高 ≥ 44px，横滑） ---------- */
+
+.sf-pad-filter-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-chip-row {
+  display: flex;
+  gap: var(--sf-space-2);
+  overflow-x: auto;
+  padding-bottom: var(--sf-space-1);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sf-pad-chip-row::-webkit-scrollbar {
+  display: none;
+}
+
+.sf-pad-root .sf-pad-chip {
+  flex: none;
+  height: var(--sf-pad-touch-min);
+  font-size: var(--sf-pad-font-body);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-tasks-detail {
+  margin-bottom: var(--sf-space-1);
+}
+
+.sf-pad-tasks-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  padding: var(--sf-space-2) 0 var(--sf-space-3);
+}
+
+.sf-pad-pager-btns {
+  display: flex;
+  gap: var(--sf-space-2);
+}
+
+/* ---------- 底部操作栏（§20.7：固定底部 + 安全区，不挡系统手势） ---------- */
+
+.sf-pad-actionbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  display: flex;
+  gap: var(--sf-space-2);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  padding-bottom: calc(var(--sf-space-2) + var(--sf-pad-safe-bottom));
+  background: var(--sf-surface);
+  border-top: 1px solid var(--sf-border);
+  box-shadow: var(--sf-shadow-md);
+}
+
+.sf-pad-actionbar-wrap {
+  flex: 1 1 0;
+  display: flex;
+  min-width: 0;
+}
+
+.sf-pad-root .sf-pad-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  height: var(--sf-pad-action-height);
+  font-size: var(--sf-pad-font-body);
+}
+
+/* ---------- 扫码占位（§19.2/§22 边界：真实扫码属 Scan 端 / F16） ---------- */
+
+.sf-pad-scan-stub {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-3);
+}
+
+.sf-pad-scan-stub__zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sf-space-2);
+  min-height: var(--sf-pad-scan-zone-height);
+  border: 1px dashed var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  background: var(--sf-bg);
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-body);
+}
+
+.sf-pad-scan-stub__icon {
+  font-size: var(--sf-pad-font-metric);
+}
+
+.sf-pad-scan-stub__note {
+  margin: 0;
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+  line-height: 1.5;
+}
+
+.sf-pad-scan-stub__input {
+  display: flex;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-muted-note {
+  margin: var(--sf-space-2) 0 0;
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+  line-height: 1.5;
+}
+
+/* ---------- @media 双轨兜底（§20.8）：纯视觉差异，不承担结构切换 ---------- */
+
+@media (orientation: landscape) {
+  .sf-pad-shell {
+    gap: var(--sf-space-4);
+  }
+
+  .sf-pad-home {
+    gap: var(--sf-space-4);
+    padding: var(--sf-space-4);
+  }
+}
+
+@media (orientation: portrait) {
+  /* 首页 2×2 → 单列堆叠（§20.5 竖屏） */
+  .sf-pad-home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 视觉微调：标题降级、隐藏用户名避免挤压 */
+  .sf-pad-header-brand {
+    font-size: var(--sf-pad-font-body);
+  }
+
+  .sf-pad-header-user {
+    display: none;
+  }
+
+  .sf-pad-shell {
+    gap: var(--sf-space-3);
+  }
+}

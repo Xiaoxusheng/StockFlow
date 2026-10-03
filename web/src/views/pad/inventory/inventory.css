@@ -1,0 +1,148 @@
+/*
+ * Pad 库存查询页局部样式（frontend.md §20.2：卡片化、大字、少表格）。
+ * 颜色 / 间距 / 圆角一律引用 --sf-*（styles/tokens.css）与 --sf-pad-*（layouts/pad/pad.css），
+ * 本文件不定义任何色板 / 固定像素色值。
+ */
+
+/* ---------- 顶部汇总条：七计数大字，失败呈「-」不拖垮整页 ---------- */
+
+.sf-pad-inv-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-inv-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  justify-content: center;
+  min-height: var(--sf-pad-card-min-height);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  background: var(--sf-bg);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-inv-summary-cell--danger {
+  color: var(--sf-danger);
+}
+
+/* ---------- 库存卡片（左栏列表，整卡可点 ≥64px，selected 高亮） ---------- */
+
+.sf-pad-stock-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  width: 100%;
+  min-height: var(--sf-pad-card-min-height);
+  padding: var(--sf-space-3);
+  text-align: left;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  color: var(--sf-text);
+  cursor: pointer;
+}
+
+.sf-pad-stock-card:active {
+  background: var(--sf-bg);
+}
+
+.sf-pad-stock-card--selected {
+  border-color: var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+.sf-pad-stock-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  font-weight: 600;
+}
+
+.sf-pad-stock-card__loc {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-stock-card__qty-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sf-space-3);
+}
+
+.sf-pad-stock-card__qty-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sf-space-1);
+}
+
+.sf-pad-stock-card__qty-strong {
+  font-size: var(--sf-pad-font-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-pad-stock-card__qty-label {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-stock-card__qty-sub {
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+}
+
+/* ---------- 库存流水时间卡（右栏，按 sku_id 过滤） ---------- */
+
+.sf-pad-ledger-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-ledger-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  background: var(--sf-bg);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-ledger-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-ledger-card__delta {
+  font-size: var(--sf-pad-font-title);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-pad-ledger-card__delta--in {
+  color: var(--sf-success);
+}
+
+.sf-pad-ledger-card__delta--out {
+  color: var(--sf-danger);
+}
+
+.sf-pad-ledger-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sf-space-1) var(--sf-space-3);
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+/* 触摸目标兜底：页面内 antd 大按钮统一抬到 ≥44px（frontend.md §20.9） */
+.sf-pad-root .sf-pad-inv-min-touch {
+  min-height: var(--sf-pad-touch-min);
+  border-radius: var(--sf-radius-lg);
+}

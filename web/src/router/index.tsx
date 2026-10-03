@@ -115,6 +115,20 @@ const JobPage = lazy(() => import('@/views/system/JobPage'))
 const SettingsPage = lazy(() => import('@/views/system/SettingsPage'))
 const MonitorPage = lazy(() => import('@/views/system/MonitorPage'))
 
+// Pad 平板作业端（F14：frontend.md §20 十页；独立终端入口，与 PC '/' 段平级挂 PadLayout，
+// 不进 PC 侧边栏菜单——menu.tsx / IMPLEMENTED_PATHS 均零改动）
+const PadLayoutLazy = lazy(() => import('@/layouts/pad').then((m) => ({ default: m.PadLayout })))
+const PadHomePageLazy = lazy(() => import('@/views/pad/home/PadHomePage'))
+const PadTasksPageLazy = lazy(() => import('@/views/pad/tasks/PadTasksPage'))
+const PadReceivePageLazy = lazy(() => import('@/views/pad/receive/PadReceivePage'))
+const PadQualityPageLazy = lazy(() => import('@/views/pad/quality/PadQualityPage'))
+const PadPutawayPageLazy = lazy(() => import('@/views/pad/putaway/PadPutawayPage'))
+const PadInventoryPageLazy = lazy(() => import('@/views/pad/inventory/PadInventoryPage'))
+const PadCountPageLazy = lazy(() => import('@/views/pad/count/PadCountPage'))
+const PadStockMovePageLazy = lazy(() => import('@/views/pad/stockmove/PadStockMovePage'))
+const PadTransferPageLazy = lazy(() => import('@/views/pad/transfer/PadTransferPage'))
+const PadExceptionPageLazy = lazy(() => import('@/views/pad/exception/PadExceptionPage'))
+
 /** 已有真实页面的路由；其余菜单路径统一落到 ModulePlaceholder */
 const IMPLEMENTED_PATHS = new Set([
   '/dashboard',
@@ -563,6 +577,61 @@ export const router = createBrowserRouter([
         element: <LazyPage><MonitorPage /></LazyPage>,
       },
       ...placeholderRoutes(),
+    ],
+  },
+  {
+    // Pad 平板作业端（F14）：独立终端入口，与 PC '/' 段平级，挂 PadLayout（不挂 PcLayout）。
+    // 子路由 path 与 layouts/pad/PadLayout.tsx PAD_NAV_ITEMS 逐字一致，导航 chip 高亮才生效；
+    // 数据为前端先行契约（后端任务/采购/质量/盘点域未交付），页面呈统一 Loading/Error 态属预期。
+    path: '/pad',
+    element: (
+      <RequireAuth>
+        <PadLayoutLazy />
+      </RequireAuth>
+    ),
+    errorElement: <RouteError />,
+    children: [
+      { index: true, element: <Navigate to="/pad/home" replace /> },
+      {
+        path: 'home',
+        element: <LazyPage><PadHomePageLazy /></LazyPage>,
+      },
+      {
+        path: 'tasks',
+        element: <LazyPage><PadTasksPageLazy /></LazyPage>,
+      },
+      {
+        path: 'receive',
+        element: <LazyPage><PadReceivePageLazy /></LazyPage>,
+      },
+      {
+        path: 'quality',
+        element: <LazyPage><PadQualityPageLazy /></LazyPage>,
+      },
+      {
+        path: 'putaway',
+        element: <LazyPage><PadPutawayPageLazy /></LazyPage>,
+      },
+      {
+        path: 'inventory',
+        element: <LazyPage><PadInventoryPageLazy /></LazyPage>,
+      },
+      {
+        path: 'count',
+        element: <LazyPage><PadCountPageLazy /></LazyPage>,
+      },
+      {
+        path: 'stockmove',
+        element: <LazyPage><PadStockMovePageLazy /></LazyPage>,
+      },
+      {
+        path: 'transfer',
+        element: <LazyPage><PadTransferPageLazy /></LazyPage>,
+      },
+      {
+        path: 'exception',
+        element: <LazyPage><PadExceptionPageLazy /></LazyPage>,
+      },
     ],
   },
   {

@@ -1,0 +1,141 @@
+/*
+ * Pad 移库页局部样式（frontend.md §20.2 / §21.4 移库操作序列：扫源库位→扫商品→扫目标库位→确认）。
+ * 颜色 / 间距 / 圆角一律引用 --sf-*（styles/tokens.css）与 --sf-pad-*（layouts/pad/pad.css）。
+ */
+
+/* ---------- 步骤指示条（§21.4 三步大按钮 + 确认，大触摸 chip） ---------- */
+
+.sf-pad-sm-steps {
+  display: flex;
+  gap: var(--sf-space-2);
+  overflow-x: auto;
+  padding-bottom: var(--sf-space-1);
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.sf-pad-sm-steps::-webkit-scrollbar {
+  display: none;
+}
+
+.sf-pad-sm-step {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+  min-height: var(--sf-pad-touch-min);
+  padding: 0 var(--sf-space-3);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  background: var(--sf-surface);
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-body);
+  white-space: nowrap;
+}
+
+.sf-pad-sm-step--done {
+  color: var(--sf-success);
+  border-color: var(--sf-success);
+}
+
+.sf-pad-sm-step--active {
+  color: var(--sf-primary);
+  border-color: var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+/* ---------- 步骤操作块（右栏三步大按钮区） ---------- */
+
+.sf-pad-sm-stepblock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-sm-stepblock__value {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-body);
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-sm-qty-input {
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-sm-qty-input .ant-input-number {
+  flex: 1 1 0;
+  min-height: var(--sf-pad-touch-min);
+}
+
+.sf-pad-root .sf-pad-sm-btn {
+  width: 100%;
+  min-height: var(--sf-pad-action-height);
+  font-size: var(--sf-pad-font-body);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-sm-confirm-wrap {
+  display: flex;
+  width: 100%;
+}
+
+/* ---------- 移库记录卡（左栏，整卡可点 ≥64px，selected 高亮） ---------- */
+
+.sf-pad-sm-record-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  width: 100%;
+  min-height: var(--sf-pad-card-min-height);
+  padding: var(--sf-space-3);
+  text-align: left;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  color: var(--sf-text);
+  cursor: pointer;
+}
+
+.sf-pad-sm-record-card:active {
+  background: var(--sf-bg);
+}
+
+.sf-pad-sm-record-card--selected {
+  border-color: var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+.sf-pad-sm-record-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  font-weight: 600;
+}
+
+.sf-pad-sm-record-card__route {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-sm-record-card__qty {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-sm-record-card__qty-unit {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-sm-record-card__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+}

@@ -1,0 +1,128 @@
+/*
+ * Pad 调拨页局部样式（仓库主管查看/跟踪视角，devices.md §12 Pad 职能）。
+ * 颜色 / 间距 / 圆角一律引用 --sf-*（styles/tokens.css）与 --sf-pad-*（layouts/pad/pad.css）。
+ */
+
+/* ---------- 调拨单卡片（左栏，整卡可点 ≥64px，selected 高亮；形态对齐 sf-pad-task-card） ---------- */
+
+.sf-pad-tr-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  width: 100%;
+  min-height: var(--sf-pad-card-min-height);
+  padding: var(--sf-space-3);
+  text-align: left;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-lg);
+  color: var(--sf-text);
+  cursor: pointer;
+}
+
+.sf-pad-tr-card:active {
+  background: var(--sf-bg);
+}
+
+.sf-pad-tr-card--selected {
+  border-color: var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+.sf-pad-tr-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-tr-card__no {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-tr-card__route {
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+  overflow-wrap: anywhere;
+}
+
+.sf-pad-tr-card__qty {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-tr-card__qty-unit {
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-tr-card__foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+}
+
+/* ---------- 状态流转只读卡（business-flow.md §10.1 七态状态机；只读跟踪） ---------- */
+
+.sf-pad-tr-flow {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-tr-flow-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-3);
+  min-height: var(--sf-pad-touch-min);
+  padding: var(--sf-space-1) var(--sf-space-3);
+  background: var(--sf-bg);
+  border-radius: var(--sf-radius-lg);
+}
+
+.sf-pad-tr-flow-row--current {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-primary);
+  box-shadow: inset 0 0 0 1px var(--sf-primary);
+}
+
+.sf-pad-tr-flow-row--done {
+  opacity: 0.6;
+}
+
+.sf-pad-tr-flow-index {
+  flex: none;
+  width: 2em;
+  color: var(--sf-text-muted);
+  font-size: var(--sf-pad-font-label);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-pad-tr-flow-current-flag {
+  margin-left: auto;
+  color: var(--sf-primary);
+  font-size: var(--sf-pad-font-label);
+  font-weight: 600;
+}
+
+/* ---------- 动作占位（出库发起 / 入库确认；端点未交付前 disabled） ---------- */
+
+.sf-pad-tr-action-wrap {
+  display: flex;
+  gap: var(--sf-space-2);
+}
+
+.sf-pad-root .sf-pad-tr-action-btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--sf-pad-action-height);
+  font-size: var(--sf-pad-font-body);
+  border-radius: var(--sf-radius-lg);
+}

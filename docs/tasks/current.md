@@ -97,6 +97,19 @@
 | 平台层修复（internal/config·middleware·router·health·database/seed.go·cmd·config.example.yaml） | S2 server.mode 默认 release（本地开发显式设 debug）、S3 初始管理员密码 ≥12 位三类字符、S4 /api/auth IP 限流（SF_AUTH_RATE_LIMIT_IP_PER_MINUTE 默认 30）、S5 SetTrustedProxies（SF_SERVER_TRUSTED_PROXIES，默认不信任任何代理）、S6 请求体上限（SF_SERVER_MAX_BODY_BYTES 默认 1MB）+ MaxHeaderBytes、S7 入口截断 request_id/UA/IP 对齐审计列宽、S9 viewer 映射剔除 auth:user:list/read、S12 release 下 sslmode=disable 启动告警、S13 /ready 就绪结果 1s 缓存 | 🔄 并行实施中（同上） |
 | 部署文档（S11） | docs/deployment.md 升 v1.1：§1.1 环境变量清单（作用/默认值/必填/生成方式）、§2.1 grants 执行步骤与纪律（新审计表人工重跑、生产禁 auto_migrate=true、app_grants.sql 尾注悬空指向勘误）、§7.1 发布检查单、§9 反向代理与网络安全基线（XFF 覆写/可信代理/8080 仅内网/HTTPS 反代终结/探针仅 LB 内网）；§3/§6 与实现对齐（/ready 检 DB+Redis、初始管理员强口令与首启立即改密必做）；决策记录见 changelog 同日条目，plan §7.3 已按防枚举决策修订 | ✅ 已交付（环境变量名/默认值与代码逐项核对） |
 
+## 2026-10-03 并行交付：Pad 端 F14（地基 + 三作业页 + 三查询移库页 + 盘点异常页，四组并行开发 + 集成收口）
+
+| 模块 | 内容 | 状态 |
+|---|---|---|
+| Pad 布局地基 | web/src/layouts/pad/ 九原语：PadLayout（Header 在线点/主题/退出 + PAD_NAV_ITEMS 十页导航）+ PadPageShell（横竖屏结构性切换三栏/堆叠）+ PadActionBar（五槽底栏，disabled 点按 Toast 门禁）+ PadTaskCard/PadInfoCard/PadScanStub + usePadOrientation + pad.css（--sf-pad-* 局部 Token 作用域 .sf-pad-root，颜色/间距/圆角仍引用 --sf-*） | ✅ 已交付并接入路由 |
+| Pad 首页/任务页 | /pad/home 四块（工作台四计数真契约 + 快速作业宫格 10 入口 + 预警「-」占位 + 最近操作 SfEmpty 占位）；/pad/tasks chip 筛选 + 状态分组任务卡列表 | ✅ 已交付并接入路由 |
+| Pad 作业三页 | /pad/receive 收货（ReceiptTaskCard 列表 + 应收/已收/待收大字 + 数量步进 + 批次效期录入占位）、/pad/quality 质检（InspectionTaskCard + 合格/部分合格/不合格三大按钮占位）、/pad/putaway 上架（三步扫商品→扫库位→校验序列，Steps 指示） | ✅ 已交付并接入路由 |
+| Pad 查询/移库/调拨三页 | /pad/inventory 库存（stockSummary 七计数 + stock/ledger 真实端点 + SKU/库位本地 Map 补显）、/pad/stockmove 移库（三步大按钮流 + [确认移库] 占位）、/pad/transfer 调拨（TransferDocCard + 七态流转只读卡 + 出入库占位） | ✅ 已交付并接入路由 |
+| Pad 盘点/异常两页 | /pad/count 盘点（CountTaskCard/明细行 + RegisterPanel 实盘登记——countApi.registerItem 本轮唯一真实写端点 + 差异前端计算 + [暂停] sessionStorage 草稿）、/pad/exception 异常（九类×七态大 chip 筛选 + 认领/处理/关闭/拍照占位） | ✅ 已交付并接入路由 |
+| 集成收口 | router/index.tsx 注册 /pad 独立顶层段（挂 PadLayout，不挂 PcLayout）：index→/pad/home + 10 条 lazy 子路由，path 与 PAD_NAV_ITEMS 逐字一致；config/menu.tsx 零改动、/pad 不入 IMPLEMENTED_PATHS（Pad 不进 PC 菜单） | ✅ 全绿 |
+
+集成收口说明（本轮实测）：四组共 26 个新文件（layouts/pad 9 + views/pad 17），仅 PadHomePage.tsx:9 深路径 import 修为统一出口 '@/layouts/pad' 一处小修；任务书草案 /pad/stock、/pad/move 按各组 integrationNeeds 与 PAD_NAV_ITEMS（PadLayout.tsx:36,38）修正为 /pad/inventory、/pad/stockmove，否则导航 chip 不高亮；死按钮复查——PadActionBar 原语与各页自建占位（收货确认/质检判定/移库/调拨出入库/异常认领等）均 disabled + 外包 span 点按 Toast 原因，0 静默死按钮；路由无重复（与 /login、/、/403、/500、* 平级）。后端任务/采购收货/质量/盘点/异常域未交付，Pad 页面呈统一 Loading/Error 态（预期行为，禁止假数据）；countApi.registerItem 为本轮唯一真实写端点。前端先行契约与遗留清单（首页计数口径差异、TaskStatus 无异常值、TaskItem 无优先级、真机横竖屏未实测等 9 项）见 changelog 同日 Pad 集成收口条目。验证：`npx tsc --noEmit -p tsconfig.app.json` 全量 EXIT=0、`npx eslint src/router/index.tsx src/views/pad/home/PadHomePage.tsx` EXIT=0（全局构建留门禁阶段）。
+
 ## 2026-10-03 并行交付：打印/文件/设备/系统扩展轮（组A–E 页面 + 组F 集成收口）
 
 | 模块 | 内容 | 状态 |
@@ -116,7 +129,7 @@
 2. **F7 单据详情**：✅ 入库单/出库单/采购订单三详情页已交付（2026-10-02 第三批，SfDetailHeader/SfTimeline 新组件；详情端点为前端先行契约）；行级状态列、打印/导出真实动作待后端单据域契约冻结后补
 3. **F8 任务中心**：✅ 我的工作台、我的任务已交付（2026-10-02 第二批，前端先行契约待后端任务域对齐）；「我的待办」「我的审批」入口待审批/待办菜单（如 /approvals）落地后补 path
 4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → ✅ **基础资料（T3）/ 仓库（T4）/ 库存核心（T5），2026-10-02 交付（三域 62 条路由 + 九个库存变更原语，详见 changelog 当日三条交付记录）**；T6 补 router 跨域 Checker 注入与 swag 汇总（实现时需核对前端先行契约，两批清单均见 changelog 2026-10-02 集成记录；注意 /api/inventory 静态段须先于 {skuCode} 参数段注册）
-5. ✅ F9 盘点、F11 Excel 导入导出与文件中心（2026-10-02 第三批 + 2026-10-03 本轮文件中心交付）、✅ F12 打印、F13 设备（PC 端，2026-10-03 本轮交付并注册路由；打印/文件/设备/系统运行域端点为前端先行契约待后端交付回对）；剩 F14 Pad、F15–F16 Scan（库位地图已交付）
+5. ✅ F9 盘点、F11 Excel 导入导出与文件中心（2026-10-02 第三批 + 2026-10-03 本轮文件中心交付）、✅ F12 打印、F13 设备（PC 端，2026-10-03 本轮交付并注册路由）、✅ **F14 Pad（2026-10-03 本轮交付并注册路由：/pad 独立段 + 十页；打印/文件/设备/系统/Pad 运行域端点为前端先行契约待后端交付回对）**；剩 F15–F16 Scan（库位地图已交付）
 
 ## 关键上下文
 
