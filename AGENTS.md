@@ -25,7 +25,10 @@ docs/plans/      开发计划
 docs/tasks/      任务状态（current.md）
 web/             StockFlow Web + Pad 前端（React）
 scan/            StockFlow Scan（Android，未开始）
-server/          Go 后端（未开始）
+cmd/ internal/ db/ config.example.yaml Makefile go.mod
+                 Go 后端（module github.com/stockflow/server，**module 根 = 仓库根**；
+                 原 server/ 目录已于 2026-10-02 并入根：脚本门禁在仓库根执行 `go build ./...`，
+                 Go 1.27 workspace 模式下裸 `./...` 不匹配子目录 module）
 ```
 
 前端 `web/src` 内部结构遵循 [docs/frontend.md §26.4](docs/frontend.md)：api/ components/ layouts/ router/ stores/ hooks/ utils/ types/ styles/ views/。
@@ -38,6 +41,13 @@ npm install
 npm run dev        # Vite 开发服务器 http://localhost:5173，/api 代理到 http://localhost:8080
 npm run build      # tsc -b && vite build
 npm run preview    # 预览生产构建
+```
+
+## 常用命令（后端，仓库根执行）
+
+```bash
+go build ./... && go vet ./... && go test ./...   # 门禁等价命令（或 make build/vet/test/ci）
+go run ./cmd/server   # 本地启动（需 PG15/Redis7；配置见 config.example.yaml，密钥走 SF_* 环境变量）
 ```
 
 后端未实现时页面显示统一的 Loading/Empty/Error 状态——这是预期行为，**禁止用假数据冒充业务**（requirements.md §10）。
@@ -61,5 +71,6 @@ npm run preview    # 预览生产构建
 
 - [x] 需求/架构/领域文档（docs/，基线 v1.x）
 - [x] 前端基础平台（web/：Token 主题、API 层、认证、PC Layout、统一表格组件、Dashboard 骨架、库存中心示范页）
-- [ ] Go 后端（server/，开发计划阶段 3–8）
+- [x] Go 后端脚手架 T0（仓库根 Go module：config/logger/response/middleware/database/cache/health/router + auth/masterdata/warehouse/inventory stub，2026-10-02）
+- [ ] Go 后端 M1 业务（开发计划阶段 3–8：迁移/认证/基础资料/仓库/库存核心）
 - [ ] 前端全量页面（frontend.md F6–F13）、Pad 端（F14）、Scan 端（F15–F16）

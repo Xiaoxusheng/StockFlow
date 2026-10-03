@@ -89,6 +89,14 @@
 
 集成收口动作（本轮）：① 路由与菜单核验——组6 已注册 /reports、/sales/new、/sales/:id、/counts/new（静态先于动态、无重复），/inventory/count 菜单项已删除、/counts 指向实现，本轮 router/menu 零改动；② 波及项销项——CountCreatePage real_name 已由组5 修复、销售两页导出死按钮已由组5 移除；③ 死按钮程序化复查（views/layouts/components 全部 Button 元素块，导出/新建类缺失 onClick）=0；④ api/views/components 层重复导出=0；⑤ 22 个 Api 命名空间方法与页面调用点比对全部匹配、无直连 axios；⑥ 小修 api/warehouse.ts 四组 setStatus 返回类型 `*Item`→`{status}`（后端 handler.go:236/346/446/565 返回 gin.H{"status"}，消费方均不消费返回值）；⑦ 裁决 CountDetailPage 流转确认保留 Modal.confirm（SfConfirm 为 danger 固定的危险操作封装，与业务流转确认语义不匹配，cancel 已单独 danger），过时注释已更新。前端先行契约与遗留清单见 changelog 同日集成收口条目。验证：`npx tsc --noEmit -p tsconfig.app.json` 全量 EXIT=0、`npx eslint`（本轮修改 2 文件）EXIT=0；全局构建留门禁阶段。
 
+## 2026-10-03 并行交付：后端安全修复轮（S1–S15，三工作包）
+
+| 工作包 | 内容 | 状态 |
+|---|---|---|
+| 认证域修复（internal/auth） | S1 授予侧特权边界（非超管禁授 super_admin/自身不持有权限点/越 data_scope，AssignPermissions 补 is_system 保护）、S8 锁定/停用统一 AUTH_CREDENTIALS_INVALID（真实原因仅 login_logs，不回显 locked_until）、S9 用户目录按数据范围过滤+列表裁剪 last_login_ip、S10 UpdateUser 变更即踢目标用户会话（销项 plan §13.3 漂移）、S14 CreateUser 置 must_change_password=true、S15 改密原密码失败计数与短期锁定、S4 认证域部分（失败计数 username+IP 双键）、S7 认证域部分（login_logs 写失败记 error） | 🔄 并行实施中（完成与门禁结论以安全修复报告/独立复审为准） |
+| 平台层修复（internal/config·middleware·router·health·database/seed.go·cmd·config.example.yaml） | S2 server.mode 默认 release（本地开发显式设 debug）、S3 初始管理员密码 ≥12 位三类字符、S4 /api/auth IP 限流（SF_AUTH_RATE_LIMIT_IP_PER_MINUTE 默认 30）、S5 SetTrustedProxies（SF_SERVER_TRUSTED_PROXIES，默认不信任任何代理）、S6 请求体上限（SF_SERVER_MAX_BODY_BYTES 默认 1MB）+ MaxHeaderBytes、S7 入口截断 request_id/UA/IP 对齐审计列宽、S9 viewer 映射剔除 auth:user:list/read、S12 release 下 sslmode=disable 启动告警、S13 /ready 就绪结果 1s 缓存 | 🔄 并行实施中（同上） |
+| 部署文档（S11） | docs/deployment.md 升 v1.1：§1.1 环境变量清单（作用/默认值/必填/生成方式）、§2.1 grants 执行步骤与纪律（新审计表人工重跑、生产禁 auto_migrate=true、app_grants.sql 尾注悬空指向勘误）、§7.1 发布检查单、§9 反向代理与网络安全基线（XFF 覆写/可信代理/8080 仅内网/HTTPS 反代终结/探针仅 LB 内网）；§3/§6 与实现对齐（/ready 检 DB+Redis、初始管理员强口令与首启立即改密必做）；决策记录见 changelog 同日条目，plan §7.3 已按防枚举决策修订 | ✅ 已交付（环境变量名/默认值与代码逐项核对） |
+
 ## 下一步（按 frontend.md §29 顺序）
 
 1. **F6 库存中心全量页面**：✅ 批次库存、序列号、库存转移、库存追溯（第二批）+ ✅ 库存分析、SKU 库存详情（2026-10-02 第三批，三个新端点为前端先行契约待后端 M1/M2 冻结回对）；库存盘点按既有裁决由盘点中心 /counts 承载
@@ -99,7 +107,7 @@
 
 ## 关键上下文
 
-- **后端 auth 域已可用**（需 PG15+Redis7、迁移后启动；运行前注入 SF_AUTH_JWT_SECRET 与 SF_ADMIN_INITIAL_PASSWORD，release 缺 JWT 密钥启动失败）。登录响应：`{access_token, token_type:"Bearer", expires_in, refresh_token, must_change_password, user}`；/api/auth/me 返回 `permissions` 权限点集（编码见 internal/auth/permissions.go）。
+- **后端 auth 域已可用**（需 PG15+Redis7、迁移后启动；运行前按 docs/deployment.md §1.1 环境变量清单注入——SF_AUTH_JWT_SECRET、SF_ADMIN_INITIAL_PASSWORD（空库首启）、SF_SERVER_MODE=release（2026-10-03 安全修复轮起默认 release，本地开发显式设 debug；release 缺 JWT 密钥启动失败））。登录响应：`{access_token, token_type:"Bearer", expires_in, refresh_token, must_change_password, user}`；/api/auth/me 返回 `permissions` 权限点集（编码见 internal/auth/permissions.go）。
 - **前端 auth.ts 对齐清单**（后端契约已定，前端适配）——✅ **已完成（2026-10-02 并行轮认证域组交付，集成轮补记）**：`token→access_token`、`refreshToken→refresh_token`、`oldPassword/newPassword→old_password/new_password`、会话字段 `id→session_id、userAgent→user_agent、createdAt→login_at`、GET /api/auth/sessions 为分页信封（items 取数组）；另含 MeResult 会话组装、must_change_password 强改闭环（403 AUTH_PASSWORD_CHANGE_REQUIRED 特判 + 不可关闭强改 Modal）、PASSWORD_RULE 与后端 password.go 对齐导出、canAccess fail-closed（空权限不放行）与菜单码归一映射（types/permission.ts RESOURCE_ALIASES）。~~遗留：api/user.ts（用户管理域 camelCase 自有类型）对齐后端 UserView JSON tag~~ ✅ **已完成（2026-10-03 契约对齐轮组3 交付，集成轮销项）**：UserView 全量 snake_case + department_id/role_ids 请求体 number 形态，见 changelog 同日条目；localStorage `sf.auth` 旧格式会话被拒绝，联调发布需重登一次。
 - ~~**待办（scope B）**：000001 迁移缺 uk_roles_code/uk_permissions_code/uk_departments_code 唯一索引~~ ✅ 已修复（2026-10-02 复核：up 补齐三表 code 唯一索引 + permissions/departments parent_id 反查索引，down 原引用即对齐；权限点同轮补录 inventory:batch/serial 至 106 个，见 changelog 复核修复条目）。
 - **待办（scope A/T6）**：router 注入 `auth.WithWarehouseChecker(warehouse.NewChecker(db))`（plan §4.3 规则①真实装配 fail-fast）与 swag 汇总、Makefile swag 目标。
