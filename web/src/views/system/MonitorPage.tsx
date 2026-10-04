@@ -3,12 +3,13 @@ import type { ReactNode } from 'react'
 import { Button, Card, Col, Flex, Progress, Row, Skeleton, Statistic, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { systemApi } from '@/api/system'
+import { systemApi, type SystemMonitorMetrics } from '@/api/system'
+import { SfDetailSection } from '@/components/common/SfDetailSection'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatFileSize, formatNumber, formatPercent } from '@/utils/format'
+import { EMPTY_TEXT, formatNumber, formatPercent } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -16,9 +17,44 @@ const { Text } = Typography
 const Line = lazy(() => import('@ant-design/plots').then((m) => ({ default: m.Line })))
 
 /** Progress percent 值域保护（0~100；接口异常值不阻塞渲染） */
-function clampPercent(value: number | undefined): number {
-  if (value == null || !Number.isFinite(value)) return 0
+function clampPercent(value: number | undefined): number | undefined {
+  if (value == null || !Number.isFinite(value)) return undefined
   return Math.min(100, Math.max(0, value))
+}
+
+/** 运行时长：秒 → 「x 小时 y 分」（仅展示换算，不做业务计算） */
+function formatUptime(seconds: number | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return EMPTY_TEXT
+  return `${formatNumber(Math.floor(seconds / 3600))} 小时 ${formatNumber(Math.floor((seconds % 3600) / 60))} 分`
+}
+
+/** Redis 状态标签：未启用不视为故障（monitor.go:253 healthy 置 true 不误报） */
+function RedisTag({ metrics }: { metrics?: SystemMonitorMetrics }) {
+  if (!metrics) return null
+  if (!metrics.redis.enabled) return <SfStatusTag label="未启用" semantic="neutral" />
+  return metrics.redis.healthy ? (
+    <SfStatusTag label="正常" semantic="success" />
+  ) : (
+    <SfStatusTag label="不可达" semantic="danger" />
+  )
+}
+
+/** Redis 探测结果文案（monitor.go:253-257 status 值域：ok/unreachable/disabled） */
+const REDIS_STATUS_LABEL: Record<string, string> = {
+  ok: '连通正常',
+  unreachable: '连接失败',
+  disabled: '未配置',
+}
+
+/** 定时任务状态标签：最近执行存在失败即告警（monitor.go:267-271 failed_last_run 汇总） */
+function JobsTag({ metrics }: { metrics?: SystemMonitorMetrics }) {
+  if (!metrics) return null
+  if (metrics.jobs.total === 0) return <SfStatusTag label="无任务" semantic="neutral" />
+  return metrics.jobs.failed_last_run > 0 ? (
+    <SfStatusTag label="有失败" semantic="danger" />
+  ) : (
+    <SfStatusTag label="正常" semantic="success" />
+  )
 }
 
 interface MetricCardProps {
@@ -52,9 +88,12 @@ function MetricCard({ title, main, percent, sub, extra }: MetricCardProps) {
 
 /**
  * 系统监控（/system/monitor，menu.tsx:160 权限码 system:monitor:view）：
- * CPU / 内存 / 磁盘 / 数据库连接 / API 错误率五类指标卡（requirements.md:184、deployment.md §5）
- * + API 请求/错误趋势图表，全部来自契约端点 GET /api/system/monitor（api.md:76 /api/system 域），
- * 后端系统域未交付：整页呈统一错误态，禁止 mock / 前端算指标。
+ * 数据库连接 / Redis 连通 / API 请求与错误率 / 定时任务 / 队列积压五类指标卡
+ * （monitor.go:186-234 monitorResponse 契约；CPU/内存/磁盘系统资源指标按 Orchestrator
+ * 裁决①豁免至阶段 21，口径注记由响应 remarks 下发，页面如实展示不补位）
+ * + API 请求/错误 24h 趋势（api_trend 5 分钟聚桶，数据源为 router 挂载的
+ * sysops.MetricsMiddleware 进程内采样，internal/router/router.go:81）。
+ * 全部来自契约端点 GET /api/system/monitor（sysops/routes.go:108 已挂载），禁止 mock / 前端算指标。
  * 30s 自动刷新：监控须能及时发现服务/数据库异常（deployment.md §5）。
  */
 export default function MonitorPage() {
@@ -65,8 +104,10 @@ export default function MonitorPage() {
   })
 
   const data = metrics.data
+  const queues = data?.queued_tasks ?? []
+  const remarks = data?.remarks ?? []
 
-  const trendData = (data?.apiTrend ?? []).flatMap((point) => [
+  const trendData = (data?.api_trend ?? []).flatMap((point) => [
     { time: point.time, 类型: '请求量', 数量: point.requests },
     { time: point.time, 类型: '错误数', 数量: point.errors },
   ])
@@ -75,7 +116,7 @@ export default function MonitorPage() {
     <div className="sf-page">
       <SfPageHeader
         title="系统监控"
-        subtitle="CPU / 内存 / 磁盘 / 数据库连接 / API 错误率（自动刷新：30 秒）"
+        subtitle="数据库 / Redis / API / 定时任务 / 队列积压（自动刷新：30 秒）"
         extra={
           <Button
             icon={<ReloadOutlined />}
@@ -95,65 +136,80 @@ export default function MonitorPage() {
         <SfError
           error={metrics.error}
           onRetry={metrics.refetch}
-          description="监控接口 GET /api/system/monitor 尚未交付（系统域后端未启动），接口就绪后自动展示真实指标"
+          description="监控数据读取失败，可点击重试；若持续失败请检查后端服务与数据库连通性"
         />
       ) : (
         <Flex vertical gap={16}>
-          {/* 五类指标卡：CPU / 内存 / 磁盘 / 数据库连接 / API 错误率 */}
+          {/* 五类指标卡：数据库连接 / Redis 连通 / API 请求与错误率 / 定时任务 / 队列积压 */}
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12} lg={8}>
               <MetricCard
-                title="CPU"
-                main={formatPercent(data?.cpu.usagePercent)}
-                percent={data?.cpu.usagePercent}
-                sub={data?.cpu.cores != null ? `逻辑核数：${formatNumber(data.cpu.cores)}` : undefined}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={8}>
-              <MetricCard
-                title="内存"
-                main={formatPercent(data?.memory.usagePercent)}
-                percent={data?.memory.usagePercent}
-                sub={`已用 ${formatFileSize(data?.memory.usedBytes)} / 总量 ${formatFileSize(data?.memory.totalBytes)}`}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={8}>
-              <MetricCard
-                title="磁盘"
-                main={formatPercent(data?.disk.usagePercent)}
-                percent={data?.disk.usagePercent}
-                sub={`已用 ${formatFileSize(data?.disk.usedBytes)} / 总量 ${formatFileSize(data?.disk.totalBytes)}`}
-              />
-            </Col>
-            <Col xs={24} sm={12} lg={8}>
-              <MetricCard
                 title="数据库连接"
-                main={`${formatNumber(data?.database.openConnections)} / ${formatNumber(data?.database.maxConnections)}`}
+                main={`${formatNumber(data?.database.in_use)} / ${formatNumber(data?.database.max_open_connections)}`}
                 percent={
-                  data && data.database.maxConnections > 0
-                    ? (data.database.openConnections / data.database.maxConnections) * 100
-                    : 0
+                  data && data.database.max_open_connections > 0
+                    ? (data.database.in_use / data.database.max_open_connections) * 100
+                    : undefined
                 }
-                sub={data?.database.healthy ? '连接正常' : '连接异常——请立即检查数据库（deployment.md §5）'}
+                sub={`使用中 / 最大连接 · 空闲 ${formatNumber(data?.database.idle)} · 等待 ${formatNumber(data?.database.wait_count)}`}
                 extra={
-                  <SfStatusTag status={data?.database.healthy ? 'online' : 'offline'} />
+                  data?.database.healthy ? (
+                    <SfStatusTag label="正常" semantic="success" />
+                  ) : (
+                    <SfStatusTag label="异常" semantic="danger" />
+                  )
                 }
               />
             </Col>
             <Col xs={24} sm={12} lg={8}>
               <MetricCard
-                title="API 错误率"
-                main={formatPercent(data?.api.errorRatePercent)}
-                percent={data?.api.errorRatePercent}
-                sub={`近 1 小时：请求 ${formatNumber(data?.api.requestCount1h)} / 错误 ${formatNumber(data?.api.errorCount1h)}`}
+                title="Redis 连通"
+                main={data?.redis.enabled ? '已启用' : '未启用'}
+                sub={`探测结果：${REDIS_STATUS_LABEL[data?.redis.status ?? ''] ?? data?.redis.status ?? EMPTY_TEXT}`}
+                extra={<RedisTag metrics={data} />}
               />
+            </Col>
+            <Col xs={24} sm={12} lg={8}>
+              <MetricCard
+                title="API 请求 / 错误率"
+                main={formatPercent(data?.api.error_rate_percent)}
+                percent={data?.api.error_rate_percent}
+                sub={`近 1 小时：请求 ${formatNumber(data?.api.request_count_1h)} · 5xx 错误 ${formatNumber(data?.api.error_count_1h)}`}
+              />
+            </Col>
+            <Col xs={24} sm={12} lg={8}>
+              <MetricCard
+                title="定时任务"
+                main={`${formatNumber(data?.jobs.enabled)} / ${formatNumber(data?.jobs.total)}`}
+                sub={`已启用 / 注册任务 · 最近执行失败 ${formatNumber(data?.jobs.failed_last_run)}`}
+                extra={<JobsTag metrics={data} />}
+              />
+            </Col>
+            <Col xs={24} sm={12} lg={8}>
+              <Card size="small" title="队列积压">
+                {queues.length === 0 ? (
+                  <SfEmpty description="未注入队列统计（asynq Inspector 缺省省略，monitor.go:196）" />
+                ) : (
+                  <Flex vertical gap={8}>
+                    {queues.map((queue) => (
+                      <Flex key={queue.queue} justify="space-between" gap={8} wrap="wrap">
+                        <Text strong>{queue.queue}</Text>
+                        <Text type="secondary" className="sf-num" style={{ fontSize: 12 }}>
+                          待处理 {formatNumber(queue.pending)} · 执行中 {formatNumber(queue.active)} · 计划{' '}
+                          {formatNumber(queue.scheduled)} · 重试 {formatNumber(queue.retry)}
+                        </Text>
+                      </Flex>
+                    ))}
+                  </Flex>
+                )}
+              </Card>
             </Col>
           </Row>
 
-          {/* API 请求/错误趋势：图表数据全部来自契约端点 apiTrend（近 24 小时） */}
-          <Card size="small" title="API 请求 / 错误趋势（近 24 小时）">
+          {/* API 请求/错误趋势：图表数据全部来自契约端点 api_trend（近 24 小时，5 分钟聚桶） */}
+          <Card size="small" title="API 请求 / 错误趋势（近 24 小时 · 5 分钟聚桶）">
             {trendData.length === 0 ? (
-              <SfEmpty description="暂无趋势采样数据" />
+              <SfEmpty description="暂无趋势采样数据（进程内采样随请求积累，服务重启后清零）" />
             ) : (
               <Suspense fallback={<Skeleton active paragraph={{ rows: 5 }} />}>
                 <Line
@@ -169,25 +225,48 @@ export default function MonitorPage() {
             )}
           </Card>
 
-          {(data?.uptimeSeconds != null || data?.queuedTasks != null) && (
-            <Card size="small" title="运行状况">
-              <Flex gap={32} wrap="wrap">
-                {data?.uptimeSeconds != null && (
-                  <Statistic
-                    title="运行时长"
-                    value={`${formatNumber(Math.floor(data.uptimeSeconds / 3600))} 小时 ${formatNumber(Math.floor((data.uptimeSeconds % 3600) / 60))} 分`}
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                )}
-                {data?.queuedTasks != null && (
-                  <Statistic
-                    title="队列任务"
-                    value={formatNumber(data.queuedTasks)}
-                    valueStyle={{ fontSize: 18 }}
-                  />
-                )}
+          {/* 运行信息：进程运行时长 + 版本三元组（构建提交缺省不展示，不造假版本号） */}
+          <SfDetailSection title="运行信息">
+            <Flex gap={32} wrap="wrap">
+              <Statistic
+                title="运行时长"
+                value={formatUptime(data?.uptime_seconds)}
+                valueStyle={{ fontSize: 18 }}
+              />
+              <Statistic
+                title="应用版本"
+                value={data?.version || EMPTY_TEXT}
+                valueStyle={{ fontSize: 18 }}
+              />
+              <Statistic
+                title="Go 版本"
+                value={data?.go_version || EMPTY_TEXT}
+                valueStyle={{ fontSize: 18 }}
+              />
+              {data?.commit ? (
+                <Flex vertical gap={2}>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    构建提交
+                  </Text>
+                  <Text className="sf-num" style={{ wordBreak: 'break-all', maxWidth: 220 }}>
+                    {data.commit}
+                  </Text>
+                </Flex>
+              ) : null}
+            </Flex>
+          </SfDetailSection>
+
+          {/* 指标口径注记：后端 remarks 下发（进程内采样局限、系统资源指标豁免），如实展示 */}
+          {remarks.length > 0 && (
+            <SfDetailSection title="指标口径注记">
+              <Flex vertical gap={4}>
+                {remarks.map((remark) => (
+                  <Text key={remark} type="secondary" style={{ fontSize: 12 }}>
+                    · {remark}
+                  </Text>
+                ))}
               </Flex>
-            </Card>
+            </SfDetailSection>
           )}
         </Flex>
       )}

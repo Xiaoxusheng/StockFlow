@@ -6,51 +6,48 @@ import {
   type LabelValueOption,
 } from './data'
 
-// ---------- 文件中心（excel.md §7 + api.md §5） ----------
-//
-// 前端先行契约：api.md 路由表未列独立文件段，以下端点为前端先行定义，
-// 后端契约冻结后统一回对（对齐 data.ts 数据中心契约的先行模式）：
-//   GET    /api/files               文件列表（module/business_no 筛选，excel.md §7）
-//   POST   /api/files               上传（multipart，api.md §5 上传安全）
-//   GET    /api/files/:id/download  下载（复用 data.ts downloadFile 认证下载）
-//   DELETE /api/files/:id           删除
-// 后端未交付时页面呈统一错误态/空态；前端不解析、不伪造、不生成假文件。
+// ---------- 文件中心（后端 M3 已交付：GET/POST /api/files + /{id}/download|preview + DELETE，
+// internal/datax/handler.go:118-124；出参 FileItem snake_case，service_file.go:36-50） ----------
 
-/** 文件 ID（后端 ID 出参统一序列化为字符串，internal/database/model.go:22） */
-export type FileId = string
+/** 文件 ID（后端 int64 出参为数字；保留 string 兼容——backend-m1-plan §1 全局约定） */
+export type FileId = number | string
 
-/** 文件中心分页筛选（excel.md §7：按业务模块/关联单据过滤可见文件；参数名前端先行，冻结后回对） */
+/** 文件中心分页筛选（handler.go:311-324：module/business_no/keyword） */
 export interface FileQuery extends PageQuery {
   module?: string
   business_no?: string
+  /** 文件名模糊匹配（handler.go:318） */
+  keyword?: string
 }
 
-/** 文件记录（excel.md §7 七字段 + 访问地址；字段名前端先行，冻结后回对） */
+/** 文件记录（FileItem，internal/datax/service_file.go:36-50 字段全量；
+ * excel.md §7 记录字段 + 访问地址） */
 export interface FileItem {
   id: FileId
-  /** 文件名（excel.md §7；存储路径由服务端生成，前端不拼接，api.md §5） */
-  fileName: string
-  /** 文件类型（MIME 或类型标识，如 image/png / xlsx） */
-  fileType?: string
+  /** 文件名（存储路径由服务端生成，前端不拼接，api.md §5） */
+  file_name: string
+  /** 扩展名白名单值（.xlsx 等） */
+  file_type: string
+  mime_type: string
   /** 大小（字节） */
-  size?: number
-  /** 上传人 */
-  uploader?: string
-  /** 上传时间（ISO 字符串） */
-  uploadedAt?: string
-  /** 业务模块（excel.md §7；展示名经 resolveModuleLabel 兜底） */
-  module?: string
-  /** 业务模块展示名（后端下发；缺省由 resolveModuleLabel 按契约值兜底） */
-  moduleName?: string
-  /** 关联单据号（excel.md §7） */
-  businessNo?: string
-  /** 缩略图地址（图片类型；后端下发的可直访地址，加载失败时降级为类型图标） */
-  thumbnailUrl?: string
-  /** 下载地址（后端下发；缺省回退 /api/files/:id/download，一律经认证下载） */
-  downloadUrl?: string
+  size_bytes: number
+  /** 业务模块（展示名经 resolveModuleLabel 兜底） */
+  module: string
+  /** 业务模块展示名（后端下发） */
+  module_name?: string
+  /** 关联单据号 */
+  business_no?: string
+  uploader_id?: number
+  uploader_name: string
+  /** 下载地址（后端下发；一律经认证 Blob 下载） */
+  download_url: string
+  /** 文件有效期（过期自动清理） */
+  expires_at?: string
+  created_at: string
 }
 
-/** 上传契约（POST /api/files multipart；模块/单据随文件一起登记，excel.md §7） */
+/** 上传契约（POST /api/files multipart 字段：module / business_no / file，
+ * FileUploadInput，service_file.go:26-30） */
 export interface FileUploadPayload {
   file: File
   /** 业务模块（FILE_MODULE_OPTIONS 值集） */
@@ -60,7 +57,7 @@ export interface FileUploadPayload {
 }
 
 /** 文件中心业务模块选项（excel.md §7 统一登记；值集 = 导入类型 ∪ 导出模块去重，
- * 复用 data.ts 既有模块契约命名，前端先行，冻结后回对） */
+ * 复用 data.ts 模块契约命名） */
 export const FILE_MODULE_OPTIONS: LabelValueOption[] = Array.from(
   new Map([...IMPORT_TYPE_OPTIONS, ...EXPORT_MODULE_OPTIONS].map((option) => [option.value, option])).values(),
 )
@@ -73,8 +70,8 @@ export const FILE_UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.xlsx,.xls,.c
 const FILE_REQUEST_TIMEOUT_MS = 60_000
 
 /** 下载地址：后端下发优先，缺省回退契约端点（不拼接任何用户输入，api.md §5） */
-export function resolveFileDownloadPath(file: Pick<FileItem, 'id' | 'downloadUrl'>): string {
-  return file.downloadUrl ?? `/api/files/${file.id}/download`
+export function resolveFileDownloadPath(file: Pick<FileItem, 'id' | 'download_url'>): string {
+  return file.download_url ?? `/api/files/${file.id}/download`
 }
 
 /**
@@ -91,7 +88,7 @@ export async function fetchFileObjectUrl(url: string): Promise<string> {
 }
 
 export const fileApi = {
-  /** 文件列表（excel.md §7：文件名/类型/大小/上传人/时间/业务模块/关联单据） */
+  /** 文件列表（GET /api/files：文件名/类型/大小/上传人/时间/业务模块/关联单据） */
   list: (query: FileQuery) => http.get<PageResult<FileItem>>('/api/files', { params: query }),
   /** 上传（multipart；Content-Type 与 boundary 由 axios 按 FormData 自动携带） */
   upload: (payload: FileUploadPayload) => {
@@ -103,6 +100,8 @@ export const fileApi = {
       timeout: FILE_REQUEST_TIMEOUT_MS,
     })
   },
-  /** 删除（危险操作，前端经 SfConfirm 二次确认；api.md §6：敏感操作由后端记操作日志） */
+  /** 预览（GET /api/files/{id}/preview，handler.go:121——仅图片原样流式返回，不做缩略图） */
+  preview: (id: FileId) => `/api/files/${id}/preview`,
+  /** 删除（软删 + 审计；危险操作，前端经 SfConfirm 二次确认，api.md §6） */
   remove: (id: FileId) => http.delete<unknown>(`/api/files/${id}`),
 }

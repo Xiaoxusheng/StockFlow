@@ -7,6 +7,7 @@ import {
   Input,
   InputNumber,
   Modal,
+  Radio,
   Select,
   Switch,
   Tabs,
@@ -32,12 +33,13 @@ import {
   printingApi,
   resolveObjectTypeLabel,
   resolvePaperLabel,
-  downloadPrintPdf,
   type BarcodeSymbology,
+  type PrintExecuteResult,
   type PrintHistoryItem,
   type PrintHistoryQuery,
   type PrintObjectType,
   type PrintTaskCreatePayload,
+  type PrintTaskExecutePayload,
   type PrintTaskItem,
   type PrintTaskQuery,
   type PrintTaskStatus,
@@ -104,26 +106,24 @@ interface TemplateFormValues {
   paper: string
   barcodeSymbology?: BarcodeSymbology
   qrcodeEnabled?: boolean
-  /** 已绑定字段键集合（提交时映射为 PrintTemplateField[]） */
+  /** 已绑定字段键集合（提交时仅传键列表，文案由后端预设注册表回填） */
   fieldKeys?: string[]
   headerText?: string
   remark?: string
 }
 
-function toTemplatePayload(values: TemplateFormValues, objectType: PrintObjectType): PrintTemplateSavePayload {
-  const presets = PRINT_TEMPLATE_FIELD_PRESETS[objectType]
-  const labelType = isLabelObjectType(objectType)
+/** 表单值 → TemplateSaveInput（snake_case；fields 仅键数组，后端按预设注册表回填文案——
+ * internal/printing/service_template.go:18-28，禁止前端自造文案） */
+function toTemplatePayload(values: TemplateFormValues): PrintTemplateSavePayload {
+  const labelType = isLabelObjectType(values.objectType)
   return {
     name: values.name.trim(),
-    objectType,
+    object_type: values.objectType,
     paper: values.paper,
-    barcodeSymbology: labelType ? (values.barcodeSymbology ?? 'CODE128') : undefined,
-    qrcodeEnabled: labelType ? (values.qrcodeEnabled ?? false) : undefined,
-    fields: (values.fieldKeys ?? []).map((key) => ({
-      key,
-      label: presets.find((preset) => preset.value === key)?.label ?? key,
-    })),
-    headerText: values.headerText?.trim() || undefined,
+    barcode_symbology: labelType ? (values.barcodeSymbology ?? 'CODE128') : undefined,
+    qrcode_enabled: labelType ? (values.qrcodeEnabled ?? false) : undefined,
+    fields: values.fieldKeys ?? [],
+    header_text: values.headerText?.trim() || undefined,
     remark: values.remark,
   }
 }
@@ -193,12 +193,12 @@ function TemplateTab() {
     setModalOpen(true)
     form.setFieldsValue({
       name: record.name,
-      objectType: record.objectType,
+      objectType: record.object_type,
       paper: record.paper,
-      barcodeSymbology: record.barcodeSymbology,
-      qrcodeEnabled: record.qrcodeEnabled,
+      barcodeSymbology: record.barcode_symbology,
+      qrcodeEnabled: record.qrcode_enabled,
       fieldKeys: record.fields?.map((field) => field.key),
-      headerText: record.headerText,
+      headerText: record.header_text,
       remark: record.remark,
     })
   }
@@ -206,7 +206,7 @@ function TemplateTab() {
   const handleSubmit = () => {
     form
       .validateFields()
-      .then((values) => saveMutation.mutate(toTemplatePayload(values, values.objectType)))
+      .then((values) => saveMutation.mutate(toTemplatePayload(values)))
       .catch(() => {
         // 表单校验失败：Form.Item 已内联提示
       })
@@ -222,7 +222,7 @@ function TemplateTab() {
     },
     {
       title: '业务类型',
-      dataIndex: 'objectType',
+      dataIndex: 'object_type',
       width: 110,
       render: (value: string) => resolveObjectTypeLabel(value),
     },
@@ -238,7 +238,7 @@ function TemplateTab() {
       width: 90,
       render: (value: string) => <SfStatusTag status={value?.toLowerCase()} />,
     },
-    { title: '修改时间', dataIndex: 'updatedAt', width: 170, render: renderDateTime },
+    { title: '修改时间', dataIndex: 'updated_at', width: 170, render: renderDateTime },
     {
       title: '操作',
       key: 'actions',
@@ -287,7 +287,8 @@ function TemplateTab() {
         <SfSearchForm
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '模板名称' },
-            { name: 'objectType', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
+            // 业务类型筛选键走 snake_case 线格式（后端 handler.go:169 c.Query("object_type")）
+            { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: TEMPLATE_STATUS_OPTIONS },
           ]}
           onSearch={(values) => {
@@ -403,12 +404,18 @@ function TemplateTab() {
   )
 }
 
-// ================= 打印任务（printing.md §1.2：创建任务 → 选择模板 → 预览 → 执行 → 记录日志） =================
+// ================= 打印任务（printing.md §1.2：创建任务 → 预览 → 执行 → 记录日志） =================
 
 interface TaskFormValues {
   templateId?: string
   dataIdsText?: string
   copies?: number
+}
+
+/** 执行确认表单值（printing.md §1.2 执行打印 → 记录打印日志；result 仅可回填一次） */
+interface TaskConfirmFormValues {
+  result: PrintExecuteResult
+  message?: string
 }
 
 /** 任务在途轮询间隔（与数据中心任务一致，excel.md §3） */
@@ -417,8 +424,9 @@ const POLL_INTERVAL_MS = 5000
 function TaskTab() {
   const [params, setParams] = useState<PrintTaskQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [form] = Form.useForm<TaskFormValues>()
+  const [confirmTask, setConfirmTask] = useState<PrintTaskItem | null>(null)
+  const [confirmForm] = Form.useForm<TaskConfirmFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -438,7 +446,7 @@ function TaskTab() {
   const templateOptions = templateItems
     .filter((item) => item.status === 'ENABLED')
     .map((item) => ({
-      label: `${item.name}（${resolveObjectTypeLabel(item.objectType)}·${resolvePaperLabel(item.paper)}）`,
+      label: `${item.name}（${resolveObjectTypeLabel(item.object_type)}·${resolvePaperLabel(item.paper)}）`,
       value: String(item.id),
     }))
   const selectedTemplateId = Form.useWatch('templateId', form)
@@ -464,21 +472,50 @@ function TaskTab() {
     onSuccess: () => {
       setModalOpen(false)
       form.resetFields()
-      messageApi.success('打印任务已创建，任务成功后可预览并下载 PDF')
+      messageApi.success('打印任务已创建，内容行装配完成后可在「预览」中查看渲染内容')
       invalidate()
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
-  const handleDownload = async (record: PrintTaskItem) => {
-    setDownloadingId(record.id)
-    try {
-      await downloadPrintPdf(record)
-    } catch (error) {
-      messageApi.error(resolveErrorMessage(error))
-    } finally {
-      setDownloadingId(null)
-    }
+  // 执行确认（POST /api/prints/tasks/{id}/execute，{result, message?}，service_task.go:258-296
+  // 回填一次守卫：result IS NULL → 命中，重复确认 409）。printing.md §1.2「执行打印 → 记录
+  // 打印日志」的落库入口：打印历史 = result 已回填子集（repository.go:208-209）。
+  const executeMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: PrintTaskExecutePayload }) =>
+      printingApi.tasks.execute(id, payload),
+    onSuccess: (task) => {
+      setConfirmTask(null)
+      confirmForm.resetFields()
+      messageApi.success(
+        task.result === 'FAILED'
+          ? `任务 ${task.print_no} 已确认打印失败，已如实记录`
+          : `任务 ${task.print_no} 已确认打印成功，记录已写入打印历史`,
+      )
+      invalidate()
+      void queryClient.invalidateQueries({ queryKey: ['printing', 'history'] })
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  const openConfirm = (task: PrintTaskItem) => {
+    confirmForm.resetFields()
+    setConfirmTask(task)
+  }
+
+  const handleConfirmSubmit = () => {
+    if (!confirmTask) return
+    confirmForm
+      .validateFields()
+      .then((values) => {
+        executeMutation.mutate({
+          id: String(confirmTask.id),
+          payload: { result: values.result, message: values.message?.trim() || undefined },
+        })
+      })
+      .catch(() => {
+        // 表单校验失败：Form.Item 已内联提示
+      })
   }
 
   const handleSubmit = () => {
@@ -490,8 +527,8 @@ function TaskTab() {
           .map((item) => item.trim())
           .filter(Boolean)
         createMutation.mutate({
-          templateId: Number(values.templateId),
-          dataIds,
+          template_id: Number(values.templateId),
+          data_ids: dataIds,
           copies: values.copies ?? 1,
         })
       })
@@ -501,41 +538,41 @@ function TaskTab() {
   }
 
   const columns: ColumnsType<PrintTaskItem> = [
-    { title: '任务ID', dataIndex: 'id', width: 150, ellipsis: true, fixed: 'left' },
+    { title: '任务单号', dataIndex: 'print_no', width: 170, ellipsis: true, fixed: 'left' },
     {
       title: '业务类型',
-      dataIndex: 'objectType',
+      dataIndex: 'object_type',
       width: 110,
       render: (value: string) => resolveObjectTypeLabel(value),
     },
     {
       title: '模板',
-      dataIndex: 'templateName',
+      dataIndex: 'template_name',
       width: 180,
       ellipsis: true,
       render: (value?: string) => value ?? '-',
     },
     { title: '纸张', dataIndex: 'paper', width: 190, render: (value: string) => resolvePaperLabel(value) },
-    { title: '数据量', dataIndex: 'totalCount', width: 90, align: 'right', render: renderCount },
+    { title: '数据量', dataIndex: 'total_count', width: 90, align: 'right', render: renderCount },
     { title: '份数', dataIndex: 'copies', width: 80, align: 'right', render: renderCount },
     {
       title: '状态',
       dataIndex: 'status',
       width: 110,
       render: (value: string, record: PrintTaskItem) =>
-        record.errorMessage ? (
-          <Tooltip title={record.errorMessage}>{renderPrintTaskStatus(value)}</Tooltip>
+        record.error_message ? (
+          <Tooltip title={record.error_message}>{renderPrintTaskStatus(value)}</Tooltip>
         ) : (
           renderPrintTaskStatus(value)
         ),
     },
-    { title: '创建人', dataIndex: 'createdBy', width: 110, render: (value?: string) => value ?? '-' },
-    { title: '创建时间', dataIndex: 'createdAt', width: 170, render: renderDateTime },
+    { title: '创建人', dataIndex: 'created_by', width: 110, render: (value?: string) => value ?? '-' },
+    { title: '创建时间', dataIndex: 'created_at', width: 170, render: renderDateTime },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 140,
+      width: 200,
       render: (_: unknown, record: PrintTaskItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
           <Button
@@ -545,22 +582,26 @@ function TaskTab() {
           >
             预览
           </Button>
-          {record.status === 'SUCCESS' ? (
-            <Button
-              type="link"
-              size="small"
-              loading={downloadingId === record.id}
-              onClick={() => void handleDownload(record)}
-            >
-              下载 PDF
+          {/* 执行确认：printing.md §1.2「执行打印 → 记录打印日志」，result 仅可回填一次
+             （service_task.go:258-296 重复确认 409），已确认任务置灰展示结果 */}
+          {record.result === undefined ? (
+            <Button type="link" size="small" onClick={() => openConfirm(record)}>
+              执行确认
             </Button>
           ) : (
-            <Tooltip title={isPrintTaskFinished(record.status) ? '失败任务无 PDF 产物' : '任务成功后可下载 PDF'}>
+            <Tooltip title={`打印结果已确认：${PRINT_RESULT_META[record.result]?.label ?? record.result}`}>
               <Button type="link" size="small" disabled>
-                下载 PDF
+                执行确认
               </Button>
             </Tooltip>
           )}
+          {/* 后端打印域无任务 PDF 下载端点（internal/printing/handler.go 路由收尾于 GET /barcode）：
+              如实置灰并提示，不调用不存在的端点、不前端伪造 PDF（printing.md §5） */}
+          <Tooltip title="后端暂未提供任务 PDF 下载端点；请在预览页通过「打印」经浏览器打印层输出">
+            <Button type="link" size="small" disabled>
+              下载 PDF
+            </Button>
+          </Tooltip>
         </span>
       ),
     },
@@ -572,7 +613,8 @@ function TaskTab() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'objectType', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
+            // 业务类型筛选键走 snake_case 线格式（后端 handler.go:268 c.Query("object_type")）
+            { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: TASK_STATUS_OPTIONS },
           ]}
           onSearch={(values) => {
@@ -598,7 +640,7 @@ function TaskTab() {
             </Button>
           }
           emptyText="暂无打印任务，点击「新建打印任务」创建（printing.md §1.2 打印统一走任务模型）"
-          scrollX={1330}
+          scrollX={1350}
         />
       </Card>
 
@@ -634,7 +676,7 @@ function TaskTab() {
               type="info"
               showIcon
               style={{ marginBottom: 16 }}
-              message={`${resolveObjectTypeLabel(selectedTemplate.objectType)} · ${resolvePaperLabel(selectedTemplate.paper)}`}
+              message={`${resolveObjectTypeLabel(selectedTemplate.object_type)} · ${resolvePaperLabel(selectedTemplate.paper)}`}
               description="打印前请先预览确认（printing.md §3：批量打印前必须显示影响数量并支持预览确认）"
             />
           )}
@@ -656,6 +698,44 @@ function TaskTab() {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Modal
+        title={`执行确认 · ${confirmTask?.print_no ?? ''}`}
+        open={confirmTask !== null}
+        width={480}
+        forceRender
+        confirmLoading={executeMutation.isPending}
+        okText="确认回填"
+        onOk={handleConfirmSubmit}
+        onCancel={() => setConfirmTask(null)}
+      >
+        {executeMutation.isError && (
+          <Alert
+            type="error"
+            showIcon
+            message={resolveErrorMessage(executeMutation.error)}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="打印结果仅可回填一次，提交后不可修改"
+          description="确认后回填打印人 / 打印时间 / 打印结果并写入打印历史（printing.md §1.2 执行打印 → 记录打印日志）"
+        />
+        <Form<TaskConfirmFormValues> form={confirmForm} layout="vertical" initialValues={{ result: 'SUCCESS' }}>
+          <Form.Item name="result" label="打印结果" rules={[{ required: true, message: '请选择打印结果' }]}>
+            <Radio.Group>
+              <Radio value="SUCCESS">打印成功</Radio>
+              <Radio value="FAILED">打印失败</Radio>
+            </Radio.Group>
+          </Form.Item>
+          <Form.Item name="message" label="备注（可选）">
+            <Input.TextArea rows={3} maxLength={255} placeholder="如：批量打印完成 / 条码生成失败等" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </>
   )
 }
@@ -672,27 +752,27 @@ function HistoryTab() {
   })
 
   const columns: ColumnsType<PrintHistoryItem> = [
-    { title: '打印人', dataIndex: 'printedBy', width: 120, render: (value?: string) => value ?? '-' },
-    { title: '打印时间', dataIndex: 'printedAt', width: 170, render: renderDateTime },
+    { title: '打印人', dataIndex: 'printed_by', width: 120, render: (value?: string) => value ?? '-' },
+    { title: '打印时间', dataIndex: 'printed_at', width: 170, render: renderDateTime },
     {
       title: '模板',
-      dataIndex: 'templateName',
+      dataIndex: 'template_name',
       width: 200,
       ellipsis: true,
       render: (value?: string) => value ?? '-',
     },
     {
       title: '业务类型',
-      dataIndex: 'objectType',
+      dataIndex: 'object_type',
       width: 110,
       render: (value: string) => resolveObjectTypeLabel(value),
     },
-    { title: '数据量', dataIndex: 'totalCount', width: 100, align: 'right', render: renderCount },
+    { title: '数据量', dataIndex: 'total_count', width: 100, align: 'right', render: renderCount },
     {
       title: '结果',
       dataIndex: 'result',
       width: 100,
-      render: (value: string, record: PrintHistoryItem) => renderPrintResult(value, record.errorMessage),
+      render: (value: string, record: PrintHistoryItem) => renderPrintResult(value, record.error_message),
     },
   ]
 
@@ -701,7 +781,8 @@ function HistoryTab() {
       <SfSearchForm
         fields={[
           { name: 'keyword', label: '关键词', control: 'input', placeholder: '打印人 / 模板名称' },
-          { name: 'objectType', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
+          // 业务类型筛选键走 snake_case 线格式（后端 handler.go:344 c.Query("object_type")）
+          { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
           { name: 'result', label: '打印结果', control: 'select', options: RESULT_OPTIONS },
         ]}
         onSearch={(values) => {
@@ -721,7 +802,7 @@ function HistoryTab() {
         pagination={list.pagination}
         total={list.total}
         onPageChange={list.onPageChange}
-        emptyText="暂无打印历史；打印记录由后端在任务执行时写入（printing.md §6 打印记录入操作日志）"
+        emptyText="暂无打印历史；打印记录由后端在任务执行确认时写入（printing.md §6 打印记录入操作日志）"
         scrollX={880}
       />
     </Card>
@@ -730,7 +811,8 @@ function HistoryTab() {
 
 /**
  * 打印中心（/data/printing，frontend.md §13：打印模板 / 打印任务 / 打印历史 / 打印预览）。
- * 模板与任务动作全部接 /api/prints 契约端点；后端打印域未交付时呈统一错误态，
+ * 模板 CRUD/复制/启停、任务创建、历史三页签全部接 /api/prints 契约端点（snake_case 视图，
+ * internal/printing/service.go:113-249）；任务 PDF 下载端点后端未交付，下载按钮如实置灰提示。
  * 预览在独立页面 /data/printing/preview（printing.md §5 禁止点击直接打印当前网页）。
  */
 export default function PrintingCenterPage() {

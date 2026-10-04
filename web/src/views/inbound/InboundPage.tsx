@@ -1,123 +1,140 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import {
   inboundApi,
-  type InboundItem,
-  type InboundQuery,
-  type InboundStatus,
-  type InboundType,
+  type InboundOrder,
+  type InboundOrderQuery,
+  type InboundOrderStatus,
+  type InboundSourceType,
 } from '@/api/inbound'
+import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import type { StatusSemantic } from '@/types/status'
+import { formatDateTime } from '@/utils/format'
 
 const { Text } = Typography
 
-/** 入库类型文案（business-flow.md §3.1；后端枚举冻结前未知值回退展示原始值） */
-const TYPE_LABEL: Record<string, string | undefined> = {
-  purchase: '采购入库',
-  production: '生产入库',
-  sales_return: '销售退货入库',
-  transfer: '调拨入库',
-  other: '其他入库',
+/** 入库来源类型文案（api/inbound.ts InboundSourceType＝迁移 CHECK 值域：PURCHASE/OTHER） */
+const SOURCE_TYPE_LABEL: Record<InboundSourceType, string> = {
+  PURCHASE: '采购入库',
+  OTHER: '其他入库',
 }
 
-const TYPE_OPTIONS: Array<{ label: string; value: InboundType }> = [
-  { label: '采购入库', value: 'purchase' },
-  { label: '生产入库', value: 'production' },
-  { label: '销售退货入库', value: 'sales_return' },
-  { label: '调拨入库', value: 'transfer' },
-  { label: '其他入库', value: 'other' },
-]
+/**
+ * 入库单七态 → SfStatusTag（models.go:27-33 迁移 CHECK 同源）。
+ * awaiting_qc/awaiting_putaway 尚未入 types/status.ts 全局注册表，
+ * 经 label/semantic 兜底传参（SfStatusTag 支持未注册状态直接指定），与盘点中心 CountStatusTag 同模式。
+ */
+const INBOUND_STATUS_TAG: Record<InboundOrderStatus, { key: string; label: string; semantic: StatusSemantic }> = {
+  DRAFT: { key: 'draft', label: '草稿', semantic: 'neutral' },
+  RECEIVING: { key: 'receiving', label: '收货中', semantic: 'processing' },
+  AWAITING_QC: { key: 'awaiting_qc', label: '待质检', semantic: 'pending' },
+  AWAITING_PUTAWAY: { key: 'awaiting_putaway', label: '待上架', semantic: 'pending' },
+  COMPLETED: { key: 'completed', label: '已完成', semantic: 'success' },
+  CANCELLED: { key: 'cancelled', label: '已取消', semantic: 'neutral' },
+  CLOSED: { key: 'closed', label: '已关闭', semantic: 'neutral' },
+}
 
-/** 状态选项与 types/status.ts 入库状态注册表一致 */
-const STATUS_OPTIONS: Array<{ label: string; value: InboundStatus }> = [
-  { label: '草稿', value: 'draft' },
-  { label: '待收货', value: 'pending_receipt' },
-  { label: '收货中', value: 'receiving' },
-  { label: '已收货', value: 'received' },
-  { label: '待质检', value: 'pending_inspection' },
-  { label: '待上架', value: 'pending_putaway' },
-  { label: '已上架', value: 'putaway_completed' },
-  { label: '已完成', value: 'completed' },
-  { label: '已关闭', value: 'closed' },
-  { label: '已取消', value: 'cancelled' },
-]
+function InboundStatusTag({ status }: { status: InboundOrderStatus }) {
+  const meta = INBOUND_STATUS_TAG[status]
+  return <SfStatusTag status={meta?.key ?? status} label={meta?.label} semantic={meta?.semantic} />
+}
 
-const COLUMNS: ColumnsType<InboundItem> = [
-  { title: '入库单号', dataIndex: 'inboundNo', width: 160, fixed: 'left' },
-  {
-    title: '入库类型',
-    dataIndex: 'inboundType',
-    width: 110,
-    render: (v: string) => TYPE_LABEL[v] ?? v,
-  },
-  { title: '来源单号', dataIndex: 'sourceNo', width: 150, render: (v?: string) => v ?? '-' },
-  {
-    title: '供应商',
-    dataIndex: 'supplierName',
-    width: 160,
-    ellipsis: true,
-    render: (v?: string) => (
-      <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>
-        {v ?? '-'}
-      </Text>
-    ),
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  {
-    title: '计划数量',
-    dataIndex: 'totalQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '已收数量',
-    dataIndex: 'receivedQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 100,
-    render: (v: string) => <SfStatusTag status={v} />,
-  },
-  { title: '创建人', dataIndex: 'operatorName', width: 100, render: (v?: string) => v ?? '-' },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    width: 170,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
+const STATUS_OPTIONS = (
+  Object.entries(INBOUND_STATUS_TAG) as Array<
+    [InboundOrderStatus, (typeof INBOUND_STATUS_TAG)[InboundOrderStatus]]
+  >
+).map(([value, meta]) => ({ label: meta.label, value }))
 
-/** 入库管理（frontend.md F7 入库/出库流程；GET /api/inbounds，子路径未冻结） */
+const SOURCE_TYPE_OPTIONS = (Object.entries(SOURCE_TYPE_LABEL) as Array<[InboundSourceType, string]>).map(
+  ([value, label]) => ({ label, value }),
+)
+
+/** 入库单列表（frontend.md F7 入库/出库流程；GET /api/inbounds，出参为 InboundOrder 裸模型
+ * snake_case，internal/purchase/models.go:164-178；仓库/来源类型经筛选回传
+ * keyword/status/source_type/source_no/warehouse_id，purchase/handler.go:220-243） */
 export default function InboundPage() {
-  const [params, setParams] = useState<InboundQuery>({})
+  const [params, setParams] = useState<InboundOrderQuery>({})
   const navigate = useNavigate()
-  const list = usePagedList<InboundItem, InboundQuery>({
+
+  // 仓库 options（GET /api/warehouses）：仓库筛选下拉 + warehouse_id→名称本地映射；
+  // 拉取失败降级为 ID 展示 / 空下拉，不阻塞列表（api/options.ts 约定）
+  const warehouseOptions = useQuery({
+    queryKey: ['inbound', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const warehouseMaps = useMemo(
+    () => buildWarehouseMaps(warehouseOptions.data ?? []),
+    [warehouseOptions.data],
+  )
+
+  const list = usePagedList<InboundOrder, InboundOrderQuery>({
     queryKey: ['inbound', 'orders'],
     fetch: (q) => inboundApi.list(q),
     params,
+    // §26.3 进详情再返回时恢复离开前分页（OutboundPage 'outbound-orders' 同款）
+    persistKey: 'inbound-orders',
   })
 
-  // 既有列保持不变，仅追加「详情」行入口（/inbound/:id，无菜单路由）
-  const columns: ColumnsType<InboundItem> = [
-    ...COLUMNS,
+  const columns: ColumnsType<InboundOrder> = [
+    { title: '入库单号', dataIndex: 'inbound_no', width: 170, fixed: 'left' },
+    {
+      title: '入库类型',
+      dataIndex: 'source_type',
+      width: 110,
+      render: (v: InboundSourceType) => SOURCE_TYPE_LABEL[v] ?? v,
+    },
+    {
+      title: '来源单号',
+      dataIndex: 'source_no',
+      width: 160,
+      render: (v: string) =>
+        v ? (
+          <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>
+            {v}
+          </Text>
+        ) : (
+          '-'
+        ),
+    },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      width: 120,
+      ellipsis: true,
+      render: (v: number) => warehouseMaps.name.get(String(v)) ?? `#${String(v)}`,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: InboundOrderStatus) => <InboundStatusTag status={v} />,
+    },
+    {
+      title: '收货完成时间',
+      dataIndex: 'received_at',
+      width: 170,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
       width: 80,
-      render: (_: unknown, record: InboundItem) => (
+      render: (_: unknown, record: InboundOrder) => (
         <Button type="link" size="small" onClick={() => navigate(`/inbound/${record.id}`)}>
           详情
         </Button>
@@ -126,7 +143,7 @@ export default function InboundPage() {
   ]
 
   const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as InboundQuery)
+    setParams(values as InboundOrderQuery)
     list.resetToFirstPage()
   }
 
@@ -139,14 +156,23 @@ export default function InboundPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '入库单号 / 来源单号 / 供应商' },
-            { name: 'inboundType', label: '入库类型', control: 'select', options: TYPE_OPTIONS },
+            { name: 'keyword', label: '关键词', control: 'input', placeholder: '入库单号 / 来源单号' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
+            { name: 'source_type', label: '入库类型', control: 'select', options: SOURCE_TYPE_OPTIONS },
+            { name: 'source_no', label: '来源单号', control: 'input', placeholder: '按来源单号精确匹配' },
+            {
+              name: 'warehouse_id',
+              label: '仓库',
+              control: 'select',
+              options: (warehouseOptions.data ?? []).map((w) => ({
+                label: `${w.name}（${w.code}）`,
+                value: String(w.id),
+              })),
+            },
           ]}
           onSearch={handleSearch}
         />
-        <SfTable<InboundItem>
+        <SfTable<InboundOrder>
           storageKey="inbound-list"
           rowKey="id"
           columns={columns}
@@ -159,7 +185,7 @@ export default function InboundPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有入库单"
-          scrollX={1330}
+          scrollX={1080}
         />
       </Card>
     </div>

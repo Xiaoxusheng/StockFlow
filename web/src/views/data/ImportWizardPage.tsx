@@ -23,10 +23,11 @@ import type { ReactNode } from 'react'
 import {
   DATA_TASK_STATUS_META,
   dataApi,
-  downloadFile,
+  downloadImportErrorFile,
+  downloadImportTemplate,
   isHighRiskImport,
   resolveModuleLabel,
-  type DataTaskItem,
+  type DataTask,
   type DataTaskQuery,
   type DataTaskStatus,
   type ImportConfirmResult,
@@ -92,22 +93,22 @@ const ERROR_COLUMNS: ColumnsType<ImportValidationError> = [
   { title: '错误原因', dataIndex: 'message' },
 ]
 
-/** 导入任务记录列（excel.md §4 任务记录模型） */
-const IMPORT_TASK_COLUMNS: ColumnsType<DataTaskItem> = [
-  { title: '任务ID', dataIndex: 'id', width: 170, ellipsis: true },
+/** 导入任务记录列（excel.md §4 任务记录模型；出参 ListTaskItem snake_case，service_import.go:794-815） */
+const IMPORT_TASK_COLUMNS: ColumnsType<DataTask> = [
+  { title: '任务单号', dataIndex: 'task_no', width: 170, ellipsis: true },
   {
     title: '导入类型',
     key: 'module',
     width: 130,
-    render: (_: unknown, record: DataTaskItem) => record.moduleName ?? resolveModuleLabel(record.module),
+    render: (_: unknown, record: DataTask) => record.module_name ?? resolveModuleLabel(record.module),
   },
-  { title: '文件名', dataIndex: 'fileName', width: 200, ellipsis: true, render: (value?: string) => value ?? '-' },
-  { title: '数量', dataIndex: 'totalRows', width: 90, align: 'right', render: renderCount },
-  { title: '成功', dataIndex: 'successRows', width: 90, align: 'right', render: renderCount },
-  { title: '失败', dataIndex: 'failedRows', width: 90, align: 'right', render: renderCount },
+  { title: '文件名', dataIndex: 'file_name', width: 200, ellipsis: true, render: (value?: string) => value ?? '-' },
+  { title: '数量', dataIndex: 'total_rows', width: 90, align: 'right', render: renderCount },
+  { title: '成功', dataIndex: 'success_rows', width: 90, align: 'right', render: renderCount },
+  { title: '失败', dataIndex: 'failed_rows', width: 90, align: 'right', render: renderCount },
   { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => renderTaskStatus(value) },
-  { title: '开始时间', dataIndex: 'startedAt', width: 160, render: renderDateTime },
-  { title: '结束时间', dataIndex: 'finishedAt', width: 160, render: renderDateTime },
+  { title: '开始时间', dataIndex: 'started_at', width: 160, render: renderDateTime },
+  { title: '结束时间', dataIndex: 'finished_at', width: 160, render: renderDateTime },
 ]
 
 /** 预览单元格统一转可读文本（仅渲染后端解析结果，不做业务解析） */
@@ -120,7 +121,8 @@ function renderPreviewCell(value: unknown): string {
 /**
  * Excel 导入六步向导（/data/imports，frontend.md §12 + excel.md §1.2）：
  * 下载模板 → 上传文件 → 数据校验 → 预览 → 确认导入 → 导入结果。
- * 每一步均为真实后端请求（api/data.ts 前端先行契约），任何步骤失败呈可读错误且可重试；
+ * 每一步均为真实后端请求（api/data.ts 已回对 datax 冻结契约：模板/校验/预览/结果
+ * 出参 snake_case，internal/datax/service_import.go），任何步骤失败呈可读错误且可重试；
  * 前端不做本地解析、不伪造校验/导入结果、不生成假文件（requirements.md §10）。
  */
 export default function ImportWizardPage() {
@@ -144,8 +146,8 @@ export default function ImportWizardPage() {
     queryFn: dataApi.imports.templates,
   })
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data])
-  const selectedTemplate = templates.find((template) => template.importType === importType) ?? null
-  const highRisk = isHighRiskImport(uploadResult?.importType)
+  const selectedTemplate = templates.find((template) => template.import_type === importType) ?? null
+  const highRisk = isHighRiskImport(uploadResult?.import_type)
 
   // 第 4 步：预览为后端解析后的结构化数据（GET /api/imports/{id}/preview），进入该步时加载
   const previewQuery = useQuery({
@@ -159,7 +161,7 @@ export default function ImportWizardPage() {
 
   // 导入任务记录（excel.md §4 数据中心·导入任务）
   const [taskParams, setTaskParams] = useState<DataTaskQuery>({})
-  const tasks = usePagedList<DataTaskItem, DataTaskQuery>({
+  const tasks = usePagedList<DataTask, DataTaskQuery>({
     queryKey: ['data', 'imports', 'tasks'],
     fetch: (query) => dataApi.imports.list(query),
     params: taskParams,
@@ -196,7 +198,8 @@ export default function ImportWizardPage() {
   const confirmMutation = useMutation({
     mutationFn: () => {
       if (!uploadResult) throw new Error('导入任务不存在，请重新上传')
-      return dataApi.imports.confirm(uploadResult.id)
+      // 高危类型必须 confirmed=true 二次确认（excel.md §6.1，service_import.go ConfirmInput）
+      return dataApi.imports.confirm(uploadResult.id, { confirmed: true })
     },
     onSuccess: (result) => {
       setConfirmResult(result)
@@ -226,10 +229,9 @@ export default function ImportWizardPage() {
     if (!selectedTemplate) return
     setDownloadingTemplate(true)
     try {
-      await downloadFile(
-        selectedTemplate.downloadUrl,
-        selectedTemplate.fileName ?? `${selectedTemplate.name}.xlsx`,
-      )
+      // GET /api/imports/templates/{type}：后端按列定义用 excelize 现场生成（流式下发），
+      // 认证 Blob 下载；前端不生成假文件
+      await downloadImportTemplate(selectedTemplate)
     } catch (error) {
       messageApi.error(resolveErrorMessage(error))
     } finally {
@@ -238,11 +240,11 @@ export default function ImportWizardPage() {
   }
 
   const handleDownloadErrorFile = async () => {
-    if (!validateResult?.errorFileUrl) return
+    if (!uploadResult || !validateResult) return
     setDownloadingErrorFile(true)
     try {
-      const fileName = validateResult.errorFileName ?? `导入错误明细_${uploadResult?.id ?? '未知任务'}.xlsx`
-      await downloadFile(validateResult.errorFileUrl, fileName)
+      // 优先校验结果下发的 error_file_url，缺省回退 GET /api/imports/{id}/error-file
+      await downloadImportErrorFile(uploadResult.id, `导入错误明细_${uploadResult.id}.xlsx`, validateResult)
     } catch (error) {
       messageApi.error(resolveErrorMessage(error))
     } finally {
@@ -253,7 +255,7 @@ export default function ImportWizardPage() {
   const handleConfirmImport = () => {
     if (!uploadResult) return
     // 初始化库存导入属高危操作：必须二次确认（excel.md §6.1）
-    if (isHighRiskImport(uploadResult.importType)) {
+    if (isHighRiskImport(uploadResult.import_type)) {
       setRiskAck(false)
       setRiskModalOpen(true)
       return
@@ -326,7 +328,7 @@ export default function ImportWizardPage() {
               <SfError
                 error={templatesQuery.error}
                 onRetry={() => void templatesQuery.refetch()}
-                description="模板列表来自 GET /api/imports/templates；后端交付该接口前，本步骤保持错误态"
+                description="模板列表来自 GET /api/imports/templates，请稍后重试"
               />
             ) : templates.length === 0 ? (
               <SfEmpty description="后端暂未下发导入模板（GET /api/imports/templates 返回为空）" />
@@ -341,7 +343,7 @@ export default function ImportWizardPage() {
                   placeholder="请选择导入类型"
                   value={importType}
                   onChange={handleSelectType}
-                  options={templates.map((template) => ({ label: template.name, value: template.importType }))}
+                  options={templates.map((template) => ({ label: template.name, value: template.import_type }))}
                 />
                 {selectedTemplate?.description && (
                   <Text type="secondary">{selectedTemplate.description}</Text>
@@ -355,7 +357,7 @@ export default function ImportWizardPage() {
                     >
                       下载模板
                     </Button>
-                    {isHighRiskImport(selectedTemplate.importType) && (
+                    {isHighRiskImport(selectedTemplate.import_type) && (
                       <Alert
                         type="warning"
                         showIcon
@@ -398,18 +400,14 @@ export default function ImportWizardPage() {
                 <SfError
                   error={uploadMutation.error}
                   onRetry={() => uploadMutation.mutate()}
-                  description="上传解析由 POST /api/imports（multipart）执行；后端交付前保持错误态，不产生假成功"
+                  description="上传解析由 POST /api/imports（multipart）执行，失败不产生假成功"
                 />
               )}
               {uploadResult !== null && (
                 <Alert
                   type="success"
                   showIcon
-                  message={
-                    uploadResult.totalRows === undefined
-                      ? '文件解析完成，请进入下一步进行数据校验'
-                      : `文件解析完成：共 ${formatNumber(uploadResult.totalRows)} 行数据，请进入下一步进行数据校验`
-                  }
+                  message={`文件解析完成：共 ${formatNumber(uploadResult.total_rows)} 行数据，请进入下一步进行数据校验`}
                 />
               )}
             </Flex>
@@ -427,16 +425,16 @@ export default function ImportWizardPage() {
                 <SfError
                   error={validateMutation.error}
                   onRetry={() => validateMutation.mutate()}
-                  description="校验由 POST /api/imports/{id}/validate 执行；后端交付前保持错误态"
+                  description="校验由 POST /api/imports/{id}/validate 执行，失败可重试"
                 />
               )}
               {validateResult !== null && (
                 <>
-                  {validateResult.errorRows > 0 ? (
+                  {validateResult.error_rows > 0 ? (
                     <Alert
                       type="error"
                       showIcon
-                      message={`校验未通过：${formatNumber(validateResult.errorRows)} 行存在错误`}
+                      message={`校验未通过：${formatNumber(validateResult.error_rows)} 行存在错误`}
                       description="请按下方逐行定位修复数据（或下载错误 Excel 修复后重新上传）；校验通过后才能进入预览。"
                     />
                   ) : (
@@ -444,9 +442,9 @@ export default function ImportWizardPage() {
                   )}
                   <SfSummaryBar
                     items={[
-                      { label: '总行数', value: formatNumber(validateResult.totalRows) },
-                      { label: '校验通过', value: formatNumber(validateResult.validRows) },
-                      { label: '错误行', value: formatNumber(validateResult.errorRows) },
+                      { label: '总行数', value: formatNumber(validateResult.total_rows) },
+                      { label: '校验通过', value: formatNumber(validateResult.valid_rows) },
+                      { label: '错误行', value: formatNumber(validateResult.error_rows) },
                     ]}
                   />
                   {validateResult.errors.length > 0 && (
@@ -458,7 +456,7 @@ export default function ImportWizardPage() {
                       pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
                     />
                   )}
-                  {validateResult.errorFileUrl && (
+                  {validateResult.error_rows > 0 && (
                     <Button
                       icon={<DownloadOutlined />}
                       loading={downloadingErrorFile}
@@ -487,13 +485,13 @@ export default function ImportWizardPage() {
                 <SfError
                   error={previewQuery.error}
                   onRetry={() => void previewQuery.refetch()}
-                  description="后端交付该接口前，本步骤保持错误态"
+                  description="预览来自 GET /api/imports/{id}/preview，请稍后重试"
                 />
               ) : previewQuery.data ? (
                 <>
                   <SfSummaryBar
                     items={[
-                      { label: '总行数', value: formatNumber(previewQuery.data.totalRows) },
+                      { label: '总行数', value: formatNumber(previewQuery.data.total_rows) },
                       { label: '列数', value: formatNumber(previewQuery.data.columns.length) },
                     ]}
                   />
@@ -527,18 +525,18 @@ export default function ImportWizardPage() {
                   {
                     key: 'type',
                     label: '导入类型',
-                    children: selectedTemplate?.name ?? resolveModuleLabel(uploadResult?.importType),
+                    children: selectedTemplate?.name ?? resolveModuleLabel(uploadResult?.import_type),
                   },
-                  { key: 'file', label: '文件名', children: uploadResult?.fileName ?? file?.name ?? '-' },
+                  { key: 'file', label: '文件名', children: uploadResult?.file_name ?? file?.name ?? '-' },
                   {
                     key: 'total',
                     label: '总行数',
-                    children: <span className="sf-num">{formatNumber(validateResult?.totalRows)}</span>,
+                    children: <span className="sf-num">{formatNumber(validateResult?.total_rows)}</span>,
                   },
                   {
                     key: 'valid',
                     label: '校验通过',
-                    children: <span className="sf-num">{formatNumber(validateResult?.validRows)}</span>,
+                    children: <span className="sf-num">{formatNumber(validateResult?.valid_rows)}</span>,
                   },
                 ]}
               />
@@ -554,7 +552,7 @@ export default function ImportWizardPage() {
                 <SfError
                   error={confirmMutation.error}
                   onRetry={handleConfirmImport}
-                  description="确认导入由 POST /api/imports/{id}/confirm 执行；后端交付前保持错误态，不产生假成功"
+                  description="确认导入由 POST /api/imports/{id}/confirm 执行，失败不产生假成功"
                 />
               )}
             </Flex>
@@ -568,15 +566,15 @@ export default function ImportWizardPage() {
                 <Flex gap={8} align="center" wrap="wrap">
                   <Text strong>导入结果：</Text>
                   {renderTaskStatus(confirmResult.status)}
-                  {confirmResult.finishedAt && (
-                    <Text type="secondary">{formatDateTime(confirmResult.finishedAt)}</Text>
+                  {confirmResult.finished_at && (
+                    <Text type="secondary">{formatDateTime(confirmResult.finished_at)}</Text>
                   )}
                 </Flex>
                 <SfSummaryBar
                   items={[
-                    { label: '总行数', value: formatNumber(confirmResult.totalRows) },
-                    { label: '成功', value: formatNumber(confirmResult.successRows) },
-                    { label: '失败', value: formatNumber(confirmResult.failedRows) },
+                    { label: '总行数', value: formatNumber(confirmResult.total_rows) },
+                    { label: '成功', value: formatNumber(confirmResult.success_rows) },
+                    { label: '失败', value: formatNumber(confirmResult.failed_rows) },
                   ]}
                 />
                 {confirmResult.status === 'PROCESSING' && (
@@ -645,7 +643,7 @@ export default function ImportWizardPage() {
                 </Button>
                 <Button
                   type="primary"
-                  disabled={validateResult === null || validateResult.errorRows > 0}
+                  disabled={validateResult === null || validateResult.error_rows > 0}
                   onClick={() => setCurrent(3)}
                 >
                   下一步：预览
@@ -708,7 +706,7 @@ export default function ImportWizardPage() {
             tasks.resetToFirstPage()
           }}
         />
-        <SfTable<DataTaskItem>
+        <SfTable<DataTask>
           storageKey="data-import-tasks"
           rowKey="id"
           columns={IMPORT_TASK_COLUMNS}

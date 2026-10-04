@@ -1,282 +1,401 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
+import type { SalesId } from './sales'
 
-// ---------- 出库管理（docs/api.md §1：领域前缀 /api/outbounds，子路径未冻结） ----------
+// ---------- 出库单（后端 M2 已交付：internal/sales/routes.go:82-87，出参为
+// OutboundOrder GORM 模型 snake_case，internal/sales/models.go:54-90） ----------
+//
+// 出库单详情含任务族（GET /api/outbounds/{no}，handler.go:274-285 返回
+// {outbound, items, allocations, picks, checks, packages, shipments}）；
+// 四作业任务族列表（拣货/复核/打包/发货，routes.go:94-112）归本文件。
+// 状态为大写枚举（models.go:265-275），渲染前经 toStatusKey 归一后走 SfStatusTag。
 
-/** 出库类型（business-flow.md §7.1；后端枚举冻结前仅用于筛选传参，展示走页面标签映射兜底） */
-export type OutboundType =
-  | 'sales' // 销售出库
-  | 'production' // 生产领料
-  | 'transfer' // 调拨出库
-  | 'other' // 其他出库
-  | 'loss' // 报损出库
+/** 出库单状态（internal/sales/models.go:265-276 迁移 CHECK 同源） */
+export type OutboundOrderStatus =
+  | 'PENDING_ALLOCATE'
+  | 'ALLOCATED'
+  | 'PICKING'
+  | 'PICKED'
+  | 'CHECKED'
+  | 'PACKED'
+  | 'PARTIAL_SHIPPED'
+  | 'SHIPPED_ALL'
+  | 'CANCELLED'
+  | 'CLOSED'
 
-/** 出库单状态主流程（business-flow.md §7.2 分配 → 拣货 → 复核 → 打包 → 发货；后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
-export type OutboundStatus =
-  | 'pending_allocate'
-  | 'allocated'
-  | 'pending_pick'
-  | 'picking'
-  | 'picked'
-  | 'pending_check'
-  | 'pending_pack'
-  | 'pending_shipment'
-  | 'shipped'
-  | 'shipment_exception'
-  | 'completed'
-  | 'closed'
-  | 'cancelled'
+/** 出库类型（models.go:344-346 迁移 CHECK：中文值域） */
+export type OutboundOrderType = '销售出库' | '生产领料' | '调拨出库' | '其他出库' | '报损出库'
 
-export interface OutboundQuery extends PageQuery {
-  keyword?: string
-  outboundType?: OutboundType
-  status?: OutboundStatus
-  warehouseCode?: string
+/** 出库单列表筛选（handler.go:253-272：status/warehouse_id/so_no/outbound_no） */
+export interface OutboundOrderQuery extends PageQuery {
+  status?: OutboundOrderStatus
+  warehouse_id?: SalesId
+  so_no?: string
+  /** 精确出库单号（handler.go:262） */
+  outbound_no?: string
 }
 
-export interface OutboundItem {
-  id: number | string
+/** 出库单（OutboundOrder，models.go:54-71 字段全量；type 为中文值域） */
+export interface OutboundOrder {
+  id: SalesId
   /** 出库单号（business-flow.md §13.1：OUT-日期-流水） */
-  outboundNo: string
-  outboundType: string
-  /** 来源单号（销售订单号等） */
-  sourceNo?: string
-  /** 客户（仅销售出库等有去向场景返回） */
-  customerName?: string
-  warehouseCode?: string
-  warehouseName: string
-  /** 需求数量合计 */
-  totalQty: number
-  /** 已拣货数量合计（发货完成时才正式扣减库存，business-flow.md §7.2） */
-  pickedQty: number
-  status: string
-  operatorName?: string
-  createdAt: string
+  outbound_no: string
+  /** 来源销售单号 */
+  so_no: string
+  type: string
+  warehouse_id: number
+  status: OutboundOrderStatus
+  picked_at: string | null
+  checked_at: string | null
+  packed_at: string | null
+  shipped_at: string | null
+  cancelled_at: string | null
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
 }
 
-// ---------- 出库作业任务（拣货 → 复核 → 打包 → 发货，business-flow.md §7.2/§8） ----------
-// 端点为前端先行骨架：后端 outbound 域未交付，页面呈统一错误态（requirements.md §10）。
-// 字段名对齐 business-flow.md §8.2–8.5 作业内容与 database.md §表清单
-// （pick_tasks / check_tasks / packing_records / shipments），最终以后端 Go JSON tag 为准，交付时需回对。
-
-/** 拣货任务状态（business-flow.md §8.2；后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
-export type PickingTaskStatus = 'pending_pick' | 'picking' | 'picked'
-
-/** 复核任务状态（business-flow.md §8.3） */
-export type CheckingTaskStatus = 'pending_check' | 'checking' | 'checked'
-
-/** 打包记录状态（business-flow.md §8.4） */
-export type PackingTaskStatus = 'pending_pack' | 'packing' | 'packed'
-
-/** 发货状态（business-flow.md §8.5：待发货 → 已发货 → 运输中 → 已签收，含异常分支） */
-export type ShipmentStatus =
-  | 'pending_shipment'
-  | 'shipped'
-  | 'in_transit'
-  | 'signed'
-  | 'shipment_exception'
-
-/** 出库作业列表筛选公共参数（参数名为前端先行定义，待后端契约对齐） */
-interface OutboundTaskQuery extends PageQuery {
-  keyword?: string
-  warehouseCode?: string
+/** 出库单明细（OutboundItem，models.go:75-90；各环节累计数量支持部分拣货/部分发货） */
+export interface OutboundOrderItem {
+  id: SalesId
+  outbound_id: number
+  line_no: number
+  sku_id: number
+  qty: number
+  qty_picked: number
+  qty_checked: number
+  qty_packed: number
+  qty_shipped: number
+  remark: string
+  created_at: string
+  updated_at: string
+  /** sales 域 CreatedBy 为裸 int64（models.go:88-89），出参数字 */
+  created_by: number
+  updated_by: number
 }
 
-export interface PickingTaskQuery extends OutboundTaskQuery {
-  status?: PickingTaskStatus
+/** 库存分配记录（AllocationRecord，models.go:94-110） */
+export interface OutboundAllocationRecord {
+  id: SalesId
+  outbound_no: string
+  line_no: number
+  sku_id: number
+  batch_id: number
+  warehouse_id: number
+  bin_id: number
+  qty: number
+  /** FIFO/FEFO/指定批次/指定仓库/指定库位（models.go:349-355） */
+  strategy: string
+  reason: Record<string, unknown>
+  /** 回指 inventory_locks（发货核销依据） */
+  lock_id: number
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
 }
 
-/** 拣货任务（business-flow.md §8.2：拣货单 → SKU → 来源库位 → 数量 → 操作人 → 完成时间） */
-export interface PickingTaskItem {
-  id: number | string
-  /** 拣货任务号 */
-  pickTaskNo: string
-  /** 关联出库单号 */
-  outboundNo: string
-  skuCode: string
-  skuName?: string
-  /** 来源库位 */
-  fromBinCode?: string
-  /** 批次（拣货支持换批次处理，business-flow.md §8.2） */
-  batchNo?: string
+// ---------- 拣货任务（GET /api/picks，routes.go:94-97；出参 PickTask，models.go:113-139） ----------
+
+/** 拣货任务状态（models.go:294-301 迁移 chk_pick_tasks_status；PICKING 值域保留、状态机不使用） */
+export type PickTaskStatus = 'PENDING' | 'CLAIMED' | 'PICKING' | 'PICKED' | 'EXCEPTION' | 'CANCELLED'
+
+/** 拣货任务列表筛选（handler.go:364-385：status/outbound_no/assignee_id/warehouse_id） */
+export interface PickTaskQuery extends PageQuery {
+  status?: PickTaskStatus
+  outbound_no?: string
+  assignee_id?: SalesId
+  warehouse_id?: SalesId
+}
+
+/** 拣货任务（PickTask，models.go:113-139 字段全量） */
+export interface PickTask {
+  id: SalesId
+  /** 拣货任务号（business-flow.md §13.1：PK- 前缀） */
+  pick_no: string
+  outbound_no: string
+  outbound_line_no: number
+  sku_id: number
+  batch_id: number
+  source_warehouse_id: number
+  source_zone_id: number
+  source_shelf_id: number
+  source_bin_id: number
   /** 应拣数量 */
-  totalQty: number
+  qty: number
   /** 已拣数量 */
-  pickedQty: number
-  status: string
-  operatorName?: string
-  /** 完成时间 */
-  completedAt?: string
-  createdAt: string
+  picked_qty: number
+  status: PickTaskStatus
+  assignee_id: number
+  assignee_name: string
+  claimed_at: string | null
+  picked_at: string | null
+  scanned_code: string
+  scan_matched: boolean
+  warehouse_id: number
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
 }
 
-export interface CheckingTaskQuery extends OutboundTaskQuery {
-  status?: CheckingTaskStatus
+/** 拣货确认入参（PickConfirmInput，service_outbound.go:197-201） */
+export interface PickConfirmPayload {
+  picked_qty: number
+  /** 序列号 SKU 必填：逐件采集（inventory-rules.md §8.2） */
+  serials?: string[]
+  /** 扫码录入值（M2 记录不解析） */
+  scanned_code?: string
 }
 
-/** 复核任务（business-flow.md §8.3：重新确认 SKU / 条码 / 数量 / 批次 / 序列号 / 订单） */
-export interface CheckingTaskItem {
-  id: number | string
-  /** 复核任务号 */
-  checkTaskNo: string
-  /** 关联出库单号 */
-  outboundNo: string
-  skuCode: string
-  skuName?: string
-  batchNo?: string
-  /** 复核数量 */
-  totalQty: number
-  status: string
-  /** 复核人 */
-  operatorName?: string
-  /** 复核完成时间 */
-  completedAt?: string
-  createdAt: string
+// ---------- 复核任务（GET /api/checks，routes.go:100-103；出参 CheckTask，models.go:143-164） ----------
+
+/** 复核任务状态（models.go:315-319；无 CLAIMED——领取为原子指派不迁移状态） */
+export type CheckTaskStatus = 'PENDING' | 'DONE' | 'EXCEPTION'
+
+/** 复核异常类型（models.go:322 五类中文值域；result 为空串 = 复核通过） */
+export type CheckResultType = '错货' | '少货' | '多货' | '批次错误' | '序列号错误'
+
+/** 复核任务列表筛选（handler.go:440-461：status/outbound_no/assignee_id/warehouse_id） */
+export interface CheckTaskQuery extends PageQuery {
+  status?: CheckTaskStatus
+  outbound_no?: string
+  assignee_id?: SalesId
+  warehouse_id?: SalesId
 }
 
-export interface PackingTaskQuery extends OutboundTaskQuery {
-  status?: PackingTaskStatus
+/** 复核任务（CheckTask，models.go:143-164 字段全量） */
+export interface CheckTask {
+  id: SalesId
+  check_no: string
+  outbound_no: string
+  outbound_line_no: number
+  sku_id: number
+  batch_id: number
+  /** 序列号 SKU 一行一件 */
+  serial_no: string
+  qty: number
+  status: CheckTaskStatus
+  /** 空 = 复核通过；异常为五类中文值域之一 */
+  result: string
+  assignee_id: number
+  assignee_name: string
+  claimed_at: string | null
+  done_at: string | null
+  warehouse_id: number
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
 }
 
-/** 打包记录（business-flow.md §8.4 记录字段；一个订单允许多个包裹） */
-export interface PackingTaskItem {
-  id: number | string
-  /** 包裹编号 */
-  packageNo: string
-  /** 关联出库单号 */
-  outboundNo: string
-  /** 包装材料 */
-  packMaterial?: string
-  /** 重量 */
+/** 复核确认入参（CheckConfirmInput，service_outbound.go:604-608） */
+export interface CheckConfirmPayload {
+  pass: boolean
+  /** pass=false 时必填：五类异常之一 */
+  result?: CheckResultType
+  /** 序列号任务必填：重新扫描确认的序列号 */
+  serial?: string
+}
+
+// ---------- 打包记录（GET/POST /api/packing，routes.go:106-107；出参 PackingRecord，models.go:167-186） ----------
+
+/** 打包记录列表筛选（handler.go:510-527：outbound_no/warehouse_id） */
+export interface PackingRecordQuery extends PageQuery {
+  outbound_no?: string
+  warehouse_id?: SalesId
+}
+
+/** 打包记录（PackingRecord，models.go:167-186 字段全量；一个订单允许多个包裹） */
+export interface PackingRecord {
+  id: SalesId
+  package_no: string
+  outbound_no: string
+  packing_material: string
+  length: number
+  width: number
+  height: number
+  weight: number
+  volume: number
+  carrier: string
+  tracking_no: string
+  warehouse_id: number
+  idempotency_key: string | null
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
+}
+
+/** 打包明细行入参（PackLineInput，service_ship.go 上方定义：line_no + qty） */
+export interface PackLineInput {
+  line_no: number
+  qty: number
+}
+
+/** 打包入参（PackInput，service_outbound.go:730-744；幂等键随体或 Idempotency-Key 头） */
+export interface PackPayload {
+  outbound_no: string
+  lines: PackLineInput[]
+  packing_material?: string
+  length?: number
+  width?: number
+  height?: number
   weight?: number
-  /** 体积 */
   volume?: number
-  /** 快递公司 */
-  carrierName?: string
-  /** 快递单号 */
-  trackingNo?: string
-  status: string
-  /** 打包人 */
-  operatorName?: string
-  /** 打包时间 */
-  packedAt?: string
-  createdAt: string
+  carrier?: string
+  tracking_no?: string
+  remark?: string
+  idempotency_key?: string
 }
 
-export interface ShipmentQuery extends OutboundTaskQuery {
+/** 打包结果（PackResult，service_outbound.go:747-750；replay=true 为幂等重放） */
+export interface PackResult {
+  package: PackingRecord
+  replay: boolean
+}
+
+// ---------- 发货单（GET/POST /api/shipments，routes.go:110-112；出参 Shipment，models.go:204-222） ----------
+
+/** 发货单状态（models.go:325-331；库存正式扣减仅发生在 PENDING→SHIPPED，后续为纯记录流转） */
+export type ShipmentStatus = 'PENDING' | 'SHIPPED' | 'IN_TRANSIT' | 'SIGNED' | 'ABNORMAL'
+
+/** 发货单列表筛选（handler.go:548-566：status/outbound_no/warehouse_id） */
+export interface ShipmentQuery extends PageQuery {
   status?: ShipmentStatus
+  outbound_no?: string
+  warehouse_id?: SalesId
 }
 
-/** 发货单（business-flow.md §8.5 发货信息字段全量；发货完成是库存正式扣减的触发点） */
-export interface ShipmentItem {
-  id: number | string
-  /** 发货单号 */
-  shipmentNo: string
-  /** 关联出库单号 */
-  outboundNo: string
-  /** 物流公司 */
-  carrierName?: string
-  /** 物流单号 */
-  trackingNo?: string
-  /** 发货仓 */
-  warehouseName?: string
-  /** 包裹数量 */
-  packageCount: number
-  /** 发货人 */
-  shipperName?: string
-  /** 发货时间 */
-  shippedAt?: string
-  status: string
-  createdAt: string
+/** 发货单（Shipment，models.go:204-222 字段全量） */
+export interface Shipment {
+  id: SalesId
+  shipment_no: string
+  outbound_no: string
+  carrier: string
+  tracking_no: string
+  warehouse_id: number
+  shipper_id: number
+  shipper_name: string
+  package_count: number
+  status: ShipmentStatus
+  shipped_at: string | null
+  idempotency_key: string | null
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
 }
 
-// ---------- 出库单详情（GET /api/outbounds/{id}，前端先行契约：后端 outbound 单据域未交付，冻结后回对字段） ----------
+/** 发货明细行入参（ShipLineInput，service_ship.go:33-35；缺省 = 全部未发货明细行） */
+export interface ShipLineInput {
+  line_no: number
+}
 
-/** 出库单商品明细行 */
-export interface OutboundDetailItem {
-  id: number | string
-  skuCode: string
-  skuName?: string
-  /** 计量单位 */
-  unitName?: string
-  /** 需求数量 */
-  totalQty: number
-  /** 已拣数量 */
-  pickedQty?: number
-  /** 来源库位 */
-  fromBinCode?: string
-  /** 批次 */
-  batchNo?: string
-  status?: string
+/** 发货确认入参（ShipInput，service_ship.go:36-43） */
+export interface ShipPayload {
+  outbound_no: string
+  lines?: ShipLineInput[]
+  carrier?: string
+  tracking_no?: string
   remark?: string
+  idempotency_key?: string
 }
 
-/** 出库单详情：含明细与流程节点时间（business-flow.md §7.2/§8、§13.4） */
-export interface OutboundDetail {
-  id: number | string
-  outboundNo: string
-  outboundType: string
-  /** 来源单号（销售订单号等） */
-  sourceNo?: string
-  customerName?: string
-  warehouseCode?: string
-  warehouseName: string
-  /** 需求数量合计 */
-  totalQty: number
-  /** 已拣数量合计 */
-  pickedQty?: number
-  status: string
-  /** 创建人 */
-  operatorName?: string
-  /** 创建时间 */
-  createdAt: string
-  /** 库存分配时间 */
-  allocatedAt?: string
-  /** 分配人 */
-  allocatedBy?: string
-  /** 拣货完成时间 */
-  pickedAt?: string
-  /** 拣货人 */
-  pickedBy?: string
-  /** 复核完成时间 */
-  checkedAt?: string
-  /** 复核人 */
-  checkedBy?: string
-  /** 打包完成时间 */
-  packedAt?: string
-  /** 打包人 */
-  packedBy?: string
-  /** 发货时间（发货完成触发库存正式扣减，business-flow.md §7.2） */
-  shippedAt?: string
-  /** 发货人 */
-  shippedBy?: string
-  /** 物流公司（business-flow.md §8.5 发货信息） */
-  carrierName?: string
-  /** 物流单号 */
-  trackingNo?: string
-  /** 备注 */
-  remark?: string
-  /** 商品明细 */
-  items: OutboundDetailItem[]
+/** 发货结果（ShipResult，service_ship.go:46-50；shipped 为行号 → 本次发货量） */
+export interface ShipResult {
+  shipment: Shipment
+  replay: boolean
+  shipped: Record<string, number>
 }
+
+// ---------- 出库单详情（GET /api/outbounds/{no}，handler.go:274-285 任务族全量） ----------
+
+export interface OutboundOrderDetail {
+  outbound: OutboundOrder
+  items: OutboundOrderItem[]
+  allocations: OutboundAllocationRecord[]
+  picks: PickTask[]
+  checks: CheckTask[]
+  packages: PackingRecord[]
+  shipments: Shipment[]
+}
+
+// ---------- 权限码（internal/auth/permissions.go:180-212 三段式冻结） ----------
+
+export const OUTBOUND_CREATE_PERMISSION = 'sales:outbound:create'
+export const OUTBOUND_CANCEL_PERMISSION = 'sales:outbound:cancel'
+export const OUTBOUND_CLOSE_PERMISSION = 'sales:outbound:close'
+export const PICK_CLAIM_PERMISSION = 'sales:pick:claim'
+export const PICK_EXECUTE_PERMISSION = 'sales:pick:execute'
+export const CHECK_CLAIM_PERMISSION = 'sales:check:claim'
+export const CHECK_EXECUTE_PERMISSION = 'sales:check:execute'
+export const PACKING_EXECUTE_PERMISSION = 'sales:packing:execute'
+export const SHIPMENT_EXECUTE_PERMISSION = 'sales:shipment:execute'
 
 export const outboundApi = {
-  /** 出库单列表（预置端点，后端未就绪时页面呈现统一错误态） */
-  list: (query: OutboundQuery) =>
-    http.get<PageResult<OutboundItem>>('/api/outbounds', { params: query }),
-  /** 出库单详情（前端先行契约，后端未交付时页面呈现统一错误态） */
-  get: (id: OutboundItem['id']) =>
-    http.get<OutboundDetail>(`/api/outbounds/${id}`),
-  /** 拣货任务列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
-  pickingTasks: (query: PickingTaskQuery) =>
-    http.get<PageResult<PickingTaskItem>>('/api/outbound/picking-tasks', { params: query }),
-  /** 复核任务列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
-  checkingTasks: (query: CheckingTaskQuery) =>
-    http.get<PageResult<CheckingTaskItem>>('/api/outbound/checking-tasks', { params: query }),
-  /** 打包记录列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
-  packingTasks: (query: PackingTaskQuery) =>
-    http.get<PageResult<PackingTaskItem>>('/api/outbound/packing-tasks', { params: query }),
-  /** 发货单列表（前端先行骨架，后端未交付时页面呈现统一错误态） */
-  shipments: (query: ShipmentQuery) =>
-    http.get<PageResult<ShipmentItem>>('/api/outbound/shipments', { params: query }),
+  /** 出库单列表（GET /api/outbounds） */
+  list: (query: OutboundOrderQuery) =>
+    http.get<PageResult<OutboundOrder>>('/api/outbounds', { params: query }),
+  /** 出库单详情（GET /api/outbounds/{no}，:no 为出库单号） */
+  get: (no: string) => http.get<OutboundOrderDetail>(`/api/outbounds/${encodeURIComponent(no)}`),
+  /** 生成拣货任务（POST /api/outbounds/{no}/picks，ALLOCATED→PICKING；返回 {outbound, picks}，handler.go:288-296） */
+  createPicks: (no: string) =>
+    http.post<{ outbound: OutboundOrder; picks: PickTask[] }>(
+      `/api/outbounds/${encodeURIComponent(no)}/picks`,
+    ),
+  /** 取消出库单（PUT /api/outbounds/{no}/cancel，释放预占） */
+  cancel: (no: string, payload?: { reason?: string }) =>
+    http.put<OutboundOrder>(`/api/outbounds/${encodeURIComponent(no)}/cancel`, payload),
+  /** 差额关闭（PUT /api/outbounds/{no}/close，原因必填） */
+  close: (no: string, payload: { reason: string }) =>
+    http.put<OutboundOrder>(`/api/outbounds/${encodeURIComponent(no)}/close`, payload),
+}
+
+/** 出库四作业任务族 API（拣货 → 复核 → 打包 → 发货，business-flow.md §8） */
+export const outboundTaskApi = {
+  picks: {
+    list: (query: PickTaskQuery) =>
+      http.get<PageResult<PickTask>>('/api/picks', { params: query }),
+    /** 领取（PUT /api/picks/{id}/claim，原子抢占） */
+    claim: (id: SalesId) => http.put<PickTask>(`/api/picks/${id}/claim`),
+    /** 拣货确认（PUT /api/picks/{id}/confirm，CLAIMED→PICKED，联动创建复核任务） */
+    confirm: (id: SalesId, payload: PickConfirmPayload) =>
+      http.put<PickTask>(`/api/picks/${id}/confirm`, payload),
+    /** 缺货/少货/库位异常上报（PUT /api/picks/{id}/exception） */
+    reportException: (id: SalesId, payload: { reason: string }) =>
+      http.put<PickTask>(`/api/picks/${id}/exception`, payload),
+  },
+  checks: {
+    list: (query: CheckTaskQuery) =>
+      http.get<PageResult<CheckTask>>('/api/checks', { params: query }),
+    /** 领取（PUT /api/checks/{id}/claim，原子指派不迁移状态） */
+    claim: (id: SalesId) => http.put<CheckTask>(`/api/checks/${id}/claim`),
+    /** 复核确认（PUT /api/checks/{id}/confirm，通过/五类异常） */
+    confirm: (id: SalesId, payload: CheckConfirmPayload) =>
+      http.put<CheckTask>(`/api/checks/${id}/confirm`, payload),
+    /** 复核异常重开（PUT /api/checks/{id}/reopen，EXCEPTION→PENDING） */
+    reopen: (id: SalesId) => http.put<CheckTask>(`/api/checks/${id}/reopen`),
+  },
+  packing: {
+    list: (query: PackingRecordQuery) =>
+      http.get<PageResult<PackingRecord>>('/api/packing', { params: query }),
+    /** 打包（POST /api/packing，幂等键；全部明细打包完成推进 CHECKED→PACKED） */
+    pack: (payload: PackPayload) => http.post<PackResult>('/api/packing', payload),
+  },
+  shipments: {
+    list: (query: ShipmentQuery) =>
+      http.get<PageResult<Shipment>>('/api/shipments', { params: query }),
+    /** 发货确认（POST /api/shipments，PENDING→SHIPPED 触发库存正式扣减） */
+    ship: (payload: ShipPayload) => http.post<ShipResult>('/api/shipments', payload),
+    /** 物流态流转（PUT /api/shipments/{id}/status，SHIPPED 后续：IN_TRANSIT/SIGNED/ABNORMAL） */
+    updateStatus: (id: SalesId, payload: { status: ShipmentStatus; remark?: string }) =>
+      http.put<Shipment>(`/api/shipments/${id}/status`, payload),
+  },
 }

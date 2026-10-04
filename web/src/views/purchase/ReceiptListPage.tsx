@@ -1,79 +1,81 @@
-import { useState } from 'react'
-import { Card, Typography } from 'antd'
+import { useMemo, useState } from 'react'
+import { Card } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
-import {
-  purchaseApi,
-  type ReceiptItem,
-  type ReceiptQuery,
-  type ReceiptStatus,
-} from '@/api/purchase'
+import { purchaseApi, type Receipt, type ReceiptQuery } from '@/api/purchase'
+import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatDate, formatDateTime } from '@/utils/format'
 
-const { Text } = Typography
-
-/** 状态选项与 business-flow.md §2.1/§3.2 采购到货流程（收货 → 质检 → 上架 → 入库完成）一致 */
-const STATUS_OPTIONS: Array<{ label: string; value: ReceiptStatus }> = [
-  { label: '收货中', value: 'receiving' },
-  { label: '待质检', value: 'pending_inspection' },
-  { label: '质检中', value: 'inspecting' },
-  { label: '已质检', value: 'inspected' },
-  { label: '待上架', value: 'pending_putaway' },
-  { label: '已上架', value: 'putaway_completed' },
-  { label: '已取消', value: 'cancelled' },
-]
-
-const COLUMNS: ColumnsType<ReceiptItem> = [
-  { title: '收货单号', dataIndex: 'receiptNo', width: 170, fixed: 'left' },
-  { title: '采购单号', dataIndex: 'poNo', width: 170, render: (v?: string) => v ?? '-' },
-  {
-    title: '供应商',
-    dataIndex: 'supplierName',
-    width: 180,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  {
-    title: '应收数量',
-    dataIndex: 'totalQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '已收数量',
-    dataIndex: 'receivedQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 100,
-    render: (v: string) => <SfStatusTag status={v} />,
-  },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    width: 170,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
-
-/** 收货列表（/purchases/receipts；GET /api/purchases/receipts 前端先行骨架，后端未交付呈统一错误态） */
+/** 收货列表（/purchases/receipts；GET /api/receipts，出参为 Receipt 裸模型 snake_case，
+ * internal/purchase/models.go:207-221——收货为事件型一次性生效（幂等键防重），
+ * 无独立状态机，状态语义由入库单承载，故列表无状态列；后端 Receipt 亦无采购单号/
+ * 供应商/应收已收数量字段，相应列不展示。warehouse_id 为裸 ID，经仓库 options
+ * 本地映射补充，映射失败降级为 ID，不造假数据） */
 export default function ReceiptListPage() {
   const [params, setParams] = useState<ReceiptQuery>({})
-  const list = usePagedList<ReceiptItem, ReceiptQuery>({
+
+  // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const warehouseNames = useMemo(
+    () => buildWarehouseMaps(warehouseOptionsQuery.data ?? []).name,
+    [warehouseOptionsQuery.data],
+  )
+
+  const list = usePagedList<Receipt, ReceiptQuery>({
     queryKey: ['purchase', 'receipts'],
     fetch: (q) => purchaseApi.receipts.list(q),
     params,
   })
+
+  const columns: ColumnsType<Receipt> = [
+    { title: '收货单号', dataIndex: 'receipt_no', width: 180, fixed: 'left' },
+    { title: '入库单号', dataIndex: 'inbound_no', width: 180, render: (v: string) => v || '-' },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      width: 130,
+      ellipsis: true,
+      render: (_: unknown, record: Receipt) =>
+        warehouseNames.get(String(record.warehouse_id)) ?? `仓库 #${record.warehouse_id}`,
+    },
+    { title: '批次号', dataIndex: 'batch_no', width: 140, render: (v: string) => v || '-' },
+    {
+      title: '效期',
+      dataIndex: 'expiry_date',
+      width: 110,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDate(v)}</span>,
+    },
+    { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string) => v || '-' },
+    {
+      title: '收货时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  // 搜索参数对齐 internal/purchase/handler.go:320-340：receipt_no/inbound_no/warehouse_id
+  // （单号后端为精确匹配，repository.go:494-499）
+  const searchFields: SearchField[] = [
+    { name: 'receipt_no', label: '收货单号', control: 'input', placeholder: '收货单号（精确）' },
+    { name: 'inbound_no', label: '入库单号', control: 'input', placeholder: '入库单号（精确）' },
+    {
+      name: 'warehouse_id',
+      label: '仓库',
+      control: 'select',
+      options: (warehouseOptionsQuery.data ?? []).map((w) => ({
+        label: `${w.name}（${w.code}）`,
+        value: String(w.id),
+      })),
+    },
+  ]
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as ReceiptQuery)
@@ -87,18 +89,11 @@ export default function ReceiptListPage() {
         subtitle="到货 → 收货 → 质检 → 上架 → 入库完成"
       />
       <Card size="small">
-        <SfSearchForm
-          fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '收货单号 / 采购单号 / 供应商' },
-            { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-          ]}
-          onSearch={handleSearch}
-        />
-        <SfTable<ReceiptItem>
+        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfTable<Receipt>
           storageKey="purchase-receipts"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -107,8 +102,8 @@ export default function ReceiptListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="当前筛选条件下没有收货单"
-          scrollX={1090}
+          emptyText="当前筛选条件下没有收货记录"
+          scrollX={1010}
         />
       </Card>
     </div>

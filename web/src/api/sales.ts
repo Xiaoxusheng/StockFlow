@@ -1,188 +1,202 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 
-// ---------- 销售域（前端先行骨架：backend-m1-plan「阶段 9–13」行——单据域契约 M2 冻结；
-// 端点为任务组指定路径，后端未交付时页面呈统一错误态） ----------
+// ---------- 销售订单 /api/sales（后端 M2 已交付：internal/sales/routes.go:73-80） ----------
+//
+// 出参为销售域 GORM 模型裸形态（internal/sales/models.go:14-51 JSON tag 全量 snake_case；
+// ID 出参 database.ID 序列化为字符串，保留 number 兼容；数量/金额 stock.Qty 裸数字）。
+// 状态为大写枚举（models.go:240-248），渲染前经 masterdata.ts toStatusKey 归一后走
+// SfStatusTag 注册表（types/status.ts）。
 
-/** ID 序列化约定对齐 purchase.ts：保留 number 兼容字符串返回 */
+/** ID 序列化约定对齐其他单据域：后端 database.ID 出参字符串，保留 number 兼容 */
 export type SalesId = number | string
 
-/** 销售订单状态（business-flow.md §6.2 订单 → 审核 → 库存预占 → 出库；
- * 后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
+/** 销售订单状态（internal/sales/models.go:240-248 迁移 CHECK 同源） */
 export type SalesOrderStatus =
-  | 'draft'
-  | 'pending_review'
-  | 'approved'
-  | 'processing'
-  | 'completed'
-  | 'cancelled'
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'REJECTED'
+  | 'PARTIAL_SHIPPED'
+  | 'SHIPPED_ALL'
+  | 'COMPLETED'
+  | 'CANCELLED'
 
+/** 销售订单列表筛选（handler.go:100-131：status/customer_id/warehouse_id/so_no/created_from/created_to） */
 export interface SalesOrderQuery extends PageQuery {
-  keyword?: string
   status?: SalesOrderStatus
-  warehouseCode?: string
+  customer_id?: SalesId
+  warehouse_id?: SalesId
+  /** 精确销售单号（handler.go:114） */
+  so_no?: string
+  /** 时间范围：YYYY-MM-DD HH:mm:ss 或 YYYY-MM-DD（handler.go:70-90） */
+  created_from?: string
+  created_to?: string
 }
 
+/** 销售订单（SalesOrder，models.go:14-33 字段全量） */
+export interface SalesOrder {
+  id: SalesId
+  /** 销售单号（business-flow.md §13.1：SO-日期-流水） */
+  so_no: string
+  customer_id: number
+  warehouse_id: number
+  shipping_address: string
+  /** 配送方式（business-flow.md §6.1） */
+  delivery_method: string
+  /** 金额合计（明细金额 = 数量 × 单价，后端计算） */
+  total_amount: number
+  status: SalesOrderStatus
+  approved_by: number
+  approved_at: string | null
+  shipped_at: string | null
+  completed_at: string | null
+  cancelled_at: string | null
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: number
+  updated_by: number
+}
+
+/** 销售订单明细（SalesOrderItem，models.go:36-51；qty_allocated/qty_shipped 承载预占与发货进度） */
 export interface SalesOrderItem {
   id: SalesId
-  /** 销售单号（business-flow.md §13.1 编号规则引擎；SO 前缀前端先行提案，待后端冻结） */
-  soNo: string
-  customerCode?: string
-  customerName: string
-  warehouseCode?: string
-  warehouseName: string
-  /** 商品数量合计 */
-  totalQty: number
-  /** 金额合计（business-flow.md §6.1 字段：数量/单价/金额）；草稿单可能缺失 */
-  totalAmount?: number
-  status: string
-  createdAt: string
-}
-
-/** 销售出库单状态（business-flow.md §7.2 销售订单 → 库存分配 → 拣货 → 复核 → 打包 → 发货；
- * 后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
-export type SalesOutboundStatus =
-  | 'pending_allocate'
-  | 'allocated'
-  | 'picking'
-  | 'picked'
-  | 'checking'
-  | 'packing'
-  | 'packed'
-  | 'shipped'
-  | 'completed'
-  | 'cancelled'
-
-export interface SalesOutboundQuery extends PageQuery {
-  keyword?: string
-  status?: SalesOutboundStatus
-  warehouseCode?: string
-}
-
-export interface SalesOutboundItem {
-  id: SalesId
-  /** 出库单号（business-flow.md §13.1：OUT-日期-流水） */
-  outNo: string
-  /** 关联销售单号 */
-  soNo?: string
-  customerName?: string
-  warehouseCode?: string
-  warehouseName: string
-  totalQty: number
-  /** 已发货数量合计（库存正式扣减发生在发货完成时，business-flow.md §7.2） */
-  shippedQty?: number
-  status: string
-  createdAt: string
-}
-
-/** 销售退货单状态（business-flow.md §9.1 退货申请 → 审核 → 收货 → 质检 → 正常库存/不良品；
- * 后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
-export type SalesReturnStatus =
-  | 'draft'
-  | 'pending_review'
-  | 'approved'
-  | 'receiving'
-  | 'pending_inspection'
-  | 'inspected'
-  | 'completed'
-  | 'cancelled'
-
-export interface SalesReturnQuery extends PageQuery {
-  keyword?: string
-  status?: SalesReturnStatus
-  warehouseCode?: string
-}
-
-export interface SalesReturnItem {
-  id: SalesId
-  /** 退货单号（business-flow.md §13.1 前缀枚举未含退货，字段名前端先行提案） */
-  returnNo: string
-  /** 关联销售单号 */
-  soNo?: string
-  customerName?: string
-  warehouseCode?: string
-  warehouseName: string
-  totalQty: number
-  /** 已收货数量合计（质检决定入库去向：合格入正常库存 / 不合格入不良品） */
-  receivedQty?: number
-  status: string
-  createdAt: string
-}
-
-// ---------- 销售订单创建 / 详情（前端先行契约：POST /api/sales-orders、GET /api/sales-orders/{id}；
-// 后端单据域 M2 冻结后回对。字段依据 business-flow.md §6.1：客户、商品、数量、单价、金额、仓库、收货地址、配送方式、备注） ----------
-
-/** 新建销售订单按钮权限码（前端先行：资源段对齐 config/menu.tsx「sales:view」，动作词对齐
- * internal/auth/permissions.go 动作枚举 create；后端销售域权限点冻结后回对，未持有点 fail-closed 隐藏） */
-export const SALES_ORDER_CREATE_PERMISSION = 'sales:create'
-
-/** 明细行（创建载荷）：商品标识前端先行采用 SKU 编码（/api/skus M1 冻结契约），后端冻结后若改 skuId 在此回对 */
-export interface SalesOrderLineInput {
-  skuCode: string
+  so_id: number
+  line_no: number
+  sku_id: number
   qty: number
-  unitPrice: number
+  price: number
+  amount: number
+  qty_allocated: number
+  qty_shipped: number
+  remark: string
+  created_at: string
+  updated_at: string
+  /** sales 域 CreatedBy 为裸 int64（models.go:49-50），出参数字 */
+  created_by: number
+  updated_by: number
+}
+
+/** 订单详情（GET /api/sales/{id}，handler.go:156-167 返回 {order, items}） */
+export interface SalesOrderDetail {
+  order: SalesOrder
+  items: SalesOrderItem[]
+}
+
+// ---------- 创建 / 编辑入参（CreateOrderInput，internal/sales/service.go:104-121） ----------
+
+/** 明细行入参（OrderItemInput，service.go:105-111；qty/price 为 stock.Qty，接受数字） */
+export interface SalesOrderLineInput {
+  line_no?: number
+  sku_id: number
+  qty: number
+  price: number
   remark?: string
 }
 
 export interface SalesOrderCreatePayload {
-  /** 客户编码（/api/customers M1 冻结契约） */
-  customerCode: string
-  /** 仓库编码（/api/warehouses M1 冻结契约） */
-  warehouseCode: string
-  /** 收货地址（business-flow.md §6.1） */
-  shippingAddress?: string
-  /** 配送方式（business-flow.md §6.1；值域后端冻结前为前端先行提案） */
-  deliveryType?: string
-  lines: SalesOrderLineInput[]
+  customer_id: number
+  warehouse_id: number
+  shipping_address?: string
+  delivery_method?: string
   remark?: string
+  items: SalesOrderLineInput[]
 }
 
-/** 明细行（详情返回）：金额 = 数量 × 单价，以后端计算为准 */
-export interface SalesOrderLine {
+/** 审核入参（ApproveInput，service.go:134-137；通过/驳回共用资源点，plan §9.1） */
+export interface SalesOrderApprovePayload {
+  action: 'APPROVE' | 'REJECT'
+  opinion?: string
+}
+
+// ---------- 权限码（internal/auth/permissions.go:170-177 三段式冻结） ----------
+
+export const SALES_ORDER_CREATE_PERMISSION = 'sales:sales:create'
+export const SALES_ORDER_UPDATE_PERMISSION = 'sales:sales:update'
+export const SALES_ORDER_SUBMIT_PERMISSION = 'sales:sales:submit'
+export const SALES_ORDER_APPROVE_PERMISSION = 'sales:sales:approve'
+export const SALES_ORDER_CANCEL_PERMISSION = 'sales:sales:cancel'
+export const SALES_ORDER_CLOSE_PERMISSION = 'sales:sales:close'
+
+// ---------- 销售退货（GET /api/returns，后端退货域：internal/returns/handler.go:115-124） ----------
+//
+// 出参为退货单视图 ReturnOrderView（internal/returns/service_sales.go:111-136 snake_case）；
+// 销售退货走 /api/returns，采购退货走 /api/purchase-returns（api/purchase.ts）。
+
+/** 退货单状态（internal/returns/models.go:27-36 迁移 chk_return_orders_status 同源） */
+export type SalesReturnStatus =
+  | 'DRAFT'
+  | 'PENDING_APPROVAL'
+  | 'APPROVED'
+  | 'RECEIVING'
+  | 'IN_QC'
+  | 'SHIPPED'
+  | 'COMPLETED'
+  | 'CANCELLED'
+
+/** 退货明细（ReturnItemView，service_sales.go:111-123；数量为 numeric 文本） */
+export interface SalesReturnItemView {
   id: SalesId
-  skuCode: string
-  productName?: string
-  unitName?: string
-  qty: number
-  unitPrice?: number
-  amount?: number
-  remark?: string
+  line_no: number
+  sku_id: number
+  qty_return: string
+  qty_received: string
+  qty_inspected: string
+  qty_defective: string
+  reason: string
+  remark: string
 }
 
-/** 销售订单详情（头 + 明细 + 状态）；时间字段命名对齐 purchase.ts PurchaseDetail 模式（§13.4 业务时间字段） */
-export interface SalesOrderDetail extends SalesOrderItem {
-  customerCode?: string
-  shippingAddress?: string
-  deliveryType?: string
-  /** 创建人 */
-  operatorName?: string
-  /** 审核时间 / 审核人（business-flow.md §6.2：订单 → 审核 → 库存预占 → 出库） */
-  reviewedAt?: string
-  reviewedBy?: string
-  /** 库存预占时间（审核通过即触发预占，inventory-rules.md §4） */
-  allocatedAt?: string
-  completedAt?: string
-  cancelledAt?: string
-  remark?: string
-  items?: SalesOrderLine[]
+/** 退货单（ReturnOrderView，service_sales.go:124-136；列表 items 省略） */
+export interface SalesReturnOrder {
+  id: SalesId
+  /** 退货单号（RT- 前缀，docnum 冻结规则） */
+  return_no: string
+  /** SALES / PURCHASE */
+  type: string
+  /** 来源单号（销售单号 / 采购单号） */
+  source_no: string
+  customer_id: number
+  supplier_id: number
+  warehouse_id: number
+  status: SalesReturnStatus
+  remark: string
+  created_at: string
+  updated_at: string
+  items?: SalesReturnItemView[]
+}
+
+/** 销售退货列表筛选（returns/handler.go:154-171：status/source_no/warehouse_id） */
+export interface SalesReturnQuery extends PageQuery {
+  status?: SalesReturnStatus
+  source_no?: string
+  warehouse_id?: SalesId
 }
 
 export const salesApi = {
   orders: {
     list: (query: SalesOrderQuery) =>
-      http.get<PageResult<SalesOrderItem>>('/api/sales-orders', { params: query }),
-    /** 创建（前端先行：后端单据域未交付时页面呈统一错误态） */
-    create: (payload: SalesOrderCreatePayload) =>
-      http.post<unknown>('/api/sales-orders', payload),
-    /** 详情（头 + 明细 + 状态，前端先行契约） */
-    detail: (id: SalesId) => http.get<SalesOrderDetail>(`/api/sales-orders/${id}`),
-  },
-  outbounds: {
-    list: (query: SalesOutboundQuery) =>
-      http.get<PageResult<SalesOutboundItem>>('/api/sales/outbounds', { params: query }),
+      http.get<PageResult<SalesOrder>>('/api/sales', { params: query }),
+    create: (payload: SalesOrderCreatePayload) => http.post<SalesOrder>('/api/sales', payload),
+    detail: (id: SalesId) => http.get<SalesOrderDetail>(`/api/sales/${id}`),
+    /** 草稿编辑（PUT /api/sales/{id}，入参与创建同构 CreateOrderInput） */
+    update: (id: SalesId, payload: SalesOrderCreatePayload) =>
+      http.put<SalesOrder>(`/api/sales/${id}`, payload),
+    /** 提交审核（DRAFT→PENDING_APPROVAL） */
+    submit: (id: SalesId) => http.put<SalesOrder>(`/api/sales/${id}/submit`),
+    /** 审核（APPROVE 通过即预占 / REJECT 驳回） */
+    approve: (id: SalesId, payload: SalesOrderApprovePayload) =>
+      http.put<SalesOrder>(`/api/sales/${id}/approve`, payload),
+    /** 取消（释放预占；原因可选） */
+    cancel: (id: SalesId, payload?: { reason?: string }) =>
+      http.put<SalesOrder>(`/api/sales/${id}/cancel`, payload),
+    /** 差额关闭（原因必填，business-flow.md §13.3） */
+    close: (id: SalesId, payload: { reason: string }) =>
+      http.put<SalesOrder>(`/api/sales/${id}/close`, payload),
   },
   returns: {
     list: (query: SalesReturnQuery) =>
-      http.get<PageResult<SalesReturnItem>>('/api/sales/returns', { params: query }),
+      http.get<PageResult<SalesReturnOrder>>('/api/returns', { params: query }),
   },
 }

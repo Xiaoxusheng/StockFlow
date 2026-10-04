@@ -19,26 +19,41 @@ const LEVEL_OPTIONS: Array<{ label: string; value: StockAlertLevel }> = [
   { label: '积压', value: 'slow_moving' },
 ]
 
+/**
+ * 阈值单位随预警级别而异（internal/reports/repository_alerts.go 分支定义）：
+ * low_stock=安全库存 / overstock=库存上限（数量），near_expiry/expired=剩余效期天数
+ * （0=已过期），slow_moving=最小积压天数档位——天数类补「天」后缀，数量类原样呈现。
+ */
+function isDayThreshold(level: StockAlertLevel): boolean {
+  return level === 'near_expiry' || level === 'expired' || level === 'slow_moving'
+}
+
 const COLUMNS: ColumnsType<StockAlertItem> = [
   {
     title: '预警类型',
     dataIndex: 'level',
     width: 100,
+    fixed: 'left',
     render: (v: StockAlertLevel) => <SfStatusTag status={v} />,
   },
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130, fixed: 'left' },
+  { title: 'SKU 编码', dataIndex: 'sku_code', width: 130 },
   {
     title: '商品名称',
-    dataIndex: 'productName',
+    dataIndex: 'sku_name',
     width: 200,
     ellipsis: true,
     render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
+  {
+    title: '仓库',
+    dataIndex: 'warehouse_name',
+    width: 120,
+    render: (v: string, record: StockAlertItem) =>
+      record.warehouse_code ? `${v}（${record.warehouse_code}）` : v,
+  },
   {
     title: '当前库存',
-    dataIndex: 'currentQty',
+    dataIndex: 'current_qty',
     width: 100,
     align: 'right',
     render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
@@ -46,9 +61,29 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
   {
     title: '阈值',
     dataIndex: 'threshold',
-    width: 90,
+    width: 100,
     align: 'right',
-    render: (v?: number) => <span className="sf-num">{v === undefined || v === null ? '-' : formatNumber(v)}</span>,
+    render: (v: number, record: StockAlertItem) => (
+      <span className="sf-num">
+        {formatNumber(v)}
+        {isDayThreshold(record.level) ? ' 天' : ''}
+      </span>
+    ),
+  },
+  {
+    // 批次号仅效期类预警携带（AlertItem.batch_no omitempty，repository.go:417），其余「-」
+    title: '批次',
+    dataIndex: 'batch_no',
+    width: 130,
+    render: (v?: string) => v || '-',
+  },
+  {
+    // 末次移动时间仅积压预警携带（last_moved_at omitempty，repository.go:419）
+    title: '末次移动',
+    dataIndex: 'last_moved_at',
+    width: 160,
+    render: (v?: string | null) =>
+      v ? <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span> : '-',
   },
   {
     title: '提示',
@@ -56,15 +91,22 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
     ellipsis: true,
     render: (v: string) => <Text style={{ maxWidth: 320 }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
 ]
 
-/** 库存预警（低库存 / 超储 / 临期 / 过期 / 积压，frontend.md §10.1） */
+/**
+ * 预警行无独立 id（AlertItem 无主键字段），用级别+仓库+SKU+批次组合键；
+ * 同一仓库+SKU 可同时命中多级别（不同 level 键不同），组合键在结果集内唯一。
+ */
+function alertRowKey(record: StockAlertItem): string {
+  return [record.level, record.warehouse_id, record.sku_id, record.batch_no ?? ''].join('-')
+}
+
+/**
+ * 库存预警（低库存 / 超储 / 临期 / 过期 / 积压，frontend.md §10.1）：
+ * GET /api/inventory/alerts 为 reports 实现、inventory 前缀挂载
+ * （internal/reports/routes.go:48；权限点 reports:report:read），响应为 snake_case
+ * AlertItem（repository.go:407-421）；筛选参数 level/keyword（handler.go:191-204）。
+ */
 export default function AlertsPage() {
   const [params, setParams] = useState<StockAlertQuery>({})
   const list = usePagedList<StockAlertItem, StockAlertQuery>({
@@ -89,14 +131,14 @@ export default function AlertsPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU / 商品名称' },
+            { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU 编码 / 商品名称' },
             { name: 'level', label: '预警类型', control: 'select', options: LEVEL_OPTIONS },
           ]}
           onSearch={handleSearch}
         />
         <SfTable<StockAlertItem>
           storageKey="inventory-alerts"
-          rowKey="id"
+          rowKey={alertRowKey}
           columns={COLUMNS}
           dataSource={list.items}
           loading={list.isFetching}
@@ -107,7 +149,7 @@ export default function AlertsPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前没有库存预警"
-          scrollX={1100}
+          scrollX={1240}
         />
       </Card>
     </div>

@@ -19,9 +19,10 @@ export interface StatusMeta {
 }
 
 export const STATUS_META: Record<string, StatusMeta> = {
-  // 通用单据状态（business-flow.md §13.2）
+  // 通用单据状态（business-flow.md §13.2；后端大写枚举经 toStatusKey 归一后命中）
   draft: { label: '草稿', semantic: 'neutral' },
   pending_review: { label: '待审核', semantic: 'pending' },
+  pending_approval: { label: '待审核', semantic: 'pending' },
   approved: { label: '已审核', semantic: 'success' },
   rejected: { label: '已驳回', semantic: 'danger' },
   pending: { label: '待处理', semantic: 'pending' },
@@ -61,11 +62,13 @@ export const STATUS_META: Record<string, StatusMeta> = {
   signed: { label: '已签收', semantic: 'success' },
   shipment_exception: { label: '发货异常', semantic: 'danger' },
 
-  // 调拨单（business-flow.md §10.1 七态状态机；与 api/transfer.ts TRANSFER_STATUS_TAG 对齐，
-  // 注册表已含 draft/pending_review/completed/cancelled，此处补齐其余三态）
-  pending_outbound: { label: '待出库', semantic: 'pending' },
+  // 调拨单（business-flow.md §10.1 七态经 toStatusKey 归一：draft/pending_approval/approved/
+  // transferring/awaiting_receipt/completed/cancelled——internal/stockops/models.go:134-142；
+  // approved 复用上方通用键「已审核」，调拨语境「待出库」文案由 api/transfer.ts
+  // TRANSFER_STATUS_TAG 以 label 覆盖；原 pending_outbound/pending_inbound 为前端虚构
+  // 值域已移除，后端无此态）
   transferring: { label: '调拨中', semantic: 'processing' },
-  pending_inbound: { label: '待入库', semantic: 'pending' },
+  awaiting_receipt: { label: '待入库', semantic: 'pending' },
 
   // 库存（inventory-rules.md）
   normal: { label: '正常', semantic: 'success' },
@@ -97,8 +100,9 @@ export const STATUS_META: Record<string, StatusMeta> = {
   partial: { label: '部分占用', semantic: 'processing' },
   full: { label: '满载', semantic: 'success' },
 
-  // 盘点（frontend.md §10.5 单据七态经大小写归一后复用通用键；此处为单据态 + 明细行态）
-  pending_execute: { label: '待执行', semantic: 'pending' },
+  // 盘点（后端五态 DRAFT/COUNTING/PENDING_REVIEW/COMPLETED/CANCELLED——internal/stockops/
+  // models.go:143-147，单据态经大小写归一后复用通用键 draft/pending_review/completed/
+  // cancelled；此处为明细行态；原 pending_execute 为前端虚构值域已移除）
   counting: { label: '盘点中', semantic: 'processing' },
   counted: { label: '已盘', semantic: 'success' },
 
@@ -115,8 +119,8 @@ export const STATUS_META: Record<string, StatusMeta> = {
   partially_qualified: { label: '部分合格', semantic: 'warning' },
   unqualified: { label: '不合格', semantic: 'danger' },
 
-  // 质检处理结果（business-flow.md §4.3 六种处置值，与 api/quality.ts DISPOSITION_TAG_FALLBACK 对齐；
-  // 合格/部分合格/不合格复用上方质检结果键）
+  // 质检处理结果（business-flow.md §4.3 处置值；后端质检单 result 为九类中文值域，
+  // 见 api/quality.ts QUALITY_RESULT_TAG_META——下列英文键为旧前端先行值域保留兜底）
   return_supplier: { label: '退供应商', semantic: 'warning' },
   scrap: { label: '报废', semantic: 'danger' },
   rework: { label: '返工', semantic: 'processing' },

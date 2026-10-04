@@ -3,14 +3,20 @@ import { Flex, Button, Form, Input, InputNumber, Row, Col, Select, Typography, m
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
-import { OPTIONS_PAGE_SIZE, masterdataApi } from '@/api/masterdata'
+import {
+  fetchCustomerOptions,
+  fetchSkuOptions,
+  fetchWarehouseOptions,
+  buildIdItemMap,
+  idKey,
+} from '@/api/options'
+import type { SkuItem } from '@/api/masterdata'
 import {
   SALES_ORDER_CREATE_PERMISSION,
   salesApi,
   type SalesOrderCreatePayload,
   type SalesOrderLineInput,
 } from '@/api/sales'
-import { warehouseApi } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -24,33 +30,42 @@ const { Text } = Typography
 /**
  * 表单值：明细行字段可空（Form.List 运行中允许未填完），提交前经校验规则与
  * flatMap 守卫收敛为 SalesOrderLineInput，不使用非空断言。
+ * 客户/仓库/SKU 下拉 value 一律为 ID 数字（提交契约 CreateOrderInput 为 int64，
+ * masterdata.ts：提交必须用 number，传字符串会 400）。
  */
 interface SalesLineFormValues {
-  skuCode?: string
+  sku_id?: number
   qty?: number
-  unitPrice?: number
+  price?: number
   remark?: string
 }
 
 interface SalesOrderFormValues {
-  customerCode: string
-  warehouseCode: string
-  shippingAddress?: string
-  deliveryType?: string
+  customer_id?: number
+  warehouse_id?: number
+  shipping_address?: string
+  delivery_method?: string
   lines: SalesLineFormValues[]
   remark?: string
 }
 
-/** 配送方式值域（business-flow.md §6.1 仅定义字段；枚举为前端先行提案，后端冻结时回对） */
-const DELIVERY_TYPE_OPTIONS = [
+/** 配送方式值域（business-flow.md §6.1 仅定义字段为自由文本；枚举为前端提案，仅作录入约束） */
+const DELIVERY_METHOD_OPTIONS = [
   { label: '快递', value: 'EXPRESS' },
   { label: '物流专线', value: 'LOGISTICS' },
   { label: '客户自提', value: 'SELF_PICK' },
   { label: '其他', value: 'OTHER' },
 ]
 
+/** 下拉选项 value：ID 出参为字符串，提交契约要求数字，此处统一转 number */
+function toIdNumber(id: number | string): number {
+  return Number(id)
+}
+
 /**
- * 新建销售订单（/sales/new，POST /api/sales-orders 前端先行契约）。
+ * 新建销售订单（/sales/new，POST /api/sales）。
+ * 提交载荷 CreateOrderInput（internal/sales/service.go:114-121）：
+ * {customer_id, warehouse_id, shipping_address, delivery_method, remark, items:[{sku_id, qty, price}]}。
  * 分区遵循 frontend.md §8：基础信息（客户/仓库/收货地址/配送方式）→ 商品明细（SKU/数量/单价/金额）→ 备注。
  * 行金额与合计仅作即时校验展示，以后端计算为准。
  */
@@ -61,34 +76,34 @@ export default function SalesOrderCreatePage() {
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, SALES_ORDER_CREATE_PERMISSION)
 
-  // 表单依赖下拉：客户 / 仓库 / SKU 一次取全；接口失败时降级为空数组，不阻塞其余字段填写
+  // 表单依赖下拉：客户 / 仓库 / SKU 一次取全（options 端点已冻结）；失败呈错误态可重试
   const customers = useQuery({
-    queryKey: ['masterdata', 'customers', 'options'],
-    queryFn: () => masterdataApi.customers.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['options', 'customers'],
+    queryFn: fetchCustomerOptions,
   })
   const warehouses = useQuery({
-    queryKey: ['warehouse', 'warehouses', 'options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
   })
   const skus = useQuery({
-    queryKey: ['masterdata', 'skus', 'options'],
-    queryFn: () => masterdataApi.skus.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['options', 'skus'],
+    queryFn: fetchSkuOptions,
   })
 
-  const customerOptions = (customers.data?.items ?? []).map((item) => ({
+  const customerOptions = (customers.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.code,
+    value: toIdNumber(item.id),
   }))
-  const warehouseOptions = (warehouses.data?.items ?? []).map((item) => ({
+  const warehouseOptions = (warehouses.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
-    value: item.code,
+    value: toIdNumber(item.id),
   }))
-  const skuOptions = (skus.data?.items ?? []).map((item) => ({
+  const skuOptions = (skus.data ?? []).map((item) => ({
     label: item.product_name ? `${item.code} ${item.product_name}` : item.code,
-    value: item.code,
+    value: toIdNumber(item.id),
   }))
   const skuMap = useMemo(
-    () => new Map((skus.data?.items ?? []).map((item) => [item.code, item])),
+    () => buildIdItemMap<SkuItem>(skus.data ?? [], (item) => item.id),
     [skus.data],
   )
 
@@ -107,17 +122,17 @@ export default function SalesOrderCreatePage() {
     let totalQty = 0
     let totalAmount = 0
     for (const line of watchedLines ?? []) {
-      const { qty, unitPrice } = line ?? {}
+      const { qty, price } = line ?? {}
       if (typeof qty === 'number') totalQty += qty
-      if (typeof qty === 'number' && typeof unitPrice === 'number') totalAmount += qty * unitPrice
+      if (typeof qty === 'number' && typeof price === 'number') totalAmount += qty * price
     }
     return { totalQty, totalAmount, rowCount: watchedLines?.length ?? 0 }
   }, [watchedLines])
 
-  const handleSkuChange = (index: number, skuCode: string) => {
-    const sku = skuMap.get(skuCode)
+  const handleSkuChange = (index: number, skuId: number) => {
+    const sku = skuMap.get(idKey(skuId))
     if (sku?.sale_price != null) {
-      form.setFieldValue(['lines', index, 'unitPrice'], sku.sale_price)
+      form.setFieldValue(['lines', index, 'price'], sku.sale_price)
     }
   }
 
@@ -125,24 +140,26 @@ export default function SalesOrderCreatePage() {
     form
       .validateFields()
       .then((values) => {
-        const lines: SalesOrderLineInput[] = (values.lines ?? []).flatMap((line) => {
-          if (!line?.skuCode || line.qty == null || line.unitPrice == null) return []
+        if (values.customer_id == null || values.warehouse_id == null) return
+        const items: SalesOrderLineInput[] = (values.lines ?? []).flatMap((line, index) => {
+          if (line?.sku_id == null || line.qty == null || line.price == null) return []
           return [
             {
-              skuCode: line.skuCode,
+              line_no: index + 1,
+              sku_id: line.sku_id,
               qty: line.qty,
-              unitPrice: line.unitPrice,
+              price: line.price,
               remark: line.remark?.trim() || undefined,
             },
           ]
         })
         submitMutation.mutate({
-          customerCode: values.customerCode.trim(),
-          warehouseCode: values.warehouseCode.trim(),
-          shippingAddress: values.shippingAddress?.trim() || undefined,
-          deliveryType: values.deliveryType,
-          lines,
+          customer_id: values.customer_id,
+          warehouse_id: values.warehouse_id,
+          shipping_address: values.shipping_address?.trim() || undefined,
+          delivery_method: values.delivery_method || undefined,
           remark: values.remark?.trim() || undefined,
+          items,
         })
       })
       .catch(() => {
@@ -156,7 +173,7 @@ export default function SalesOrderCreatePage() {
         <SfPageHeader title="新建销售订单" onBack={() => navigate('/sales')} />
         <SfError
           error={new Error('没有新建销售订单的权限')}
-          description="需要销售域「新建」权限点（前端先行码 sales:create），请联系管理员开通；后端仍会做最终校验"
+          description="需要销售域「新建」权限点（sales:sales:create），请联系管理员开通；后端仍会做最终校验"
         />
       </div>
     )
@@ -193,7 +210,7 @@ export default function SalesOrderCreatePage() {
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item
-                name="customerCode"
+                name="customer_id"
                 label="客户"
                 rules={[{ required: true, message: '请选择客户' }]}
               >
@@ -208,7 +225,7 @@ export default function SalesOrderCreatePage() {
             </Col>
             <Col span={8}>
               <Form.Item
-                name="warehouseCode"
+                name="warehouse_id"
                 label="仓库"
                 rules={[{ required: true, message: '请选择仓库' }]}
               >
@@ -222,12 +239,12 @@ export default function SalesOrderCreatePage() {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="deliveryType" label="配送方式">
-                <Select options={DELIVERY_TYPE_OPTIONS} placeholder="请选择配送方式" allowClear />
+              <Form.Item name="delivery_method" label="配送方式">
+                <Select options={DELIVERY_METHOD_OPTIONS} placeholder="请选择配送方式" allowClear />
               </Form.Item>
             </Col>
             <Col span={24}>
-              <Form.Item name="shippingAddress" label="收货地址">
+              <Form.Item name="shipping_address" label="收货地址">
                 <Input placeholder="请输入收货地址" maxLength={255} />
               </Form.Item>
             </Col>
@@ -262,13 +279,13 @@ export default function SalesOrderCreatePage() {
                     {fields.map((field) => {
                       const line = watchedLines?.[field.name]
                       const lineAmount =
-                        typeof line?.qty === 'number' && typeof line?.unitPrice === 'number'
-                          ? line.qty * line.unitPrice
+                        typeof line?.qty === 'number' && typeof line?.price === 'number'
+                          ? line.qty * line.price
                           : null
                       return (
                         <Flex key={field.key} gap={12} align="baseline" wrap="nowrap">
                           <Form.Item
-                            name={[field.name, 'skuCode']}
+                            name={[field.name, 'sku_id']}
                             rules={[{ required: true, message: '请选择 SKU' }]}
                             style={{ width: 280, marginBottom: 0 }}
                           >
@@ -278,7 +295,7 @@ export default function SalesOrderCreatePage() {
                               options={skuOptions}
                               placeholder="选择 SKU"
                               loading={skus.isLoading}
-                              onChange={(value: string) => handleSkuChange(field.name, value)}
+                              onChange={(value: number) => handleSkuChange(field.name, value)}
                             />
                           </Form.Item>
                           <Form.Item
@@ -292,7 +309,7 @@ export default function SalesOrderCreatePage() {
                             <InputNumber min={1} precision={0} style={{ width: '100%' }} placeholder="数量" />
                           </Form.Item>
                           <Form.Item
-                            name={[field.name, 'unitPrice']}
+                            name={[field.name, 'price']}
                             rules={[
                               { required: true, message: '请输入单价' },
                               { type: 'number', min: 0, message: '单价不能为负数' },
@@ -338,6 +355,9 @@ export default function SalesOrderCreatePage() {
                   { label: '合计金额', value: formatMoney(totals.totalAmount) },
                 ]}
               />
+              <Text type="secondary">
+                行金额与合计为录入即时校验预览，正式金额以后端计算为准（total_amount 由后端按明细汇总）。
+              </Text>
             </Flex>
           </SfDetailSection>
         </div>

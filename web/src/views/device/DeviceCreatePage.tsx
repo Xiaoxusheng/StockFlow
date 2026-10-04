@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   Button,
@@ -13,7 +13,7 @@ import {
   message,
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { toDataURL } from 'qrcode'
 import {
@@ -22,12 +22,14 @@ import {
   deviceApi,
   type DeviceActivation,
   type DeviceCreatePayload,
+  type DeviceId,
   type DeviceType,
 } from '@/api/device'
-import { warehouseApi } from '@/api/warehouse'
-import { OPTIONS_PAGE_SIZE } from '@/api/masterdata'
+import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfError } from '@/components/common/SfError'
+import { SfLoading } from '@/components/common/SfLoading'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { formatDateTime } from '@/utils/format'
@@ -38,7 +40,39 @@ const ACTIVATION_POLL_MS = 5000
 /** 二维码渲染尺寸（px） */
 const QR_SIZE = 208
 
-/** 表单值：仓库下拉存字符串 ID，提交时转契约的 number 外键 */
+/**
+ * 刷新恢复记录键：创建成功的激活 payload（含二维码）仅存组件内存，页面刷新即丢；
+ * 记录 device_id 供激活状态查询恢复现场，二维码（qr_content）查询不可还原，
+ * 需经 PUT /{id}/activation 重新生成取回（device.ts:110-111 / service_device.go:185-186）。
+ */
+const PENDING_ACTIVATION_KEY = 'sf.device.pending-activation'
+
+function readPendingActivationId(): string | null {
+  try {
+    return sessionStorage.getItem(PENDING_ACTIVATION_KEY)
+  } catch {
+    // 存储不可用时降级为会话内状态
+    return null
+  }
+}
+
+function writePendingActivationId(id: DeviceId): void {
+  try {
+    sessionStorage.setItem(PENDING_ACTIVATION_KEY, String(id))
+  } catch {
+    // 同上
+  }
+}
+
+function clearPendingActivationId(): void {
+  try {
+    sessionStorage.removeItem(PENDING_ACTIVATION_KEY)
+  } catch {
+    // 同上
+  }
+}
+
+/** 表单值：仓库下拉存字符串 ID，提交时转契约的 number 外键（0=暂不绑定，service_device.go:258） */
 interface DeviceFormValues {
   code: string
   name: string
@@ -61,10 +95,20 @@ function buildQrContent(activation: DeviceActivation): string {
   return `${activation.server_url}?device=${encodeURIComponent(activation.device_code)}`
 }
 
+/** 绑定仓库展示：DeviceActivationPayload 仅携带 warehouse_id 裸 ID（service_device.go:187-197），
+ * 经仓库 options 本地映射；0=未绑定仓库，映射失败降级 #ID */
+function warehouseText(warehouseId: number, names: Map<string, string>): string {
+  if (!warehouseId) return '未绑定仓库'
+  return names.get(idKey(warehouseId)) ?? `#${idKey(warehouseId)}`
+}
+
 /** 激活二维码面板：qrcode 库真实渲染（devices.md §6.2 / frontend.md §14.3）+
- * 激活状态真实轮询与手动刷新（后端未交付时呈统一错误态，不做假激活） */
-function ActivationPanel({ activation, onViewDetail, onCreateAnother }: {
+ * 激活状态真实轮询与手动刷新 + 重新生成激活码（PUT /{id}/activation，旧码作废） */
+function ActivationPanel({ activation, warehouseNames, regenerating, onRegenerate, onViewDetail, onCreateAnother }: {
   activation: DeviceActivation
+  warehouseNames: Map<string, string>
+  regenerating: boolean
+  onRegenerate: () => void
   onViewDetail: () => void
   onCreateAnother: () => void
 }) {
@@ -118,7 +162,7 @@ function ActivationPanel({ activation, onViewDetail, onCreateAnother }: {
             items={[
               { key: 'code', label: '设备编号', children: latest.device_code },
               { key: 'server', label: '服务器地址', children: latest.server_url },
-              { key: 'warehouse', label: '绑定仓库', children: latest.warehouse_name ?? '未绑定仓库' },
+              { key: 'warehouse', label: '绑定仓库', children: warehouseText(latest.warehouse_id, warehouseNames) },
               { key: 'expires', label: '有效期至', children: formatDateTime(latest.expires_at) },
               { key: 'activated', label: '激活时间', children: formatDateTime(latest.activated_at) },
             ]}
@@ -137,63 +181,200 @@ function ActivationPanel({ activation, onViewDetail, onCreateAnother }: {
           <SfError
             error={activationQuery.error}
             onRetry={activationQuery.refetch}
-            description="激活状态接口不可用：GET /api/devices/{id}/activation（后端设备域尚未交付）"
+            description="激活状态查询失败：GET /api/devices/{id}/activation"
           />
         ) : (
-          <Flex gap={12} align="center" wrap="wrap">
-            <SfStatusTag label={statusMeta.label} semantic={statusMeta.semantic} />
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              loading={activationQuery.isFetching}
-              onClick={() => void activationQuery.refetch()}
-            >
-              刷新激活状态
-            </Button>
-            {activationQuery.data && (
-              <span>激活状态每 {ACTIVATION_POLL_MS / 1000} 秒自动刷新，直至进入终态</span>
+          <Flex vertical gap={12}>
+            <Flex gap={12} align="center" wrap="wrap">
+              <SfStatusTag label={statusMeta.label} semantic={statusMeta.semantic} />
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={activationQuery.isFetching}
+                onClick={() => void activationQuery.refetch()}
+              >
+                刷新激活状态
+              </Button>
+              {activationQuery.data && (
+                <span>激活状态每 {ACTIVATION_POLL_MS / 1000} 秒自动刷新，直至进入终态</span>
+              )}
+            </Flex>
+            {latest.status === 'activated' && (
+              <Alert
+                type="success"
+                showIcon
+                message="设备已激活"
+                description="该设备已完成激活并获取设备令牌，可关闭本页；后续可在设备详情查看在线与扫码情况。"
+              />
             )}
           </Flex>
         )}
       </Card>
-      <Flex gap={8}>
+      <Flex gap={8} wrap="wrap">
         <Button type="primary" onClick={onViewDetail}>
           查看设备详情
         </Button>
         <Button onClick={onCreateAnother}>再建一台</Button>
+        <SfConfirm
+          title="重新生成激活二维码？"
+          description="原激活码与设备端令牌将全部作废，设备回到待激活状态。"
+          okText="重新生成"
+          confirming={regenerating}
+          onConfirm={onRegenerate}
+        >
+          <Button icon={<ReloadOutlined />}>重新生成激活码</Button>
+        </SfConfirm>
       </Flex>
     </Flex>
   )
 }
 
 /**
+ * 刷新恢复面板：创建成功的激活 payload 仅存内存，页面刷新即丢；凭 sessionStorage
+ * 记录的 device_id 经 GET /{id}/activation 取回激活状态；二维码查询不可还原——
+ * 待激活/过期态提供「重新生成激活码」经 PUT /{id}/activation 取回新二维码
+ * （service_device.go:185-186：token 仅存哈希，查询不出参）。
+ */
+function RecoveredActivationPanel({ activation, warehouseNames, loading, error, onRetry, regenerating, onRegenerate, onViewDetail, onDiscard }: {
+  activation?: DeviceActivation
+  warehouseNames: Map<string, string>
+  loading: boolean
+  error: unknown
+  onRetry: () => void
+  regenerating: boolean
+  onRegenerate: () => void
+  onViewDetail: () => void
+  onDiscard: () => void
+}) {
+  if (loading) {
+    return (
+      <Card size="small" title="激活状态恢复">
+        <SfLoading rows={3} />
+      </Card>
+    )
+  }
+  if (error || !activation) {
+    return (
+      <Card size="small" title="激活状态恢复">
+        <Flex vertical gap={12}>
+          <SfError
+            error={error ?? new Error('激活状态查询失败')}
+            onRetry={onRetry}
+            description="激活状态查询失败：GET /api/devices/{id}/activation"
+          />
+          <Button onClick={onDiscard}>返回登记表单</Button>
+        </Flex>
+      </Card>
+    )
+  }
+  const statusMeta = ACTIVATION_STATUS_META[activation.status] ?? ACTIVATION_STATUS_META.pending
+  return (
+    <Card size="small" title="激活状态恢复">
+      <Flex vertical gap={16}>
+        {activation.status === 'activated' ? (
+          <Alert
+            type="success"
+            showIcon
+            message="设备已激活"
+            description={`设备 ${activation.device_code} 已完成激活，本次登记流程结束；页面刷新丢失的激活二维码无需补发。`}
+          />
+        ) : (
+          <Alert
+            type="warning"
+            showIcon
+            message="激活二维码已随页面刷新丢失"
+            description="二维码内容仅在创建或重新生成时返回（激活令牌仅存哈希，查询不可还原）。如需重新展示二维码，请重新生成激活码，原激活码与设备令牌将作废。"
+          />
+        )}
+        <Descriptions
+          bordered
+          size="small"
+          column={{ xs: 1, md: 2, xl: 3 }}
+          items={[
+            { key: 'code', label: '设备编号', children: activation.device_code },
+            {
+              key: 'status',
+              label: '激活状态',
+              children: <SfStatusTag label={statusMeta.label} semantic={statusMeta.semantic} />,
+            },
+            { key: 'warehouse', label: '绑定仓库', children: warehouseText(activation.warehouse_id, warehouseNames) },
+            { key: 'expires', label: '有效期至', children: formatDateTime(activation.expires_at) },
+            { key: 'activated', label: '激活时间', children: formatDateTime(activation.activated_at) },
+          ]}
+        />
+        <Flex gap={8} wrap="wrap">
+          {activation.status !== 'activated' && (
+            <SfConfirm
+              title="重新生成激活二维码？"
+              description="原激活码与设备端令牌将全部作废，设备回到待激活状态。"
+              okText="重新生成"
+              confirming={regenerating}
+              onConfirm={onRegenerate}
+            >
+              <Button type="primary">重新生成激活码</Button>
+            </SfConfirm>
+          )}
+          <Button onClick={onViewDetail}>查看设备详情</Button>
+          <Button onClick={onDiscard}>返回登记表单</Button>
+        </Flex>
+      </Flex>
+    </Card>
+  )
+}
+
+/**
  * 新建设备页（/devices/new，无菜单路由；frontend.md §14.3 / devices.md §6.1–6.2）：
- * 设备表单 → 提交成功返回激活二维码 payload → qrcode 渲染 + 激活状态轮询。
- * 后端 POST /api/devices 未交付时提交呈统一错误态。
+ * 设备表单 → 提交成功返回激活二维码 payload（POST /api/devices，service_device.go:264-327）
+ * → qrcode 渲染 + 激活状态轮询；页面刷新丢码时经重新生成接口取回。
  */
 export default function DeviceCreatePage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [form] = Form.useForm<DeviceFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const [created, setCreated] = useState<DeviceActivation | null>(null)
+  const [pendingId, setPendingId] = useState<string | null>(readPendingActivationId)
 
   // 绑定仓库下拉：一次取全；接口失败降级为空数组，不阻塞表单其余字段
   const warehouses = useQuery({
-    queryKey: ['warehouses', 'options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['devices', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
   })
-  const warehouseOptions = (warehouses.data?.items ?? []).map((item) => ({
+  const warehouseOptions = (warehouses.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
     value: String(item.id),
   }))
+  const warehouseNames = useMemo(() => buildWarehouseMaps(warehouses.data ?? []).name, [warehouses.data])
 
   const createMutation = useMutation({
     mutationFn: (payload: DeviceCreatePayload) => deviceApi.create(payload),
     onSuccess: (data) => {
       setCreated(data)
+      writePendingActivationId(data.device_id)
       messageApi.success('设备已登记，请使用 StockFlow Scan 扫描激活二维码')
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  // 重新生成激活码（PUT /api/devices/{id}/activation，handler.go:346-358）：
+  // 刷新丢失二维码 / 换码场景下二维码的唯一取回路径
+  const regenMutation = useMutation({
+    mutationFn: (deviceId: DeviceId) => deviceApi.regenActivation(deviceId),
+    onSuccess: (data) => {
+      setCreated(data)
+      writePendingActivationId(data.device_id)
+      // 同步轮询缓存：重新生成后回到待激活态，避免面板短暂展示重新生成前的旧状态
+      queryClient.setQueryData(['devices', 'activation', String(data.device_id)], data)
+      messageApi.success('已重新生成激活二维码，原激活码与设备令牌已作废')
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  // 刷新恢复：created 内存态丢失但记录了 device_id 时，经激活状态查询恢复现场
+  const recoveredQuery = useQuery({
+    queryKey: ['devices', 'activation', 'recover', pendingId],
+    queryFn: () => deviceApi.activation(pendingId as string),
+    enabled: !created && Boolean(pendingId),
   })
 
   const handleSubmit = (values: DeviceFormValues) => {
@@ -203,15 +384,28 @@ export default function DeviceCreatePage() {
       type: values.type,
       brand: values.brand,
       model: values.model,
-      warehouse_id: values.warehouse_id != null ? Number(values.warehouse_id) : null,
+      warehouse_id: values.warehouse_id ? Number(values.warehouse_id) : 0,
       remark: values.remark,
     })
   }
 
   const handleCreateAnother = () => {
+    clearPendingActivationId()
+    setPendingId(null)
     createMutation.reset()
     setCreated(null)
     form.resetFields()
+  }
+
+  const handleViewDetail = (deviceId: DeviceId) => {
+    clearPendingActivationId()
+    setPendingId(null)
+    navigate(`/devices/${encodeURIComponent(String(deviceId))}`)
+  }
+
+  const handleDiscardPending = () => {
+    clearPendingActivationId()
+    setPendingId(null)
   }
 
   return (
@@ -225,8 +419,23 @@ export default function DeviceCreatePage() {
       {created ? (
         <ActivationPanel
           activation={created}
-          onViewDetail={() => navigate(`/devices/${encodeURIComponent(String(created.device_id))}`)}
+          warehouseNames={warehouseNames}
+          regenerating={regenMutation.isPending}
+          onRegenerate={() => regenMutation.mutate(created.device_id)}
+          onViewDetail={() => handleViewDetail(created.device_id)}
           onCreateAnother={handleCreateAnother}
+        />
+      ) : pendingId ? (
+        <RecoveredActivationPanel
+          activation={recoveredQuery.data}
+          warehouseNames={warehouseNames}
+          loading={recoveredQuery.isPending}
+          error={recoveredQuery.error}
+          onRetry={() => void recoveredQuery.refetch()}
+          regenerating={regenMutation.isPending}
+          onRegenerate={() => regenMutation.mutate(pendingId)}
+          onViewDetail={() => handleViewDetail(pendingId)}
+          onDiscard={handleDiscardPending}
         />
       ) : (
         <Card size="small" title="设备信息">
@@ -235,7 +444,7 @@ export default function DeviceCreatePage() {
               type="error"
               showIcon
               message={resolveErrorMessage(createMutation.error)}
-              description="创建接口不可用：POST /api/devices（后端设备域尚未交付，契约冻结后回对字段）"
+              description="创建失败：请检查设备编号是否重复、仓库是否有效后重试（POST /api/devices）。"
               style={{ marginBottom: 16 }}
             />
           )}
@@ -251,7 +460,7 @@ export default function DeviceCreatePage() {
                   name="code"
                   label="设备编号"
                   rules={[{ required: true, message: '请输入设备编号' }]}
-                  extra="设备注册主键，如 SF-SCAN-001（devices.md §6.1）"
+                  extra="设备注册主键，2–64 位字母数字开头，如 SF-SCAN-001（devices.md §6.1）"
                 >
                   <Input placeholder="唯一设备编号" maxLength={64} />
                 </Form.Item>
@@ -275,7 +484,7 @@ export default function DeviceCreatePage() {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="warehouse_id" label="绑定仓库" extra="作为设备初始配置仓库（devices.md §6.2）">
+                <Form.Item name="warehouse_id" label="绑定仓库" extra="作为设备初始配置仓库，可暂不绑定（devices.md §6.3）">
                   <Select options={warehouseOptions} placeholder="请选择绑定仓库" allowClear />
                 </Form.Item>
               </Col>

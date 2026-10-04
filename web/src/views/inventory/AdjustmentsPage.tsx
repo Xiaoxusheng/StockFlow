@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useQuery } from '@tanstack/react-query'
 import {
   inventoryApi,
   type InventoryAdjustmentItem,
@@ -8,13 +9,24 @@ import {
   type InventoryAdjustmentStatus,
   type InventoryAdjustmentType,
 } from '@/api/inventory'
+import {
+  buildBinCodeMap,
+  buildIdMap,
+  buildSkuMaps,
+  buildWarehouseMaps,
+  fetchBatchOptions,
+  fetchBinOptions,
+  fetchSkuOptions,
+  fetchWarehouseOptions,
+  idKey,
+} from '@/api/options'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatDateTime, formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -54,62 +66,108 @@ function AdjustStatusTag({ status }: { status: InventoryAdjustmentStatus }) {
   return <SfStatusTag status={meta?.key ?? status} label={meta?.label} semantic={meta?.semantic} />
 }
 
-const COLUMNS: ColumnsType<InventoryAdjustmentItem> = [
-  { title: '调整单号', dataIndex: 'adjustmentNo', width: 150, fixed: 'left' },
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130 },
-  {
-    title: '商品名称',
-    dataIndex: 'productName',
-    width: 200,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '调整类型', dataIndex: 'adjustType', width: 90 },
-  {
-    title: '调整数量',
-    dataIndex: 'qty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '调整原因',
-    dataIndex: 'reason',
-    width: 220,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 220 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 90,
-    render: (v: InventoryAdjustmentStatus) => <AdjustStatusTag status={v} />,
-  },
-  { title: '申请人', dataIndex: 'createdByName', width: 100, render: (v?: string) => v ?? '-' },
-  {
-    title: '申请时间',
-    dataIndex: 'createdAt',
-    width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-  {
-    title: '审核时间',
-    dataIndex: 'approvedAt',
-    width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-  {
-    title: '执行时间',
-    dataIndex: 'executedAt',
-    width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
+/** 可选维度 ID 0 值显示占位符（0=非批次） */
+function idOrDash(value: string): string {
+  return value === '0' ? '-' : value
+}
 
-/** 库存调整（business-flow.md §11.1：申请必填原因 → 审核 → 执行 → 生成库存流水） */
+interface AdjustmentNameMaps {
+  skuCodes: Map<string, string>
+  skuNames: Map<string, string>
+  warehouseNames: Map<string, string>
+  binCodes: Map<string, string>
+  batchNos: Map<string, string>
+}
+
+/** 组装列：AdjustmentView 仅下发裸 ID，经 maps 本地解析编码/名称（解析失败降级 ID，不造假数据） */
+function buildColumns(maps: AdjustmentNameMaps): ColumnsType<InventoryAdjustmentItem> {
+  return [
+    { title: '调整单号', dataIndex: 'adjustment_no', width: 150, fixed: 'left' },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      render: (v: InventoryAdjustmentItem['sku_id']) => maps.skuCodes.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 200,
+      ellipsis: true,
+      render: (_: unknown, record: InventoryAdjustmentItem) => {
+        const name = maps.skuNames.get(idKey(record.sku_id))
+        return name ? (
+          <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          '-'
+        )
+      },
+    },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      key: 'warehouse_name',
+      width: 100,
+      render: (v: InventoryAdjustmentItem['warehouse_id']) => maps.warehouseNames.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '库位',
+      dataIndex: 'bin_id',
+      key: 'bin_code',
+      width: 110,
+      render: (v: InventoryAdjustmentItem['bin_id']) => maps.binCodes.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '批次',
+      dataIndex: 'batch_id',
+      key: 'batch_no',
+      width: 110,
+      render: (v: InventoryAdjustmentItem['batch_id']) => idOrDash(maps.batchNos.get(idKey(v)) ?? idKey(v)),
+    },
+    { title: '调整类型', dataIndex: 'adjust_type', width: 90 },
+    {
+      title: '调整数量',
+      dataIndex: 'qty',
+      width: 100,
+      align: 'right',
+      // stock.Qty 裸数字出参（numeric(18,4)），按最多 4 位小数展示、不强制补零
+      render: (v: number) => <span className="sf-num">{formatQty(v)}</span>,
+    },
+    {
+      title: '调整原因',
+      dataIndex: 'reason',
+      width: 220,
+      ellipsis: true,
+      render: (v: string) => <Text style={{ maxWidth: 220 }} ellipsis={{ tooltip: v }}>{v}</Text>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v: InventoryAdjustmentStatus) => <AdjustStatusTag status={v} />,
+    },
+    {
+      title: '申请时间',
+      dataIndex: 'created_at',
+      width: 160,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+    {
+      title: '执行时间',
+      dataIndex: 'executed_at',
+      width: 160,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+}
+
+/** 库存调整（business-flow.md §11.1：申请必填原因 → 审核 → 执行 → 生成库存流水；
+ * GET /api/inventory/adjustments 后端已交付：internal/inventory/handler.go:524-556，
+ * 出参 AdjustmentView snake_case 仅裸 ID，经 api/options.ts 本地映射补充编码/名称，
+ * 失败降级 ID；后端无 approved_at，执行信息仅 executed_at/executed_by） */
 export default function AdjustmentsPage() {
   const [params, setParams] = useState<InventoryAdjustmentQuery>({})
   const list = usePagedList<InventoryAdjustmentItem, InventoryAdjustmentQuery>({
@@ -118,10 +176,23 @@ export default function AdjustmentsPage() {
     params,
   })
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as InventoryAdjustmentQuery)
-    list.resetToFirstPage()
-  }
+  // AdjustmentView 无联表编码/名称（warehouse_id/sku_id/bin_id/batch_id 裸 ID），options 一次取全本地映射
+  const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
+  const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
+  const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
+  const batches = useQuery({ queryKey: ['options', 'batches'], queryFn: fetchBatchOptions })
+
+  const maps: AdjustmentNameMaps = useMemo(
+    () => ({
+      warehouseNames: buildWarehouseMaps(warehouses.data ?? []).name,
+      skuCodes: buildSkuMaps(skus.data ?? []).code,
+      skuNames: buildSkuMaps(skus.data ?? []).name,
+      binCodes: buildBinCodeMap(bins.data ?? []),
+      batchNos: buildIdMap(batches.data ?? [], (b) => b.id, (b) => b.batch_no),
+    }),
+    [warehouses.data, skus.data, bins.data, batches.data],
+  )
+  const columns = useMemo(() => buildColumns(maps), [maps])
 
   return (
     <div className="sf-page">
@@ -132,17 +203,20 @@ export default function AdjustmentsPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '调整单号 / SKU / 商品名称' },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-            { name: 'adjustType', label: '调整类型', control: 'select', options: ADJUST_TYPE_OPTIONS },
+            { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
+            { name: 'warehouse_id', label: '仓库 ID', control: 'input', placeholder: '仓库 ID（正整数）' },
+            { name: 'adjust_type', label: '调整类型', control: 'select', options: ADJUST_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: ADJUST_STATUS_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          onSearch={(values) => {
+            setParams(values as InventoryAdjustmentQuery)
+            list.resetToFirstPage()
+          }}
         />
         <SfTable<InventoryAdjustmentItem>
           storageKey="inventory-adjustments"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -152,7 +226,7 @@ export default function AdjustmentsPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存调整单"
-          scrollX={1880}
+          scrollX={1750}
         />
       </Card>
     </div>

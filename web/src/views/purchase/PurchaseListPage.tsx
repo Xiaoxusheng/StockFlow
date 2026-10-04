@@ -1,102 +1,169 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button, Card, Typography } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
-import { purchaseApi, type PurchaseItem, type PurchaseQuery, type PurchaseStatus } from '@/api/purchase'
+import {
+  purchaseApi,
+  type PurchaseOrder,
+  type PurchaseQuery,
+  type PurchaseStatus,
+} from '@/api/purchase'
+import { toStatusKey } from '@/api/masterdata'
+import {
+  buildSupplierMaps,
+  buildWarehouseMaps,
+  fetchSupplierOptions,
+  fetchWarehouseOptions,
+} from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDate, formatDateTime, formatMoney, formatNumber } from '@/utils/format'
+import type { StatusSemantic } from '@/types/status'
+import { formatDateTime, formatMoney } from '@/utils/format'
 
 const { Text } = Typography
 
-/** 状态选项与 business-flow.md §2.2 采购订单状态机一致 */
-const STATUS_OPTIONS: Array<{ label: string; value: PurchaseStatus }> = [
-  { label: '草稿', value: 'draft' },
-  { label: '待审核', value: 'pending_review' },
-  { label: '已审核', value: 'approved' },
-  { label: '部分到货', value: 'partially_received' },
-  { label: '到货完成', value: 'received' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'cancelled' },
-]
+/**
+ * 采购订单状态 → SfStatusTag（internal/purchase/models.go:17-23 七态）。
+ * types/status.ts 注册表已收录 draft/pending_approval/approved/completed/cancelled
+ * （文案/语义一致，SfStatusTag 以注册表优先）；PARTIAL_RECEIVED/RECEIVED_ALL 为
+ * 采购语境专有键未注册，经 SfStatusTag 的 label/semantic 兜底；后端返回未知值时
+ * 映射缺失，SfStatusTag 兜底中性灰 + 原始文案，不崩溃。
+ */
+const PO_STATUS_TAG: Record<PurchaseStatus, { label: string; semantic: StatusSemantic }> = {
+  DRAFT: { label: '草稿', semantic: 'neutral' },
+  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
+  APPROVED: { label: '已审核', semantic: 'success' },
+  PARTIAL_RECEIVED: { label: '部分到货', semantic: 'processing' },
+  RECEIVED_ALL: { label: '到货完成', semantic: 'success' },
+  COMPLETED: { label: '已完成', semantic: 'success' },
+  CANCELLED: { label: '已取消', semantic: 'neutral' },
+}
 
-const COLUMNS: ColumnsType<PurchaseItem> = [
-  { title: '采购单号', dataIndex: 'poNo', width: 170, fixed: 'left' },
-  {
-    title: '供应商',
-    dataIndex: 'supplierName',
-    width: 180,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  {
-    title: '总数量',
-    dataIndex: 'totalQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '已收货',
-    dataIndex: 'receivedQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '金额',
-    dataIndex: 'totalAmount',
-    width: 120,
-    align: 'right',
-    render: (v?: number) => <span className="sf-num">{formatMoney(v)}</span>,
-  },
-  {
-    title: '预计到货',
-    dataIndex: 'expectedArrivalDate',
-    width: 110,
-    render: (v?: string) => formatDate(v),
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 90,
-    render: (v: string) => <SfStatusTag status={v} />,
-  },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    width: 170,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
+const STATUS_OPTIONS = Object.entries(PO_STATUS_TAG).map(([value, tag]) => ({
+  label: tag.label,
+  value,
+}))
 
-/** 采购订单列表（frontend.md 采购中心 /purchases；GET /api/purchases，子路径未冻结） */
+function renderStatus(status: PurchaseStatus) {
+  const tag = PO_STATUS_TAG[status]
+  return <SfStatusTag status={toStatusKey(status)} label={tag?.label} semantic={tag?.semantic} />
+}
+
+/** 采购订单列表（/purchases；GET /api/purchases，出参为 PurchaseOrder 裸模型
+ * snake_case，internal/purchase/models.go:120-135——供应商/仓库为裸 ID，
+ * 经基础资料 options 本地映射补充，映射失败降级为 ID，不造假数据） */
 export default function PurchaseListPage() {
   const [params, setParams] = useState<PurchaseQuery>({})
   const navigate = useNavigate()
-  const list = usePagedList<PurchaseItem, PurchaseQuery>({
+
+  // 供应商/仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
+  const supplierOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'suppliers'],
+    queryFn: fetchSupplierOptions,
+  })
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const supplierNames = useMemo(
+    () => buildSupplierMaps(supplierOptionsQuery.data ?? []).name,
+    [supplierOptionsQuery.data],
+  )
+  const warehouseNames = useMemo(
+    () => buildWarehouseMaps(warehouseOptionsQuery.data ?? []).name,
+    [warehouseOptionsQuery.data],
+  )
+
+  const list = usePagedList<PurchaseOrder, PurchaseQuery>({
     queryKey: ['purchase', 'orders'],
     fetch: (q) => purchaseApi.list(q),
     params,
+    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
+    persistKey: 'purchase-orders',
   })
 
-  // 既有列保持不变，仅追加「详情」行入口（/purchases/:id，无菜单路由）
-  const columns: ColumnsType<PurchaseItem> = [
-    ...COLUMNS,
+  const columns: ColumnsType<PurchaseOrder> = [
+    { title: '采购单号', dataIndex: 'po_no', width: 180, fixed: 'left' },
+    {
+      title: '供应商',
+      dataIndex: 'supplier_id',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: PurchaseOrder) => {
+        const name = supplierNames.get(String(record.supplier_id)) ?? `供应商 #${record.supplier_id}`
+        return (
+          <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        )
+      },
+    },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      width: 130,
+      ellipsis: true,
+      render: (_: unknown, record: PurchaseOrder) =>
+        warehouseNames.get(String(record.warehouse_id)) ?? `仓库 #${record.warehouse_id}`,
+    },
+    {
+      title: '金额',
+      dataIndex: 'total_amount',
+      width: 130,
+      align: 'right',
+      render: (v: number) => <span className="sf-num">{formatMoney(v)}</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: PurchaseStatus) => renderStatus(v),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
       width: 80,
-      render: (_: unknown, record: PurchaseItem) => (
+      render: (_: unknown, record: PurchaseOrder) => (
         <Button type="link" size="small" onClick={() => navigate(`/purchases/${record.id}`)}>
           详情
         </Button>
       ),
+    },
+  ]
+
+  // 搜索参数对齐 internal/purchase/handler.go:87-115：keyword/status/supplier_id/warehouse_id
+  // （keyword 后端按 po_no ILIKE 模糊，repository.go:292-294；下拉选项失败时呈无选项空态，不造假数据）
+  const searchFields: SearchField[] = [
+    { name: 'keyword', label: '关键词', control: 'input', placeholder: '采购单号' },
+    { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
+    {
+      name: 'supplier_id',
+      label: '供应商',
+      control: 'select',
+      options: (supplierOptionsQuery.data ?? []).map((s) => ({
+        label: `${s.name}（${s.code}）`,
+        value: String(s.id),
+      })),
+    },
+    {
+      name: 'warehouse_id',
+      label: '仓库',
+      control: 'select',
+      options: (warehouseOptionsQuery.data ?? []).map((w) => ({
+        label: `${w.name}（${w.code}）`,
+        value: String(w.id),
+      })),
     },
   ]
 
@@ -112,15 +179,8 @@ export default function PurchaseListPage() {
         subtitle="草稿 → 待审核 → 已审核 → 到货 → 完成"
       />
       <Card size="small">
-        <SfSearchForm
-          fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '采购单号 / 供应商' },
-            { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-          ]}
-          onSearch={handleSearch}
-        />
-        <SfTable<PurchaseItem>
+        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfTable<PurchaseOrder>
           storageKey="purchase-orders"
           rowKey="id"
           columns={columns}
@@ -133,7 +193,7 @@ export default function PurchaseListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购订单"
-          scrollX={1220}
+          scrollX={970}
         />
       </Card>
     </div>

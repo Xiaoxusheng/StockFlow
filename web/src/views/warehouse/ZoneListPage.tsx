@@ -83,7 +83,7 @@ export default function ZoneListPage() {
   // 仓库选项（搜索与表单共用，走真实 /api/warehouses）
   const warehouseOptionsQuery = useQuery({
     queryKey: ['warehouse', 'warehouses', 'options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: 200 }),
+    queryFn: () => warehouseApi.list({ page: 1, pageSize: 100 }),
   })
   const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,

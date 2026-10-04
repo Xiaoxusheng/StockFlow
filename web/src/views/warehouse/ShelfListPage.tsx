@@ -87,7 +87,7 @@ export default function ShelfListPage() {
   // 仓库选项（搜索与表单共用）
   const warehouseOptionsQuery = useQuery({
     queryKey: ['warehouse', 'warehouses', 'options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: 200 }),
+    queryFn: () => warehouseApi.list({ page: 1, pageSize: 100 }),
   })
   const warehouseOptions = (warehouseOptionsQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
@@ -111,7 +111,7 @@ export default function ShelfListPage() {
   const formWarehouseId = Form.useWatch('warehouse_id', form)
   const zoneOptionsQuery = useQuery({
     queryKey: ['warehouse', 'zones', 'options', formWarehouseId],
-    queryFn: () => zoneApi.list({ warehouseId: formWarehouseId, page: 1, pageSize: 200 }),
+    queryFn: () => zoneApi.list({ warehouseId: formWarehouseId, page: 1, pageSize: 100 }),
     enabled: formWarehouseId !== undefined && formWarehouseId !== null,
   })
   const zoneOptions = (zoneOptionsQuery.data?.items ?? []).map((item) => ({

@@ -102,9 +102,13 @@ export const MENU_TREE: MenuItem[] = [
     label: '质量中心',
     icon: <SafetyCertificateOutlined />,
     children: [
-      { path: '/quality/inspections', label: '质检', permission: 'quality:inspection:view' },
-      { path: '/quality/nonconforming', label: '不合格品', permission: 'quality:nonconforming:view' },
-      { path: '/quality/trace', label: '质量追溯', permission: 'quality:trace:view' },
+      // 质量域菜单码归一为两段 quality:view（matchBackendPermission 取末两段：资源段 quality
+      // 命中后端冻结码 purchase:quality:*，view 动作 = 持任意动作即放行）——
+      // 原 quality:inspection:view 等三段码资源段 inspection/nonconforming/trace 在后端
+      // 权限清单（internal/auth/permissions.go:163-167）不存在，非超管用户将看不到菜单入口
+      { path: '/quality/inspections', label: '质检', permission: 'quality:view' },
+      { path: '/quality/nonconforming', label: '不合格品', permission: 'quality:view' },
+      { path: '/quality/trace', label: '质量追溯', permission: 'quality:view' },
     ],
   },
   { path: '/counts', label: '盘点中心', icon: <AuditOutlined />, permission: 'count:view' },

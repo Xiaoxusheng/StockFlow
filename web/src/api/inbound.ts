@@ -1,123 +1,127 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
+import type { SalesId } from './sales'
 
-// ---------- 入库管理（docs/api.md §1：领域前缀 /api/inbounds，子路径未冻结） ----------
+// ---------- 入库单（后端 M2 已交付：internal/purchase/purchase.go:50-55，
+// 出参为 InboundOrder GORM 模型 snake_case，internal/purchase/models.go:164-202） ----------
+//
+// 状态为大写枚举（models.go:27-33），渲染前经 toStatusKey 归一后走 SfStatusTag。
 
-/** 入库类型（business-flow.md §3.1；后端枚举冻结前仅用于筛选传参，展示走页面标签映射兜底） */
-export type InboundType =
-  | 'purchase' // 采购入库
-  | 'production' // 生产入库
-  | 'sales_return' // 销售退货入库
-  | 'transfer' // 调拨入库
-  | 'other' // 其他入库
+/** 入库单状态（internal/purchase/models.go:27-33 迁移 CHECK 同源：
+ * DRAFT→RECEIVING→AWAITING_QC→AWAITING_PUTAWAY→COMPLETED，差额关闭 CLOSED，取消 CANCELLED） */
+export type InboundOrderStatus =
+  | 'DRAFT'
+  | 'RECEIVING'
+  | 'AWAITING_QC'
+  | 'AWAITING_PUTAWAY'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CLOSED'
 
-/** 入库单状态主流程（business-flow.md §3.2 收货 → 质检 → 上架；后端枚举冻结前仅用于筛选传参，展示走 SfStatusTag 兜底） */
-export type InboundStatus =
-  | 'draft'
-  | 'pending_receipt'
-  | 'receiving'
-  | 'received'
-  | 'pending_inspection'
-  | 'pending_putaway'
-  | 'putaway_completed'
-  | 'completed'
-  | 'closed'
-  | 'cancelled'
+/** 入库来源类型（models.go:49-50 迁移 CHECK：PURCHASE 采购入库 / OTHER 其他入库） */
+export type InboundSourceType = 'PURCHASE' | 'OTHER'
 
-export interface InboundQuery extends PageQuery {
+/** 入库单列表筛选（handler.go:220-242：keyword/status/source_type/source_no/warehouse_id） */
+export interface InboundOrderQuery extends PageQuery {
   keyword?: string
-  inboundType?: InboundType
-  status?: InboundStatus
-  warehouseCode?: string
+  status?: InboundOrderStatus
+  source_type?: InboundSourceType
+  source_no?: string
+  warehouse_id?: SalesId
 }
 
-export interface InboundItem {
-  id: number | string
+/** 入库单（InboundOrder，models.go:164-178 字段全量） */
+export interface InboundOrder {
+  id: SalesId
   /** 入库单号（business-flow.md §13.1：IN-日期-流水） */
-  inboundNo: string
-  inboundType: string
-  /** 来源单号（采购单 / 退货单 / 调拨单等） */
-  sourceNo?: string
-  /** 供应商（仅采购入库等有来源场景返回） */
-  supplierName?: string
-  warehouseCode?: string
-  warehouseName: string
-  /** 计划数量合计 */
-  totalQty: number
-  /** 已收货数量合计（business-flow.md §3.3 支持部分收货） */
-  receivedQty: number
-  status: string
-  operatorName?: string
-  createdAt: string
+  inbound_no: string
+  source_type: InboundSourceType
+  /** 来源单号（采购单号等） */
+  source_no: string
+  warehouse_id: number
+  status: InboundOrderStatus
+  received_at: string | null
+  inspected_at: string | null
+  putaway_at: string | null
+  completed_at: string | null
+  cancelled_at: string | null
+  remark: string
+  created_at: string
+  updated_at: string
+  /** database.ID 序列化为字符串（BaseModel，database/model.go:122-128） */
+  created_by: string
+  updated_by: string
 }
 
-// ---------- 入库单详情（GET /api/inbounds/{id}，前端先行契约：后端入库单据域未交付，冻结后回对字段） ----------
+/** 入库单明细（InboundItem，models.go:187-199；qty_received/qty_inspected/qty_putaway
+ * 承载收货→质检→上架三段进度，business-flow.md §3.3 支持部分收货） */
+export interface InboundOrderItem {
+  id: SalesId
+  inbound_id: number
+  line_no: number
+  sku_id: number
+  qty: number
+  qty_received: number
+  qty_inspected: number
+  qty_putaway: number
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: string
+  updated_by: string
+}
 
-/** 入库单商品明细行 */
-export interface InboundDetailItem {
-  id: number | string
-  skuCode: string
-  skuName?: string
-  /** 计量单位 */
-  unitName?: string
-  /** 计划数量 */
-  totalQty: number
-  /** 已收货数量（business-flow.md §3.3 支持部分收货） */
-  receivedQty?: number
-  /** 批次 */
-  batchNo?: string
-  /** 目的库位 */
-  binCode?: string
-  status?: string
+/** 入库单详情（GET /api/inbounds/{id}，service_inbound.go:336-339 返回 {order, items}） */
+export interface InboundOrderDetail {
+  order: InboundOrder
+  items: InboundOrderItem[]
+}
+
+/** 明细行入参（InboundItemInput，service_inbound.go:25-30：同 SKU 合并单行） */
+export interface InboundLineInput {
+  sku_id: number
+  qty: number
   remark?: string
 }
 
-/** 入库单详情：含明细与流程节点时间（business-flow.md §13.4） */
-export interface InboundDetail {
-  id: number | string
-  inboundNo: string
-  inboundType: string
-  /** 来源单号（采购单 / 退货单 / 调拨单等） */
-  sourceNo?: string
-  supplierName?: string
-  warehouseCode?: string
-  warehouseName: string
-  /** 计划数量合计 */
-  totalQty: number
-  /** 已收货数量合计 */
-  receivedQty?: number
-  status: string
-  /** 创建人 */
-  operatorName?: string
-  /** 创建时间 */
-  createdAt: string
-  /** 审核时间 */
-  reviewedAt?: string
-  /** 审核人 */
-  reviewedBy?: string
-  /** 收货完成时间 */
-  receivedAt?: string
-  /** 收货人 */
-  receivedBy?: string
-  /** 质检完成时间 */
-  inspectedAt?: string
-  /** 质检人 */
-  inspectedBy?: string
-  /** 上架完成时间 */
-  putawayAt?: string
-  /** 上架人 */
-  putawayBy?: string
-  /** 备注 */
+/** 创建入参（InboundCreateInput，service_inbound.go:32-37） */
+export interface InboundCreatePayload {
+  source_type: InboundSourceType
+  source_no?: string
+  warehouse_id: number
   remark?: string
-  /** 商品明细 */
-  items: InboundDetailItem[]
+  items: InboundLineInput[]
 }
+
+/** 草稿编辑入参（InboundUpdateInput，service_inbound.go:39-42：仅 remark + 明细整单替换） */
+export interface InboundUpdatePayload {
+  remark?: string
+  items?: InboundLineInput[]
+}
+
+/** 差额关闭入参（InboundCloseInput，service_inbound.go:46-49；RECEIVING→CLOSED，原因必填） */
+export interface InboundClosePayload {
+  reason: string
+}
+
+// ---------- 权限码（internal/auth/permissions.go:145-150 三段式冻结） ----------
+
+export const INBOUND_CREATE_PERMISSION = 'purchase:inbound:create'
+export const INBOUND_UPDATE_PERMISSION = 'purchase:inbound:update'
+export const INBOUND_CANCEL_PERMISSION = 'purchase:inbound:cancel'
+export const INBOUND_CLOSE_PERMISSION = 'purchase:inbound:close'
 
 export const inboundApi = {
-  /** 入库单列表（预置端点，后端未就绪时页面呈现统一错误态） */
-  list: (query: InboundQuery) =>
-    http.get<PageResult<InboundItem>>('/api/inbounds', { params: query }),
-  /** 入库单详情（前端先行契约，后端未交付时页面呈现统一错误态） */
-  get: (id: InboundItem['id']) =>
-    http.get<InboundDetail>(`/api/inbounds/${id}`),
+  list: (query: InboundOrderQuery) =>
+    http.get<PageResult<InboundOrder>>('/api/inbounds', { params: query }),
+  create: (payload: InboundCreatePayload) => http.post<InboundOrder>('/api/inbounds', payload),
+  detail: (id: SalesId) => http.get<InboundOrderDetail>(`/api/inbounds/${id}`),
+  /** 草稿编辑（PUT /api/inbounds/{id}，仅 remark + 明细整单替换） */
+  update: (id: SalesId, payload: InboundUpdatePayload) =>
+    http.put<InboundOrder>(`/api/inbounds/${id}`, payload),
+  cancel: (id: SalesId, payload?: { reason?: string }) =>
+    http.post<InboundOrder>(`/api/inbounds/${id}/cancel`, payload),
+  /** 差额关闭（RECEIVING→CLOSED，原因必填） */
+  close: (id: SalesId, payload: InboundClosePayload) =>
+    http.post<InboundOrder>(`/api/inbounds/${id}/close`, payload),
 }

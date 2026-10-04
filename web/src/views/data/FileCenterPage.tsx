@@ -21,6 +21,7 @@ import {
   fetchFileObjectUrl,
   fileApi,
   resolveFileDownloadPath,
+  type FileId,
   type FileItem,
   type FileQuery,
 } from '@/api/file'
@@ -54,10 +55,11 @@ function pendingFileKey(file: File, index: number): string {
 
 /**
  * 文件中心（/data/files，excel.md §7 + frontend.md §15.4）：
- * 全平台附件/产物文件统一登记（文件名/类型/大小/上传人/上传时间/业务模块/关联单据），
- * 支持认证下载（downloadFile）、图片预览/全屏（认证流受控 Image）、删除（SfConfirm）与
- * multipart 上传（SfAttachment 附件块作为上传入口）。后端未交付时呈统一错误态，
- * 前端不生成假文件。
+ * 全平台附件/产物文件统一登记（文件名/类型/大小/上传人/上传时间/业务模块/关联单据，
+ * 出参 FileItem snake_case，service_file.go:36-50），支持认证下载（GET /api/files/{id}/download
+ * 经 downloadFile）、图片预览/全屏（GET /api/files/{id}/preview 认证流转受控 Image）、
+ * 删除（DELETE /api/files/{id} 经 SfConfirm）与 multipart 上传（POST /api/files，
+ * SfAttachment 附件块作为上传入口）。请求失败呈统一可读错误态，前端不生成假文件。
  */
 export default function FileCenterPage() {
   const { token } = theme.useToken()
@@ -66,8 +68,8 @@ export default function FileCenterPage() {
   const [params, setParams] = useState<FileQuery>({})
   const [uploadOpen, setUploadOpen] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
-  const [downloadingId, setDownloadingId] = useState<string | null>(null)
-  const [previewingId, setPreviewingId] = useState<string | null>(null)
+  const [downloadingId, setDownloadingId] = useState<FileId | null>(null)
+  const [previewingId, setPreviewingId] = useState<FileId | null>(null)
   const [preview, setPreview] = useState<{ open: boolean; src: string }>({ open: false, src: '' })
   const [form] = Form.useForm<FileUploadFormValues>()
 
@@ -107,11 +109,12 @@ export default function FileCenterPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
-  /** 下载：复用 downloadFile 认证下载（Blob 落地触发保存），失败呈可读错误态，不生成假文件 */
+  /** 下载：认证流经 downloadFile（GET /api/files/{id}/download，Blob 落地触发保存），
+   * 失败呈可读错误态，不生成假文件 */
   const handleDownload = async (record: FileItem) => {
     setDownloadingId(record.id)
     try {
-      await downloadFile(resolveFileDownloadPath(record), record.fileName)
+      await downloadFile(resolveFileDownloadPath(record), record.file_name)
     } catch (error) {
       messageApi.error(resolveErrorMessage(error))
     } finally {
@@ -119,11 +122,12 @@ export default function FileCenterPage() {
     }
   }
 
-  /** 预览（图片类型）：认证获取文件流转 objectUrl，交受控 antd Image 预览/全屏 */
+  /** 预览（仅图片，GET /api/files/{id}/preview 原样流式返回）：认证获取文件流转 objectUrl，
+   * 交受控 antd Image 预览/全屏 */
   const handlePreview = async (record: FileItem) => {
     setPreviewingId(record.id)
     try {
-      const url = await fetchFileObjectUrl(resolveFileDownloadPath(record))
+      const url = await fetchFileObjectUrl(fileApi.preview(record.id))
       setPreview({ open: true, src: url })
     } catch (error) {
       messageApi.error(resolveErrorMessage(error))
@@ -162,43 +166,41 @@ export default function FileCenterPage() {
     size: file.size,
   }))
 
+  /** 图片文件判定（复用 SfAttachment 判定；FileItem 为 file_type/file_name 蛇形契约） */
+  const isImageFile = (record: FileItem): boolean =>
+    isImageAttachment({ fileType: record.file_type, fileName: record.file_name })
+
   const columns: ColumnsType<FileItem> = [
     {
       title: '文件名',
-      dataIndex: 'fileName',
+      dataIndex: 'file_name',
       width: 260,
       fixed: 'left',
       render: (value: string, record: FileItem) => (
         <Flex align="center" gap={8}>
-          {isImageAttachment(record) && record.thumbnailUrl ? (
-            <Image
-              width={32}
-              height={32}
-              src={record.thumbnailUrl}
-              preview={false}
-              style={{ objectFit: 'cover', borderRadius: 4 }}
-            />
-          ) : (
-            <FileOutlined style={{ fontSize: 18, color: token.colorTextSecondary }} />
-          )}
+          {/* 缩略图需认证流，列表不做直连 <Image src>（api.md §5）；图片类型以图标标识，
+              预览走认证预览端点 */}
+          <FileOutlined
+            style={{ fontSize: 18, color: isImageFile(record) ? token.colorPrimary : token.colorTextSecondary }}
+          />
           <Text style={{ maxWidth: 190 }} ellipsis={{ tooltip: value }}>
             {value}
           </Text>
         </Flex>
       ),
     },
-    { title: '文件类型', dataIndex: 'fileType', width: 110, render: (v?: string) => v ?? '-' },
+    { title: '文件类型', dataIndex: 'file_type', width: 110, render: (v?: string) => v ?? '-' },
     {
       title: '大小',
-      dataIndex: 'size',
+      dataIndex: 'size_bytes',
       width: 100,
       align: 'right',
       render: (v?: number) => <span className="sf-num">{formatFileSize(v)}</span>,
     },
-    { title: '上传人', dataIndex: 'uploader', width: 100, render: (v?: string) => v ?? '-' },
+    { title: '上传人', dataIndex: 'uploader_name', width: 100, render: (v?: string) => v ?? '-' },
     {
       title: '上传时间',
-      dataIndex: 'uploadedAt',
+      dataIndex: 'created_at',
       width: 160,
       render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
     },
@@ -206,11 +208,11 @@ export default function FileCenterPage() {
       title: '业务模块',
       key: 'module',
       width: 120,
-      render: (_: unknown, record: FileItem) => record.moduleName ?? resolveModuleLabel(record.module),
+      render: (_: unknown, record: FileItem) => record.module_name ?? resolveModuleLabel(record.module),
     },
     {
       title: '关联单据',
-      dataIndex: 'businessNo',
+      dataIndex: 'business_no',
       width: 140,
       ellipsis: true,
       render: (v?: string) => v ?? '-',
@@ -222,7 +224,7 @@ export default function FileCenterPage() {
       width: 170,
       render: (_: unknown, record: FileItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
-          {isImageAttachment(record) && (
+          {isImageFile(record) && (
             <Button
               type="link"
               size="small"
@@ -274,6 +276,7 @@ export default function FileCenterPage() {
         <SfSearchForm
           fields={[
             { name: 'module', label: '业务模块', control: 'select', options: FILE_MODULE_OPTIONS },
+            { name: 'keyword', label: '文件名', control: 'input', placeholder: '文件名关键词' },
             { name: 'business_no', label: '关联单据号', control: 'input', placeholder: '关联单据号' },
           ]}
           onSearch={(values) => {

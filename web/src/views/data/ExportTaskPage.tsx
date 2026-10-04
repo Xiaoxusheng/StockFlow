@@ -24,15 +24,13 @@ import { useSearchParams } from 'react-router'
 import {
   DATA_TASK_STATUS_META,
   dataApi,
-  downloadFile,
+  downloadExportFile,
   EXPORT_MODULE_OPTIONS,
   EXPORT_SCOPE_OPTIONS,
-  isTaskFinished,
   isTaskInFlight,
   resolveModuleLabel,
   resolveScopeLabel,
-  resolveTaskTypeLabel,
-  type DataTaskItem,
+  type DataTask,
   type DataTaskQuery,
   type DataTaskStatus,
   type ExportCreatePayload,
@@ -44,6 +42,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
+import { SfError } from '@/components/common/SfError'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
 /** 轮询间隔：任务在途时每 5 秒刷新进度（excel.md §3「处理中 35%」） */
@@ -80,7 +79,8 @@ interface ExportFormValues {
   timeRange?: [Dayjs, Dayjs] | null
 }
 
-/** 表单值 → 导出任务契约（字段对齐 excel.md §4 任务记录模型，冻结后回对） */
+/** 表单值 → 导出创建契约（ExportCreateInput，service_export.go:24-32：
+ * scope=SELECTED→ids、CURRENT_PAGE→page/page_size、BY_FILTER→filters、TIME_RANGE→time_from/time_to） */
 function toExportPayload(values: ExportFormValues, presetFilters: Record<string, string>): ExportCreatePayload {
   const payload: ExportCreatePayload = { module: values.module, scope: values.scope }
   if (values.scope === 'SELECTED') {
@@ -91,26 +91,29 @@ function toExportPayload(values: ExportFormValues, presetFilters: Record<string,
   }
   if (values.scope === 'CURRENT_PAGE') {
     payload.page = values.page
-    payload.pageSize = values.pageSize
+    payload.page_size = values.pageSize
   }
   if (values.scope === 'BY_FILTER') {
-    // URL 范围参数（SfExportButton 携带的列表筛选，如 warehouse_id）并入 filters 透传
+    // URL 范围参数（SfExportButton 携带的列表筛选，如 warehouse_id）并入 filters 透传；
+    // 未知键由后端按各域白名单忽略（contract.go ExportFilter.Filters）
     const filters: Record<string, string> = { ...presetFilters }
     if (values.keyword) filters.keyword = values.keyword
     if (Object.keys(filters).length > 0) payload.filters = filters
-    if (values.timeRange?.[0] && values.timeRange?.[1]) {
-      payload.startTime = values.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
-      payload.endTime = values.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
-    }
+  }
+  if (values.scope === 'TIME_RANGE' && values.timeRange?.[0] && values.timeRange?.[1]) {
+    payload.time_from = values.timeRange[0].format('YYYY-MM-DD HH:mm:ss')
+    payload.time_to = values.timeRange[1].format('YYYY-MM-DD HH:mm:ss')
   }
   return payload
 }
 
 /**
  * Excel 导出任务中心（/data/exports，excel.md §3/§4）：
- * 创建导出任务（范围 excel.md §2.2）→ 任务列表展示进度（处理中 35%）→ 终态后下载产物。
- * 进度轮询经 TanStack Query refetchInterval 驱动，任务全部进入终态后自动停止；
- * 产物下载走真实链接（downloadFile），后端未交付呈可读错误态，不生成假文件。
+ * 创建导出任务（范围 excel.md §2.2，契约 ExportCreateInput snake_case）→ 任务列表展示
+ * 进度（处理中 35%）→ 终态后认证下载产物（GET /api/exports/{id}/file）。
+ * 在途进度轮询走任务详情端点 GET /api/data-tasks/export/{id}（handler.go:123-124，
+ * 导出独立权限点），任务全部进入终态后自动停止；未装配行源的模块创建任务后端返回
+ * 409 DATAX_MODULE_NOT_AVAILABLE，错误信封如实呈现，不生成假文件。
  */
 export default function ExportTaskPage() {
   const [messageApi, contextHolder] = message.useMessage()
@@ -126,28 +129,55 @@ export default function ExportTaskPage() {
   const [params, setParams] = useState<DataTaskQuery>(() => (urlModule ? { module: urlModule } : {}))
   const [modalOpen, setModalOpen] = useState(false)
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  /** 在途任务的详情快照（GET /api/data-tasks/export/{id} 轮询结果，仅合并到在途行） */
+  const [polledDetails, setPolledDetails] = useState<Record<string, DataTask>>({})
   const [form] = Form.useForm<ExportFormValues>()
   const scope = Form.useWatch('scope', form)
 
-  const list = usePagedList<DataTaskItem, DataTaskQuery>({
+  const list = usePagedList<DataTask, DataTaskQuery>({
     queryKey: ['data', 'exports'],
     fetch: (query) => dataApi.exports.list(query),
     params,
   })
 
-  const hasInFlight = list.items.some((item) => isTaskInFlight(item.status))
+  const inFlightItems = useMemo(
+    () => list.items.filter((item) => isTaskInFlight(item.status)),
+    [list.items],
+  )
+  const inFlightKey = inFlightItems.map((item) => item.id).join(',')
 
-  // 进度轮询：usePagedList 未暴露 refetchInterval，以独立轮询查询驱动列表 refetch；
-  // 仅在存在排队/处理中任务时启用，全部进入终态后 refetchInterval 置 false 自动停止。
+  // 进度轮询：对每个在途任务轮询详情端点（GET /api/data-tasks/export/{id}），
+  // 进度/状态合并展示；任一任务进入终态即刷新列表取回产物地址与最终行数，
+  // 全部终态后 enabled=false + refetchInterval=false 自动停止。
   useQuery({
-    queryKey: ['data', 'exports', 'progress-poll'],
+    queryKey: ['data', 'exports', 'in-flight', inFlightKey],
     queryFn: async () => {
-      await list.refetch()
-      return null
+      const results = await Promise.allSettled(inFlightItems.map((item) => dataApi.exportTask(item.id)))
+      const next: Record<string, DataTask> = {}
+      let reachedTerminal = false
+      results.forEach((result, index) => {
+        const source = inFlightItems[index]
+        if (result.status !== 'fulfilled' || !source) return
+        const detail = result.value
+        next[source.id] = detail
+        if (!isTaskInFlight(detail.status)) reachedTerminal = true
+      })
+      setPolledDetails(next)
+      if (reachedTerminal) {
+        void queryClient.invalidateQueries({ queryKey: ['data', 'exports'] })
+      }
+      return next
     },
-    refetchInterval: hasInFlight ? POLL_INTERVAL_MS : false,
-    enabled: hasInFlight,
+    refetchInterval: inFlightItems.length > 0 ? POLL_INTERVAL_MS : false,
+    enabled: inFlightItems.length > 0,
   })
+
+  /** 展示行：在途行合并详情快照（轮询更新进度），终态行以列表为准 */
+  const displayItems = useMemo(
+    () =>
+      list.items.map((item) => (isTaskInFlight(item.status) ? polledDetails[item.id] ?? item : item)),
+    [list.items, polledDetails],
+  )
 
   const createMutation = useMutation({
     mutationFn: (payload: ExportCreatePayload) => dataApi.exports.create(payload),
@@ -160,11 +190,11 @@ export default function ExportTaskPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
-  const handleDownload = async (record: DataTaskItem) => {
-    if (!record.fileUrl) return
+  const handleDownload = async (record: DataTask) => {
     setDownloadingId(record.id)
     try {
-      await downloadFile(record.fileUrl, record.fileName ?? `导出产物_${record.id}.xlsx`)
+      // 认证下载：优先任务下发 file_url，缺省回退 GET /api/exports/{id}/file
+      await downloadExportFile(record)
     } catch (error) {
       messageApi.error(resolveErrorMessage(error))
     } finally {
@@ -192,27 +222,25 @@ export default function ExportTaskPage() {
       })
   }
 
-  const columns: ColumnsType<DataTaskItem> = [
-    { title: '任务ID', dataIndex: 'id', width: 150, ellipsis: true },
-    { title: '任务类型', dataIndex: 'taskType', width: 90, render: (value: string) => resolveTaskTypeLabel(value) },
+  const columns: ColumnsType<DataTask> = [
+    { title: '任务单号', dataIndex: 'task_no', width: 160, ellipsis: true },
     {
       title: '业务模块',
       key: 'module',
       width: 120,
-      render: (_: unknown, record: DataTaskItem) => record.moduleName ?? resolveModuleLabel(record.module),
+      render: (_: unknown, record: DataTask) => record.module_name ?? resolveModuleLabel(record.module),
     },
     { title: '导出范围', dataIndex: 'scope', width: 140, render: (value?: string) => resolveScopeLabel(value) },
-    { title: '文件名', dataIndex: 'fileName', width: 180, ellipsis: true, render: (value?: string) => value ?? '-' },
-    { title: '创建人', dataIndex: 'creator', width: 100, render: (value?: string) => value ?? '-' },
-    { title: '数量', dataIndex: 'totalRows', width: 90, align: 'right', render: renderCount },
-    { title: '成功', dataIndex: 'successRows', width: 90, align: 'right', render: renderCount },
-    { title: '失败', dataIndex: 'failedRows', width: 90, align: 'right', render: renderCount },
+    { title: '文件名', dataIndex: 'file_name', width: 180, ellipsis: true, render: (value?: string) => value ?? '-' },
+    { title: '数量', dataIndex: 'total_rows', width: 90, align: 'right', render: renderCount },
+    { title: '成功', dataIndex: 'success_rows', width: 90, align: 'right', render: renderCount },
+    { title: '失败', dataIndex: 'failed_rows', width: 90, align: 'right', render: renderCount },
     {
       title: '进度',
       key: 'progress',
       width: 140,
-      render: (_: unknown, record: DataTaskItem) =>
-        record.status === 'PROCESSING' && typeof record.progress === 'number' ? (
+      render: (_: unknown, record: DataTask) =>
+        isTaskInFlight(record.status) && typeof record.progress === 'number' ? (
           <Progress percent={record.progress} size="small" style={{ width: 110 }} />
         ) : (
           '-'
@@ -222,22 +250,23 @@ export default function ExportTaskPage() {
       title: '状态',
       dataIndex: 'status',
       width: 110,
-      render: (value: string, record: DataTaskItem) =>
-        record.errorMessage ? (
-          <Tooltip title={record.errorMessage}>{renderTaskStatus(value)}</Tooltip>
+      render: (value: string, record: DataTask) =>
+        record.error_message ? (
+          <Tooltip title={record.error_message}>{renderTaskStatus(value)}</Tooltip>
         ) : (
           renderTaskStatus(value)
         ),
     },
-    { title: '开始时间', dataIndex: 'startedAt', width: 160, render: renderDateTime },
-    { title: '结束时间', dataIndex: 'finishedAt', width: 160, render: renderDateTime },
+    { title: '开始时间', dataIndex: 'started_at', width: 160, render: renderDateTime },
+    { title: '结束时间', dataIndex: 'finished_at', width: 160, render: renderDateTime },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
       width: 90,
-      render: (_: unknown, record: DataTaskItem) =>
-        isTaskFinished(record.status) && record.fileUrl ? (
+      render: (_: unknown, record: DataTask) =>
+        // 导出单值成功无部分成功（QUEUED→PROCESSING→SUCCESS/FAILED）；仅成功任务有产物文件
+        record.status === 'SUCCESS' ? (
           <Button
             type="link"
             size="small"
@@ -276,11 +305,11 @@ export default function ExportTaskPage() {
             list.resetToFirstPage()
           }}
         />
-        <SfTable<DataTaskItem>
+        <SfTable<DataTask>
           storageKey="data-export-tasks"
           rowKey="id"
           columns={columns}
-          dataSource={list.items}
+          dataSource={displayItems}
           loading={list.isFetching}
           error={list.error}
           onRetry={list.refetch}
@@ -348,12 +377,19 @@ export default function ExportTaskPage() {
                 />
               )}
               <Form.Item name="keyword" label="筛选关键词">
-                <Input placeholder="随业务模块的筛选条件（后端契约冻结后回对）" />
-              </Form.Item>
-              <Form.Item name="timeRange" label="时间范围">
-                <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+                <Input placeholder="随业务模块的筛选条件（后端按白名单键认领）" />
               </Form.Item>
             </>
+          )}
+          {scope === 'TIME_RANGE' && (
+            <Form.Item
+              name="timeRange"
+              label="创建时间范围"
+              rules={[{ required: true, message: '请选择导出的创建时间范围' }]}
+              extra="按记录创建时间区间导出（time_from / time_to）"
+            >
+              <DatePicker.RangePicker showTime style={{ width: '100%' }} />
+            </Form.Item>
           )}
           {scope === 'ALL' && (
             <Alert
@@ -364,7 +400,11 @@ export default function ExportTaskPage() {
             />
           )}
           {createMutation.isError && (
-            <Alert type="error" showIcon message={resolveErrorMessage(createMutation.error)} style={{ marginTop: 16 }} />
+            // 未装配行源的模块（PRODUCT/SKU/SUPPLIER/CUSTOMER/REPORT）后端返回
+            // 409 DATAX_MODULE_NOT_AVAILABLE——错误信封如实呈现，不造假任务
+            <div style={{ marginTop: 16 }}>
+              <SfError error={createMutation.error} onRetry={handleSubmit} />
+            </div>
           )}
         </Form>
       </Modal>

@@ -1,58 +1,114 @@
-import { Button, Descriptions, Flex, Table } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { useMemo } from 'react'
+import { Descriptions, Flex, Table, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
-import { outboundApi, type OutboundDetail, type OutboundDetailItem } from '@/api/outbound'
+import {
+  outboundApi,
+  type CheckTask,
+  type CheckTaskStatus,
+  type OutboundOrder,
+  type OutboundOrderItem,
+  type OutboundOrderStatus,
+  type PackingRecord,
+  type PickTask,
+  type PickTaskStatus,
+  type Shipment,
+  type ShipmentStatus,
+} from '@/api/outbound'
+import { toStatusKey } from '@/api/masterdata'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
-/** 出库类型文案（business-flow.md §7.1；与列表页一致，未知值回退展示原始值） */
-const TYPE_LABEL: Record<string, string | undefined> = {
-  sales: '销售出库',
-  production: '生产领料',
-  transfer: '调拨出库',
-  other: '其他出库',
-  loss: '报损出库',
+const { Text } = Typography
+
+/** 出库单状态 → SfStatusTag（与 OutboundPage 同映射；PARTIAL_SHIPPED/SHIPPED_ALL 注册表
+ * 暂无键，以 label/semantic 兜底） */
+const OB_STATUS_TAG: Record<OutboundOrderStatus, { label: string; semantic: StatusSemantic }> = {
+  PENDING_ALLOCATE: { label: '待分配', semantic: 'pending' },
+  ALLOCATED: { label: '已分配', semantic: 'processing' },
+  PICKING: { label: '拣货中', semantic: 'processing' },
+  PICKED: { label: '已拣货', semantic: 'success' },
+  CHECKED: { label: '已复核', semantic: 'success' },
+  PACKED: { label: '已打包', semantic: 'success' },
+  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'warning' },
+  SHIPPED_ALL: { label: '已发货', semantic: 'success' },
+  CANCELLED: { label: '已取消', semantic: 'neutral' },
+  CLOSED: { label: '已关闭', semantic: 'neutral' },
+}
+
+/** 拣货任务状态 → SfStatusTag（models.go:294-301；PICKING 值域保留、状态机不使用） */
+const PICK_STATUS_TAG: Record<PickTaskStatus, { label: string; semantic: StatusSemantic }> = {
+  PENDING: { label: '待领取', semantic: 'pending' },
+  CLAIMED: { label: '已领取', semantic: 'processing' },
+  PICKING: { label: '拣货中', semantic: 'processing' },
+  PICKED: { label: '已拣货', semantic: 'success' },
+  EXCEPTION: { label: '拣货异常', semantic: 'danger' },
+  CANCELLED: { label: '已取消', semantic: 'neutral' },
+}
+
+function PickStatusTag({ status }: { status: PickTaskStatus }) {
+  const meta = PICK_STATUS_TAG[status]
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
+}
+
+/** 复核任务状态 → SfStatusTag（models.go:315-319：PENDING/DONE/EXCEPTION，无 CLAIMED——领取为原子指派） */
+const CHECK_STATUS_TAG: Record<CheckTaskStatus, { label: string; semantic: StatusSemantic }> = {
+  PENDING: { label: '待复核', semantic: 'pending' },
+  DONE: { label: '已复核', semantic: 'success' },
+  EXCEPTION: { label: '复核异常', semantic: 'danger' },
+}
+
+function CheckStatusTag({ status }: { status: CheckTaskStatus }) {
+  const meta = CHECK_STATUS_TAG[status]
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
+}
+
+/** 发货单状态 → SfStatusTag（models.go:325-331：PENDING→SHIPPED 正式扣减库存，后续为纯记录流转） */
+const SHIPMENT_STATUS_TAG: Record<ShipmentStatus, { label: string; semantic: StatusSemantic }> = {
+  PENDING: { label: '待发货', semantic: 'pending' },
+  SHIPPED: { label: '已发货', semantic: 'success' },
+  IN_TRANSIT: { label: '运输中', semantic: 'processing' },
+  SIGNED: { label: '已签收', semantic: 'success' },
+  ABNORMAL: { label: '异常', semantic: 'danger' },
+}
+
+function ShipmentStatusTag({ status }: { status: ShipmentStatus }) {
+  const meta = SHIPMENT_STATUS_TAG[status]
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
 }
 
 /**
- * 单据状态 → 当前所处环节的展示（business-flow.md §7.2/§8 分配→拣货→复核→打包→发货）。
- * 「已分配/已拣货/已打包」等表示上一环节刚完成，映射为下一环节的待处理状态；
- * 未命中的未完成环节由 SfTimeline 兜底为「未开始」。
+ * 单据状态 → 当前所处环节（business-flow.md §8 分配→拣货→复核→打包→发货）。
+ * 单据仅存各环节完成时间（picked_at/checked_at/packed_at/shipped_at），有时间的环节视为
+ * 已完成；「已分配/已拣货/已复核/已打包」表示上一环节刚完成，映射为下一环节的待处理状态；
+ * CANCELLED/CLOSED 无当前环节，未完成环节由 SfTimeline 兜底为「未开始」。
  */
-const STATUS_NODE_STATE: Record<string, { node: string; status?: string; label?: string; semantic?: StatusSemantic }> = {
-  pending_allocate: { node: 'allocate', status: 'pending_allocate' },
-  allocated: { node: 'pick', status: 'pending_pick' },
-  pending_pick: { node: 'pick', status: 'pending_pick' },
-  picking: { node: 'pick', status: 'picking' },
-  picked: { node: 'check', status: 'pending_check' },
-  pending_check: { node: 'check', status: 'pending_check' },
-  checking: { node: 'check', status: 'checking' },
-  pending_pack: { node: 'pack', status: 'pending_pack' },
-  packing: { node: 'pack', status: 'packing' },
-  pending_shipment: { node: 'ship', status: 'pending_shipment' },
-  shipment_exception: { node: 'ship', status: 'shipment_exception' },
-  shipped: { node: 'ship', status: 'shipped' },
-  completed: { node: 'ship', status: 'completed' },
-  closed: { node: 'ship', status: 'completed' },
+const CURRENT_NODE: Partial<Record<OutboundOrderStatus, { node: string; status: string }>> = {
+  PENDING_ALLOCATE: { node: 'pick', status: 'pending_pick' },
+  ALLOCATED: { node: 'pick', status: 'pending_pick' },
+  PICKING: { node: 'pick', status: 'picking' },
+  PICKED: { node: 'check', status: 'pending_check' },
+  CHECKED: { node: 'pack', status: 'pending_pack' },
+  PACKED: { node: 'ship', status: 'pending_shipment' },
 }
 
-/** Timeline 节点组装：有时间的环节视为已完成，当前环节展示单据状态，其余未开始（§13.4 各环节时间） */
-function buildSteps(detail: OutboundDetail): SfTimelineStep[] {
-  const current = STATUS_NODE_STATE[detail.status]
-  const nodes: Array<{ key: string; title: string; time?: string; operator?: string }> = [
-    { key: 'allocate', title: '分配', time: detail.allocatedAt, operator: detail.allocatedBy },
-    { key: 'pick', title: '拣货', time: detail.pickedAt, operator: detail.pickedBy },
-    { key: 'check', title: '复核', time: detail.checkedAt, operator: detail.checkedBy },
-    { key: 'pack', title: '打包', time: detail.packedAt, operator: detail.packedBy },
-    { key: 'ship', title: '发货', time: detail.shippedAt, operator: detail.shippedBy },
+/** Timeline 节点组装：有时间的环节已完成，当前环节展示单据状态，其余未开始 */
+function buildSteps(outbound: OutboundOrder): SfTimelineStep[] {
+  const current = CURRENT_NODE[outbound.status]
+  const nodes: Array<{ key: string; title: string; time: string | null }> = [
+    { key: 'pick', title: '拣货', time: outbound.picked_at },
+    { key: 'check', title: '复核', time: outbound.checked_at },
+    { key: 'pack', title: '打包', time: outbound.packed_at },
+    { key: 'ship', title: '发货', time: outbound.shipped_at },
   ]
   return nodes.map((node) => {
     const isCurrent = current?.node === node.key && !node.time
@@ -60,44 +116,22 @@ function buildSteps(detail: OutboundDetail): SfTimelineStep[] {
       key: node.key,
       title: node.title,
       time: node.time,
-      operator: node.operator,
       status: node.time ? 'completed' : isCurrent ? current?.status : undefined,
-      statusLabel: node.time || !isCurrent ? undefined : current?.label,
-      statusSemantic: node.time || !isCurrent ? undefined : current?.semantic,
     }
   })
 }
 
-const ITEM_COLUMNS: ColumnsType<OutboundDetailItem> = [
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 140 },
-  {
-    title: '商品名称',
-    dataIndex: 'skuName',
-    width: 180,
-    ellipsis: true,
-    render: (v?: string) => v ?? '-',
-  },
-  { title: '单位', dataIndex: 'unitName', width: 70, render: (v?: string) => v ?? '-' },
-  {
-    title: '需求数量',
-    dataIndex: 'totalQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '已拣数量',
-    dataIndex: 'pickedQty',
-    width: 100,
-    align: 'right',
-    render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  { title: '来源库位', dataIndex: 'fromBinCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 130, render: (v?: string) => v ?? '-' },
-  { title: '备注', dataIndex: 'remark', width: 140, ellipsis: true, render: (v?: string) => v ?? '-' },
-]
+function renderQty(value: number) {
+  return <span className="sf-num">{formatNumber(value)}</span>
+}
 
-/** 出库单详情（/outbound/:id，frontend.md §7 结构；后端 outbound 单据域未交付时呈统一错误态） */
+/**
+ * 出库单详情（/outbound/:no，GET /api/outbounds/{no} 后端 M2 已交付）。
+ * 路由参数名 :id（router/index.tsx），#17 修复后跳转传入的值为出库单号。
+ * 响应为任务族全量 {outbound, items, allocations, picks, checks, packages, shipments}
+ * （internal/sales/handler.go getOutbound）：Header/时间线用单据各环节时间，
+ * 明细区渲染出库明细行（各环节累计进度）+ 拣货/复核任务与包裹/发货记录（frontend.md §7）。
+ */
 export default function OutboundDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -108,10 +142,25 @@ export default function OutboundDetailPage() {
     enabled: Boolean(id),
   })
 
+  // SKU / 仓库 ID → 编码/名称（拣货任务为裸模型无联表，映射失败降级为 ID）
+  const skuOptions = useQuery({
+    queryKey: ['outbound', 'sku-options'],
+    queryFn: fetchSkuOptions,
+  })
+  const warehouseOptions = useQuery({
+    queryKey: ['outbound', 'warehouse-options'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
+  const warehouseNames = useMemo(
+    () => buildWarehouseMaps(warehouseOptions.data ?? []).name,
+    [warehouseOptions.data],
+  )
+
   if (!id) {
     return (
       <div className="sf-page">
-        <SfError error={new Error('URL 缺少单据编号')} />
+        <SfError error={new Error('URL 缺少出库单号')} />
       </div>
     )
   }
@@ -128,36 +177,193 @@ export default function OutboundDetailPage() {
         <SfError
           error={query.error}
           onRetry={query.refetch}
-          description="出库单详情接口不可用：GET /api/outbounds/{id}（后端 outbound 单据域尚未交付，契约冻结后回对字段）"
+          description="出库单详情接口不可用：GET /api/outbounds/{出库单号}"
         />
       </div>
     )
   }
 
   const detail = query.data
-  const lines = detail.items ?? []
+  const outbound = detail.outbound
+  const items = detail.items ?? []
+  const picks = detail.picks ?? []
+  const checks = detail.checks ?? []
+  const packages = detail.packages ?? []
+  const shipments = detail.shipments ?? []
+  const obMeta = OB_STATUS_TAG[outbound.status]
+  const warehouseName =
+    warehouseNames.get(idKey(outbound.warehouse_id)) ?? idKey(outbound.warehouse_id)
+
+  const pickColumns: ColumnsType<PickTask> = [
+    { title: '拣货任务号', dataIndex: 'pick_no', width: 160 },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      render: (v: number) => skuMaps.code.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: PickTask) => {
+        const name = skuMaps.name.get(idKey(record.sku_id))
+        return name ? (
+          <Text style={{ maxWidth: 170 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          '-'
+        )
+      },
+    },
+    { title: '应拣数量', dataIndex: 'qty', width: 100, align: 'right', render: renderQty },
+    { title: '已拣数量', dataIndex: 'picked_qty', width: 100, align: 'right', render: renderQty },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: PickTaskStatus) => <PickStatusTag status={v} />,
+    },
+    { title: '领取人', dataIndex: 'assignee_name', width: 100, render: (v: string) => v || '-' },
+    {
+      title: '拣货时间',
+      dataIndex: 'picked_at',
+      width: 170,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  const itemColumns: ColumnsType<OutboundOrderItem> = [
+    { title: '行号', dataIndex: 'line_no', width: 70 },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      render: (v: number) => skuMaps.code.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: OutboundOrderItem) => {
+        const name = skuMaps.name.get(idKey(record.sku_id))
+        return name ? (
+          <Text style={{ maxWidth: 170 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          '-'
+        )
+      },
+    },
+    { title: '应出数量', dataIndex: 'qty', width: 100, align: 'right', render: renderQty },
+    { title: '已拣', dataIndex: 'qty_picked', width: 90, align: 'right', render: renderQty },
+    { title: '已复核', dataIndex: 'qty_checked', width: 90, align: 'right', render: renderQty },
+    { title: '已打包', dataIndex: 'qty_packed', width: 90, align: 'right', render: renderQty },
+    { title: '已发货', dataIndex: 'qty_shipped', width: 90, align: 'right', render: renderQty },
+    {
+      title: '备注',
+      dataIndex: 'remark',
+      width: 160,
+      ellipsis: true,
+      render: (v?: string) => (v ? <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-'),
+    },
+  ]
+
+  const checkColumns: ColumnsType<CheckTask> = [
+    { title: '复核任务号', dataIndex: 'check_no', width: 160 },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      render: (v: number) => skuMaps.code.get(idKey(v)) ?? idKey(v),
+    },
+    { title: '数量', dataIndex: 'qty', width: 90, align: 'right', render: renderQty },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: CheckTaskStatus) => <CheckStatusTag status={v} />,
+    },
+    {
+      title: '复核结果',
+      dataIndex: 'result',
+      width: 110,
+      // result 为空串 = 复核通过；异常为五类中文值域之一（models.go:322）
+      render: (v: string) => v || '通过',
+    },
+    { title: '复核人', dataIndex: 'assignee_name', width: 100, render: (v: string) => v || '-' },
+    {
+      title: '完成时间',
+      dataIndex: 'done_at',
+      width: 170,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  const packageColumns: ColumnsType<PackingRecord> = [
+    { title: '包裹号', dataIndex: 'package_no', width: 160 },
+    { title: '包材', dataIndex: 'packing_material', width: 120, render: (v: string) => v || '-' },
+    {
+      title: '尺寸（长×宽×高 mm）',
+      key: 'size',
+      width: 170,
+      render: (_: unknown, record: PackingRecord) => `${record.length} × ${record.width} × ${record.height}`,
+    },
+    { title: '重量 (kg)', dataIndex: 'weight', width: 100, align: 'right', render: renderQty },
+    { title: '承运商', dataIndex: 'carrier', width: 120, render: (v: string) => v || '-' },
+    { title: '运单号', dataIndex: 'tracking_no', width: 150, render: (v: string) => v || '-' },
+    {
+      title: '打包时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  const shipmentColumns: ColumnsType<Shipment> = [
+    { title: '发货单号', dataIndex: 'shipment_no', width: 160 },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: ShipmentStatus) => <ShipmentStatusTag status={v} />,
+    },
+    { title: '承运商', dataIndex: 'carrier', width: 120, render: (v: string) => v || '-' },
+    { title: '运单号', dataIndex: 'tracking_no', width: 150, render: (v: string) => v || '-' },
+    { title: '包裹数', dataIndex: 'package_count', width: 90, align: 'right', render: renderQty },
+    { title: '发货人', dataIndex: 'shipper_name', width: 100, render: (v: string) => v || '-' },
+    {
+      title: '发货时间',
+      dataIndex: 'shipped_at',
+      width: 170,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
 
   return (
     <div className="sf-page">
       <SfDetailHeader
-        code={detail.outboundNo}
-        status={detail.status}
+        code={outbound.outbound_no}
+        status={toStatusKey(outbound.status)}
+        statusLabel={obMeta?.label}
+        statusSemantic={obMeta?.semantic}
         summary={
           <SfSummaryBar
             items={[
-              { label: '出库类型', value: TYPE_LABEL[detail.outboundType] ?? detail.outboundType },
-              { label: '仓库', value: detail.warehouseName },
-              { label: '需求数量', value: formatNumber(detail.totalQty) },
-              { label: '已拣数量', value: formatNumber(detail.pickedQty) },
-              { label: 'SKU 数', value: formatNumber(lines.length) },
+              { label: '出库类型', value: outbound.type || '-' },
+              { label: '仓库', value: warehouseName },
+              { label: '明细行', value: `${items.length} 行` },
+              { label: '拣货任务', value: `${picks.length} 条` },
             ]}
           />
         }
-        actions={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/outbound')}>
-            返回列表
-          </Button>
-        }
+        onBack={() => navigate('/outbound')}
       />
       <Flex vertical gap={16}>
         <SfDetailSection title="基础信息">
@@ -166,55 +372,73 @@ export default function OutboundDetailPage() {
             size="small"
             column={{ xs: 1, md: 2, xl: 3 }}
             items={[
-              { key: 'outboundNo', label: '出库单号', children: detail.outboundNo },
-              {
-                key: 'outboundType',
-                label: '出库类型',
-                children: TYPE_LABEL[detail.outboundType] ?? detail.outboundType,
-              },
-              {
-                key: 'warehouse',
-                label: '仓库',
-                children: detail.warehouseCode
-                  ? `${detail.warehouseName}（${detail.warehouseCode}）`
-                  : detail.warehouseName,
-              },
-              { key: 'customer', label: '客户', children: detail.customerName ?? '-' },
-              { key: 'operator', label: '创建人', children: detail.operatorName ?? '-' },
-              { key: 'createdAt', label: '创建时间', children: formatDateTime(detail.createdAt) },
-              { key: 'remark', label: '备注', children: detail.remark ?? '-', span: 2 },
+              { key: 'outboundNo', label: '出库单号', children: outbound.outbound_no },
+              { key: 'soNo', label: '来源销售单号', children: outbound.so_no || '-' },
+              { key: 'type', label: '出库类型', children: outbound.type || '-' },
+              { key: 'warehouse', label: '仓库', children: warehouseName },
+              { key: 'createdAt', label: '创建时间', children: formatDateTime(outbound.created_at) },
+              { key: 'cancelledAt', label: '取消时间', children: formatDateTime(outbound.cancelled_at) },
+              { key: 'remark', label: '备注', children: outbound.remark || '-', span: 2 },
             ]}
           />
         </SfDetailSection>
-        <SfDetailSection title="商品明细">
-          <Table<OutboundDetailItem>
+        <SfDetailSection title="出库明细">
+          <Table<OutboundOrderItem>
             size="small"
             rowKey="id"
-            columns={ITEM_COLUMNS}
-            dataSource={lines}
+            columns={itemColumns}
+            dataSource={items}
             pagination={false}
-            scroll={{ x: 980 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无商品明细" /> }}
+            scroll={{ x: 1180 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无明细行" /> }}
+          />
+        </SfDetailSection>
+        <SfDetailSection title="拣货任务">
+          <Table<PickTask>
+            size="small"
+            rowKey="id"
+            columns={pickColumns}
+            dataSource={picks}
+            pagination={false}
+            scroll={{ x: 1050 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无拣货任务（分配生成后展示）" /> }}
+          />
+        </SfDetailSection>
+        <SfDetailSection title="复核记录">
+          <Table<CheckTask>
+            size="small"
+            rowKey="id"
+            columns={checkColumns}
+            dataSource={checks}
+            pagination={false}
+            scroll={{ x: 1010 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无复核任务（拣货确认后生成）" /> }}
+          />
+        </SfDetailSection>
+        <SfDetailSection title="包裹记录">
+          <Table<PackingRecord>
+            size="small"
+            rowKey="id"
+            columns={packageColumns}
+            dataSource={packages}
+            pagination={false}
+            scroll={{ x: 1170 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无打包记录" /> }}
+          />
+        </SfDetailSection>
+        <SfDetailSection title="发货记录">
+          <Table<Shipment>
+            size="small"
+            rowKey="id"
+            columns={shipmentColumns}
+            dataSource={shipments}
+            pagination={false}
+            scroll={{ x: 1060 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无发货单" /> }}
           />
         </SfDetailSection>
         <SfDetailSection title="业务流程">
-          <SfTimeline steps={buildSteps(detail)} emptyText="该出库单暂无流程节点记录" />
-        </SfDetailSection>
-        <SfDetailSection title="关联单据">
-          <Descriptions
-            bordered
-            size="small"
-            column={{ xs: 1, md: 2 }}
-            items={[
-              {
-                key: 'sourceNo',
-                label: '来源单号',
-                children: detail.sourceNo ?? '暂无来源单据',
-              },
-              { key: 'carrier', label: '物流公司', children: detail.carrierName ?? '-' },
-              { key: 'trackingNo', label: '物流单号', children: detail.trackingNo ?? '-' },
-            ]}
-          />
+          <SfTimeline steps={buildSteps(outbound)} emptyText="该出库单暂无流程节点记录" />
         </SfDetailSection>
       </Flex>
     </div>

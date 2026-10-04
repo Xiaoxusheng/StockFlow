@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useQuery } from '@tanstack/react-query'
 import {
   inventoryApi,
   type InventoryLockItem,
@@ -8,13 +9,24 @@ import {
   type InventoryLockStatus,
   type InventoryLockType,
 } from '@/api/inventory'
+import {
+  buildBinCodeMap,
+  buildIdMap,
+  buildSkuMaps,
+  buildWarehouseMaps,
+  fetchBatchOptions,
+  fetchBinOptions,
+  fetchSkuOptions,
+  fetchWarehouseOptions,
+  idKey,
+} from '@/api/options'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatDateTime, formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -56,62 +68,114 @@ function LockStatusTag({ status }: { status: InventoryLockStatus }) {
   return <SfStatusTag status={meta?.key ?? status} label={meta?.label} semantic={meta?.semantic} />
 }
 
-const COLUMNS: ColumnsType<InventoryLockItem> = [
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130, fixed: 'left' },
-  {
-    title: '商品名称',
-    dataIndex: 'productName',
-    width: 200,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
-  {
-    title: '锁定类型',
-    dataIndex: 'lockType',
-    width: 100,
-    render: (v: InventoryLockType) => LOCK_TYPE_LABEL[v] ?? v,
-  },
-  { title: '来源类型', dataIndex: 'sourceType', width: 110 },
-  { title: '来源单号', dataIndex: 'sourceNo', width: 160 },
-  {
-    title: '锁定数量',
-    dataIndex: 'qty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 90,
-    render: (v: InventoryLockStatus) => <LockStatusTag status={v} />,
-  },
-  {
-    title: '备注',
-    dataIndex: 'remark',
-    width: 160,
-    ellipsis: true,
-    render: (v?: string) => (v ? <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-'),
-  },
-  { title: '操作人', dataIndex: 'createdByName', width: 100, render: (v?: string) => v ?? '-' },
-  {
-    title: '锁定时间',
-    dataIndex: 'createdAt',
-    width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-  {
-    title: '释放时间',
-    dataIndex: 'releasedAt',
-    width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
+/** 可选维度 ID 0 值显示占位符（0=非批次） */
+function idOrDash(value: string): string {
+  return value === '0' ? '-' : value
+}
 
-/** 库存锁定（frontend.md §10.1；锁定规则见 inventory-rules.md §4：释放须由明确业务动作触发并生成流水） */
+interface LockNameMaps {
+  skuCodes: Map<string, string>
+  skuNames: Map<string, string>
+  warehouseNames: Map<string, string>
+  binCodes: Map<string, string>
+  batchNos: Map<string, string>
+}
+
+/** 组装列：LockView 仅下发裸 ID，经 maps 本地解析编码/名称（解析失败降级 ID，不造假数据） */
+function buildColumns(maps: LockNameMaps): ColumnsType<InventoryLockItem> {
+  return [
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      fixed: 'left',
+      render: (v: InventoryLockItem['sku_id']) => maps.skuCodes.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 200,
+      ellipsis: true,
+      render: (_: unknown, record: InventoryLockItem) => {
+        const name = maps.skuNames.get(idKey(record.sku_id))
+        return name ? (
+          <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          '-'
+        )
+      },
+    },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      key: 'warehouse_name',
+      width: 100,
+      render: (v: InventoryLockItem['warehouse_id']) => maps.warehouseNames.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '库位',
+      dataIndex: 'bin_id',
+      key: 'bin_code',
+      width: 110,
+      render: (v: InventoryLockItem['bin_id']) => maps.binCodes.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '批次',
+      dataIndex: 'batch_id',
+      key: 'batch_no',
+      width: 110,
+      render: (v: InventoryLockItem['batch_id']) => idOrDash(maps.batchNos.get(idKey(v)) ?? idKey(v)),
+    },
+    {
+      title: '锁定类型',
+      dataIndex: 'lock_type',
+      width: 100,
+      render: (v: InventoryLockType) => LOCK_TYPE_LABEL[v] ?? v,
+    },
+    { title: '来源类型', dataIndex: 'source_type', width: 110, render: (v: string) => v || '-' },
+    { title: '来源单号', dataIndex: 'source_no', width: 160, render: (v: string) => v || '-' },
+    {
+      title: '锁定数量',
+      dataIndex: 'qty',
+      width: 100,
+      align: 'right',
+      // stock.Qty 裸数字出参（numeric(18,4)），按最多 4 位小数展示、不强制补零
+      render: (v: number) => <span className="sf-num">{formatQty(v)}</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (v: InventoryLockStatus) => <LockStatusTag status={v} />,
+    },
+    {
+      title: '备注',
+      dataIndex: 'remark',
+      width: 160,
+      ellipsis: true,
+      render: (v?: string) => (v ? <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-'),
+    },
+    {
+      title: '锁定时间',
+      dataIndex: 'created_at',
+      width: 160,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+    {
+      title: '释放时间',
+      dataIndex: 'released_at',
+      width: 160,
+      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+}
+
+/** 库存锁定（frontend.md §10.1；GET /api/inventory/locks 后端已交付：internal/inventory/handler.go:479-516；
+ * 出参 LockView snake_case 仅裸 ID，经 api/options.ts 一次取全基础资料后本地映射补充编码/名称，
+ * 失败降级 ID；锁定规则见 inventory-rules.md §4：释放须由明确业务动作触发并生成流水） */
 export default function LocksPage() {
   const [params, setParams] = useState<InventoryLockQuery>({})
   const list = usePagedList<InventoryLockItem, InventoryLockQuery>({
@@ -120,10 +184,23 @@ export default function LocksPage() {
     params,
   })
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as InventoryLockQuery)
-    list.resetToFirstPage()
-  }
+  // LockView 无联表编码/名称（warehouse_id/sku_id/bin_id/batch_id 裸 ID），options 一次取全本地映射
+  const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
+  const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
+  const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
+  const batches = useQuery({ queryKey: ['options', 'batches'], queryFn: fetchBatchOptions })
+
+  const maps: LockNameMaps = useMemo(
+    () => ({
+      warehouseNames: buildWarehouseMaps(warehouses.data ?? []).name,
+      skuCodes: buildSkuMaps(skus.data ?? []).code,
+      skuNames: buildSkuMaps(skus.data ?? []).name,
+      binCodes: buildBinCodeMap(bins.data ?? []),
+      batchNos: buildIdMap(batches.data ?? [], (b) => b.id, (b) => b.batch_no),
+    }),
+    [warehouses.data, skus.data, bins.data, batches.data],
+  )
+  const columns = useMemo(() => buildColumns(maps), [maps])
 
   return (
     <div className="sf-page">
@@ -134,17 +211,21 @@ export default function LocksPage() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU / 商品名称 / 来源单号' },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-            { name: 'lockType', label: '锁定类型', control: 'select', options: LOCK_TYPE_OPTIONS },
+            { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
+            { name: 'warehouse_id', label: '仓库 ID', control: 'input', placeholder: '仓库 ID（正整数）' },
+            { name: 'lock_type', label: '锁定类型', control: 'select', options: LOCK_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: LOCK_STATUS_OPTIONS },
+            { name: 'source_no', label: '来源单号', control: 'input', placeholder: '来源单号' },
           ]}
-          onSearch={handleSearch}
+          onSearch={(values) => {
+            setParams(values as InventoryLockQuery)
+            list.resetToFirstPage()
+          }}
         />
         <SfTable<InventoryLockItem>
           storageKey="inventory-locks"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -154,7 +235,7 @@ export default function LocksPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存锁定记录"
-          scrollX={1790}
+          scrollX={1690}
         />
       </Card>
     </div>

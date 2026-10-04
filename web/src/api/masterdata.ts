@@ -38,8 +38,12 @@ export interface MasterdataQuery extends PageQuery {
   status?: EnabledStatus
 }
 
-/** 下拉数据源等一次取全场景的页大小（基础资料量级有限；接口失败时调用方降级为空，不阻塞表单） */
-export const OPTIONS_PAGE_SIZE = 200
+/**
+ * 下拉数据源等一次取全场景的页大小（基础资料量级有限；接口失败时调用方降级为空，不阻塞表单）。
+ * 上限对齐后端 response.ParsePage 的 MaxPageSize=100（internal/response/response.go:47，
+ * 越界直接报参数错误而非 clamp——200 会 400），需要更多行由调用方分页取全（api/options.ts fetchAllPages）。
+ */
+export const OPTIONS_PAGE_SIZE = 100
 
 // ---------- 商品分类（/api/product-categories，service_category.go:24-33 CategoryView） ----------
 

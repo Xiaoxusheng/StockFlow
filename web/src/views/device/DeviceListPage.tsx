@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
@@ -13,8 +13,13 @@ import {
   type DeviceQuery,
   type DeviceType,
 } from '@/api/device'
-import { warehouseApi } from '@/api/warehouse'
-import { OPTIONS_PAGE_SIZE } from '@/api/masterdata'
+import {
+  buildUserNameMap,
+  buildWarehouseMaps,
+  fetchUserOptions,
+  fetchWarehouseOptions,
+  idKey,
+} from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDeviceStatus } from '@/components/device/SfDeviceStatus'
 import { SfError } from '@/components/common/SfError'
@@ -23,23 +28,30 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { formatDateTime } from '@/utils/format'
 
-/** 在线筛选选项（字符串形态，提交前经 toDeviceQuery 转回契约的 boolean） */
+/** 在线筛选选项（字符串形态，提交前经 toDeviceQuery 转回契约的 boolean——handler.go:290-293） */
 const ONLINE_OPTIONS = [
   { label: '在线', value: 'true' },
   { label: '离线', value: 'false' },
 ]
 
+/** 启停状态筛选（models.go:34-37 值域 ENABLED/DISABLED，handler.go:277 直传） */
+const STATUS_OPTIONS = [
+  { label: '已启用', value: 'ENABLED' },
+  { label: '已停用', value: 'DISABLED' },
+]
+
 function toDeviceQuery(values: Record<string, unknown>): DeviceQuery {
-  const { online, ...rest } = values
+  const { online, warehouse_id, ...rest } = values
   return {
     ...(rest as DeviceQuery),
     online: online === 'true' ? true : online === 'false' ? false : undefined,
+    warehouse_id: warehouse_id ? Number(warehouse_id) : undefined,
   }
 }
 
-/** 文本列统一空值占位（utils/format EMPTY_TEXT 约定） */
+/** 文本列统一空值占位（空串与 null 同视为空，utils/format EMPTY_TEXT 约定） */
 function renderText(value?: string | null): string {
-  return value ?? '-'
+  return value || '-'
 }
 
 function renderDateTime(value?: string | null): ReactNode {
@@ -47,11 +59,22 @@ function renderDateTime(value?: string | null): ReactNode {
 }
 
 /**
+ * 裸 ID 列展示：后端 DeviceView 不联表下发 warehouse_name/bound_user_name
+ * （device.ts:6-9 注 / service_device.go:167-170），经 options 本地映射；
+ * 0=未绑定，映射失败降级 #ID，不造假数据。
+ */
+function renderIdRef(value: number, names: Map<string, string> | undefined, emptyText: string): string {
+  if (!value) return emptyText
+  const key = idKey(value)
+  return names?.get(key) ?? `#${key}`
+}
+
+/**
  * 设备中心列表页（frontend.md §14.1 十列 / devices.md §7.1）。
  * 四条菜单路由复用同一组件，deviceType 由路由参数化：
  * /devices/scanners、/devices/pda、/devices/pads、/devices/printers（config/menu.tsx:141-144），
  * 也可通过 props 显式传入。行点击进入设备详情 /devices/:id。
- * 后端 /api/devices 域未交付时整表呈统一错误态。
+ * 后端 GET /api/devices 已交付（internal/devices/handler.go:185-186）；接口异常时整表呈统一错误态。
  */
 export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceType?: DeviceType } = {}) {
   const location = useLocation()
@@ -69,15 +92,23 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
     enabled: Boolean(deviceType),
   })
 
-  // 仓库筛选下拉：一次取全；接口失败降级为空数组，不阻塞其余筛选（ProductListPage 同款处理）
+  // 仓库/用户 options（GET /api/warehouses、/api/users）：仓库筛选下拉 +
+  // warehouse_id/bound_user_id → 名称本地映射；拉取失败降级空下拉 / #ID 展示，
+  // 不阻塞列表（api/options.ts 约定，InboundPage 同款）
   const warehouses = useQuery({
-    queryKey: ['warehouses', 'options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['devices', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
   })
-  const warehouseOptions = (warehouses.data?.items ?? []).map((item) => ({
+  const users = useQuery({
+    queryKey: ['devices', 'options', 'users'],
+    queryFn: fetchUserOptions,
+  })
+  const warehouseOptions = (warehouses.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
     value: String(item.id),
   }))
+  const warehouseNames = useMemo(() => buildWarehouseMaps(warehouses.data ?? []).name, [warehouses.data])
+  const userNames = useMemo(() => buildUserNameMap(users.data ?? []), [users.data])
 
   // 十列 = frontend.md §14.1 全集，列名逐字一致
   const columns: ColumnsType<DeviceItem> = [
@@ -90,8 +121,20 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
     },
     { title: '品牌', dataIndex: 'brand', width: 110, render: renderText },
     { title: '型号', dataIndex: 'model', width: 110, render: renderText },
-    { title: '仓库', dataIndex: 'warehouse_name', width: 110, render: renderText },
-    { title: '绑定用户', dataIndex: 'bound_user_name', width: 110, render: renderText },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      width: 110,
+      ellipsis: true,
+      render: (value: number) => renderIdRef(value, warehouseNames, '未绑定仓库'),
+    },
+    {
+      title: '绑定用户',
+      dataIndex: 'bound_user_id',
+      width: 110,
+      ellipsis: true,
+      render: (value: number) => renderIdRef(value, userNames, '未绑定'),
+    },
     {
       title: '在线状态',
       dataIndex: 'online',
@@ -126,6 +169,7 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
         fields={[
           { name: 'keyword', label: '关键词', control: 'input', placeholder: '设备编号 / 名称' },
           { name: 'warehouse_id', label: '仓库', control: 'select', options: warehouseOptions },
+          { name: 'status', label: '启停状态', control: 'select', options: STATUS_OPTIONS },
           { name: 'online', label: '在线状态', control: 'select', options: ONLINE_OPTIONS },
         ]}
         onSearch={(values) => {

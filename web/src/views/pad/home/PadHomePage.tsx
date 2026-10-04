@@ -21,8 +21,10 @@ function MetricCell({ label, value }: { label: string; value: string }) {
 /**
  * Pad 首页（frontend.md §20.5：任务 / 快速作业 / 预警 / 最近操作 四块，不做 PC Dashboard 缩放）。
  * 横屏 2×2 区块（.sf-pad-home 网格），竖屏单列堆叠（pad.css @media 切换）。
- * 数据全部走真实 API：taskApi.summary / inventoryApi.stockSummary 均为前端先行契约，
- * 失败分别呈 SfError / 「-」占位，不拖垮整页（§9.5）；最近操作无端点，呈上下文占位说明。
+ * 数据全部走真实 API：inventoryApi.stockSummary 对齐已交付的 GET /api/inventory/summary
+ * （snake_case DashboardSummary），失败呈「-」占位不拖垮整页（§9.5）；
+ * taskApi.summary（GET /api/workbench/summary）仍为前端先行契约，失败呈 SfError；
+ * 最近操作无端点，呈上下文占位说明。
  */
 export default function PadHomePage() {
   const navigate = useNavigate()
@@ -92,11 +94,11 @@ export default function PadHomePage() {
         <div className="sf-pad-metric-grid">
           <MetricCell
             label="临期数量"
-            value={stockSummary.data ? formatNumber(stockSummary.data.nearExpiryQty) : '-'}
+            value={stockSummary.data ? formatNumber(stockSummary.data.near_expiry_qty) : '-'}
           />
           <MetricCell
             label="异常数量"
-            value={stockSummary.data ? formatNumber(stockSummary.data.abnormalQty) : '-'}
+            value={stockSummary.data ? formatNumber(stockSummary.data.abnormal_qty) : '-'}
           />
         </div>
         {stockSummary.error && (

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Breadcrumb, Card, Descriptions, Flex, Skeleton, Tabs, Typography } from 'antd'
+import { Alert, Breadcrumb, Card, Descriptions, Flex, Skeleton, Table, Tabs, Typography } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -24,8 +24,7 @@ import {
   type SerialQuery,
   type SerialStatus,
   type StockDistributionNode,
-  type TraceItem,
-  type TraceQuery,
+  type TraceLedgerItem,
 } from '@/api/inventory'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -35,7 +34,7 @@ import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { EMPTY_TEXT, formatDate, formatDateTime, formatMoney, formatNumber } from '@/utils/format'
+import { EMPTY_TEXT, formatDate, formatDateTime, formatMoney, formatNumber, formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -439,21 +438,22 @@ function LedgerTab({ skuId }: { skuId?: InventoryId }) {
 const LOCK_COLUMNS: ColumnsType<InventoryLockItem> = [
   {
     title: '锁定类型',
-    dataIndex: 'lockType',
+    dataIndex: 'lock_type',
     width: 100,
     render: (v: InventoryLockType) => LOCK_TYPE_LABEL[v] ?? v,
   },
-  { title: '来源类型', dataIndex: 'sourceType', width: 110 },
-  { title: '来源单号', dataIndex: 'sourceNo', width: 160 },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
+  { title: '来源类型', dataIndex: 'source_type', width: 110, render: (v: string) => v || '-' },
+  { title: '来源单号', dataIndex: 'source_no', width: 160, render: (v: string) => v || '-' },
+  { title: '仓库 ID', dataIndex: 'warehouse_id', width: 100, render: (v: InventoryLockItem['warehouse_id']) => idOrDash(String(v)) },
+  { title: '库位 ID', dataIndex: 'bin_id', width: 100, render: (v: InventoryLockItem['bin_id']) => idOrDash(String(v)) },
+  { title: '批次 ID', dataIndex: 'batch_id', width: 100, render: (v: InventoryLockItem['batch_id']) => idOrDash(String(v)) },
   {
     title: '锁定数量',
     dataIndex: 'qty',
     width: 100,
     align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    // stock.Qty 裸数字出参（numeric(18,4)），最多 4 位小数、不强制补零
+    render: (v: number) => <span className="sf-num">{formatQty(v)}</span>,
   },
   {
     title: '状态',
@@ -468,28 +468,27 @@ const LOCK_COLUMNS: ColumnsType<InventoryLockItem> = [
     ellipsis: true,
     render: (v?: string) => (v ? <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-'),
   },
-  { title: '操作人', dataIndex: 'createdByName', width: 100, render: (v?: string) => v ?? '-' },
   {
     title: '锁定时间',
-    dataIndex: 'createdAt',
+    dataIndex: 'created_at',
     width: 160,
     render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
   {
     title: '释放时间',
-    dataIndex: 'releasedAt',
+    dataIndex: 'released_at',
     width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
 
-/** 库存锁定页签：GET /api/inventory/locks（前端先行契约，M1 不交付该端点，呈统一错误态；
- * skuCode 字段暂以详情行 SKU ID 填充，契约冻结后回对为 sku_id） */
+/** 库存锁定页签：GET /api/inventory/locks?sku_id=（后端已交付，handler.go:479-516 支持 sku_id
+ * 过滤；LockView 裸 ID 出参——仓库/库位/批次以 ID 列呈现，与本页序列号/流水页签同口径） */
 function LockTab({ skuId }: { skuId?: InventoryId }) {
   const ready = skuId !== undefined
   const list = usePagedList<InventoryLockItem, InventoryLockQuery>({
     queryKey: ['inventory', 'stock', 'detail', 'locks', String(skuId ?? '')],
-    fetch: (q) => inventoryApi.locks({ ...q, skuCode: skuId === undefined ? undefined : String(skuId) }),
+    fetch: (q) => inventoryApi.locks({ ...q, sku_id: skuId }),
     params: {},
     enabled: ready,
   })
@@ -512,34 +511,34 @@ function LockTab({ skuId }: { skuId?: InventoryId }) {
   )
 }
 
-const TRACE_COLUMNS: ColumnsType<TraceItem> = [
+const TRACE_COLUMNS: ColumnsType<TraceLedgerItem> = [
   {
     title: '事件时间',
-    dataIndex: 'occurredAt',
+    dataIndex: 'created_at',
     width: 160,
     fixed: 'left',
     render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
   {
     title: '变更类型',
-    dataIndex: 'changeType',
+    dataIndex: 'change_type',
     width: 110,
     render: (v: InventoryChangeType) => CHANGE_TYPE_LABEL[v] ?? v,
   },
-  { title: '业务类型', dataIndex: 'bizType', width: 100 },
-  { title: '单据号', dataIndex: 'bizNo', width: 160 },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  { title: '库位', dataIndex: 'binCode', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '批次', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '序列号', dataIndex: 'serialNo', width: 130, render: (v?: string) => v ?? '-' },
+  { title: '业务类型', dataIndex: 'business_type', width: 100, render: (v: string) => v || '-' },
+  { title: '单据号', dataIndex: 'business_no', width: 160, render: (v: string) => v || '-' },
+  { title: '仓库 ID', dataIndex: 'warehouse_id', width: 100, render: (v: TraceLedgerItem['warehouse_id']) => idOrDash(String(v)) },
+  { title: '库位 ID', dataIndex: 'bin_id', width: 100, render: (v: TraceLedgerItem['bin_id']) => idOrDash(String(v)) },
+  { title: '批次 ID', dataIndex: 'batch_id', width: 100, render: (v: TraceLedgerItem['batch_id']) => idOrDash(String(v)) },
+  { title: '序列号', dataIndex: 'serial_no', width: 130, render: (v?: string) => v || '-' },
   {
     title: '状态流转',
     key: 'statusFlow',
     width: 140,
-    render: (_: unknown, record: TraceItem) => {
-      if (!record.statusFrom && !record.statusTo) return '-'
-      const from = STATE_LABEL[record.statusFrom ?? ''] ?? record.statusFrom ?? '-'
-      const to = STATE_LABEL[record.statusTo ?? ''] ?? record.statusTo ?? '-'
+    render: (_: unknown, record: TraceLedgerItem) => {
+      if (!record.status_from && !record.status_to) return '-'
+      const from = STATE_LABEL[record.status_from] ?? record.status_from ?? '-'
+      const to = STATE_LABEL[record.status_to] ?? record.status_to ?? '-'
       return (
         <Text style={{ maxWidth: 140, whiteSpace: 'nowrap' }} ellipsis={{ tooltip: `${from} → ${to}` }}>
           {from} → {to}
@@ -549,47 +548,68 @@ const TRACE_COLUMNS: ColumnsType<TraceItem> = [
   },
   {
     title: '变更数量',
-    dataIndex: 'qtyChange',
+    dataIndex: 'qty_change',
     width: 100,
     align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    // 追溯链 qty 为字符串化 numeric(18,4) 出参（ports.go:110-112），按最多 4 位小数展示
+    render: (v: string) => <span className="sf-num">{formatQty(v)}</span>,
   },
   {
     title: '结余',
-    dataIndex: 'qtyAfter',
+    dataIndex: 'qty_after',
     width: 100,
     align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    render: (v: string) => <span className="sf-num">{formatQty(v)}</span>,
   },
-  { title: '操作人', dataIndex: 'operatorName', width: 100, render: (v: string) => v || '-' },
+  { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string) => v || '-' },
 ]
 
-/** 追溯页签：GET /api/inventory/trace?skuCode=（前端先行契约，呈统一错误态；
- * skuCode 字段暂以详情行 SKU ID 填充，契约冻结后回对为 sku_id） */
+/** 追溯页签：GET /api/inventory/trace?sku_id=（后端已交付：returns 域查询编排，
+ * internal/returns/handler.go:669-696 + service_trace.go；响应为单个非分页 TraceResult——
+ * 本页签展示追溯链主轴 chain，chain_truncated 时提示截断；仓库/库位/批次以 ID 列呈现，
+ * 与本页序列号/流水页签同口径） */
 function TraceTab({ skuId }: { skuId?: InventoryId }) {
   const ready = skuId !== undefined
-  const list = usePagedList<TraceItem, TraceQuery>({
+  const trace = useQuery({
     queryKey: ['inventory', 'stock', 'detail', 'trace', String(skuId ?? '')],
-    fetch: (q) => inventoryApi.trace({ ...q, skuCode: skuId === undefined ? undefined : String(skuId) }),
-    params: {},
+    queryFn: () => inventoryApi.trace({ sku_id: skuId }),
     enabled: ready,
   })
+  if (!ready) {
+    return <SfEmpty description="该库存行未关联 SKU" />
+  }
+  if (trace.isPending) {
+    return <Skeleton active paragraph={{ rows: 5 }} />
+  }
+  if (trace.error) {
+    return (
+      <SfError
+        error={trace.error}
+        onRetry={trace.refetch}
+        description="库存追溯接口不可用：GET /api/inventory/trace?sku_id="
+      />
+    )
+  }
+  const result = trace.data
   return (
-    <SfTable<TraceItem>
-      storageKey="inventory-stock-detail-trace"
-      rowKey="id"
-      columns={TRACE_COLUMNS}
-      dataSource={list.items}
-      loading={list.isFetching}
-      error={list.error}
-      onRetry={list.refetch}
-      onRefresh={list.refetch}
-      pagination={list.pagination}
-      total={list.total}
-      onPageChange={list.onPageChange}
-      emptyText="该 SKU 暂无追溯记录"
-      scrollX={1420}
-    />
+    <Flex vertical gap={8}>
+      {result.chain_truncated && (
+        <Alert
+          type="info"
+          showIcon
+          message={`追溯链已达上限，仅展示最近 ${result.chain.length} 条（时间正序）`}
+        />
+      )}
+      <Table<TraceLedgerItem>
+        size="small"
+        rowKey="id"
+        columns={TRACE_COLUMNS}
+        dataSource={result.chain}
+        pagination={false}
+        scroll={{ x: 1420 }}
+        locale={{ emptyText: () => <SfEmpty description="该 SKU 暂无追溯记录" /> }}
+      />
+    </Flex>
   )
 }
 

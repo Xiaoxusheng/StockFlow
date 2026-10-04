@@ -10,13 +10,16 @@ import { SfLoading } from '@/components/common/SfLoading'
 
 const { Text } = Typography
 
+// 通知类型 → Tag 色：键为后端值域大写枚举（db/migrations/000014 chk_notifications_type：
+// SYSTEM/APPROVAL/STOCK_ALERT/EXPIRY_ALERT/EXCEPTION/TASK，api/notifications.ts
+// NotificationType）；未知类型兜底 default 色。
 const NOTIFICATION_TYPE_COLOR: Record<string, string> = {
-  approval: 'blue',
-  stock_alert: 'orange',
-  expiry_alert: 'gold',
-  exception: 'red',
-  task: 'cyan',
-  system: 'default',
+  APPROVAL: 'blue',
+  STOCK_ALERT: 'orange',
+  EXPIRY_ALERT: 'gold',
+  EXCEPTION: 'red',
+  TASK: 'cyan',
+  SYSTEM: 'default',
 }
 
 export interface NotificationDrawerProps {
@@ -100,7 +103,7 @@ export function NotificationDrawer({ open, onClose }: NotificationDrawerProps) {
                   {item.content}
                 </Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  {formatDateTime(item.createdAt)}
+                  {formatDateTime(item.created_at)}
                 </Text>
               </Flex>
             </List.Item>

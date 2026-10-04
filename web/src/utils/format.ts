@@ -32,6 +32,20 @@ export function formatNumber(value: number | string | null | undefined, digits =
   }).format(n)
 }
 
+/**
+ * 库存数量：千分位 + 最多 4 位小数、不强制补零（1.5 → "1.5"、5 → "5"）。
+ * 后端数量为 numeric(18,4)（stock.ParseQty 最多 4 位小数），固定 digits=0 会把
+ * 合法小数数量四舍五入展示；JSON 出参为字符串化 Qty 亦可直接传入（stock/qty.go:72-74）。
+ */
+export function formatQty(value: number | string | null | undefined): string {
+  if (value === null || value === undefined || value === '') return EMPTY_TEXT
+  const n = Number(value)
+  if (!Number.isFinite(n)) return EMPTY_TEXT
+  return new Intl.NumberFormat('zh-CN', {
+    maximumFractionDigits: 4,
+  }).format(n)
+}
+
 /** 金额：¥ 1,234.56 */
 export function formatMoney(value: number | string | null | undefined, digits = 2): string {
   if (value === null || value === undefined || value === '') return EMPTY_TEXT

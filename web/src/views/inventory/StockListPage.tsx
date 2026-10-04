@@ -21,6 +21,9 @@ export default function StockListPage() {
     params,
     persistKey: 'inventory-stock',
   })
+  // 汇总条：GET /api/inventory/summary 为 reports 实现、inventory 前缀挂载
+  // （router.go:211 + internal/reports/routes.go:47；权限点 reports:report:read），
+  // 响应为 snake_case DashboardSummary（repository.go:364-378），键名对齐 api/inventory.ts StockSummary
   const summary = useQuery({
     queryKey: ['inventory', 'stock', 'summary'],
     queryFn: inventoryApi.stockSummary,
@@ -31,14 +34,16 @@ export default function StockListPage() {
     list.resetToFirstPage()
   }
 
+  // 键名取 snake_case 汇总字段（StockSummary；口径见 api/inventory.ts 注释：
+  // abnormal = 冻结+残次、near_expiry 含已过期）
   const summaryItems = [
-    { label: 'SKU 数', value: summary.data?.skuCount },
-    { label: '库存总量', value: summary.data?.totalQty },
-    { label: '可用', value: summary.data?.availableQty },
-    { label: '锁定', value: summary.data?.lockedQty },
-    { label: '冻结', value: summary.data?.frozenQty },
-    { label: '临期', value: summary.data?.nearExpiryQty, danger: true },
-    { label: '异常', value: summary.data?.abnormalQty, danger: true },
+    { label: 'SKU 数', value: summary.data?.sku_count },
+    { label: '库存总量', value: summary.data?.total_qty },
+    { label: '可用', value: summary.data?.available_qty },
+    { label: '锁定', value: summary.data?.locked_qty },
+    { label: '冻结', value: summary.data?.frozen_qty },
+    { label: '临期', value: summary.data?.near_expiry_qty, danger: true },
+    { label: '异常', value: summary.data?.abnormal_qty, danger: true },
   ]
 
   return (

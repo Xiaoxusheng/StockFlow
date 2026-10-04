@@ -17,7 +17,6 @@ import {
 import { SaveOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  SYSTEM_CONFIG_VIEW_PERMISSION,
   systemApi,
   type SystemConfigItem,
   type SystemConfigSavePayload,
@@ -38,19 +37,11 @@ type ConfigFormValue = string | number | boolean
 type ConfigFormValues = Record<string, ConfigFormValue>
 
 /**
- * 分组标签映射：group 编码为前端提案值域（api/system.ts），未知分组兜底展示原始编码，
- * 后端冻结后新增分组不阻塞页面。
+ * 配置保存权限码（三段冻结码，internal/auth/permissions.go:357）：
+ * 端点 PUT /api/system/configs 由后端 system:config:update 校验（sysops/routes.go:100），
+ * 前端据此隐藏保存入口仅为体验优化，后端必须校验（permission.md §6）。
  */
-const CONFIG_GROUP_LABEL: Record<string, string> = {
-  basic: '基础参数',
-  inventory: '库存参数',
-  document: '单据参数',
-  security: '安全参数',
-}
-
-function groupLabel(group: string): string {
-  return CONFIG_GROUP_LABEL[group] ?? group
-}
+const SYSTEM_CONFIG_UPDATE_PERMISSION = 'system:config:update'
 
 /** 字段说明：配置键 + 备注（只读项显式标注） */
 function ConfigFieldExtra({ item }: { item: SystemConfigItem }) {
@@ -86,16 +77,18 @@ function ConfigControl({ item, disabled }: { item: SystemConfigItem; disabled: b
 /**
  * 系统配置（/system/settings，menu.tsx:159 权限码 system:config:view）：
  * 按 group 分区渲染分组表单（SfDetailSection），保存仅提交变更项走契约端点
- * PUT /api/system/configs（api.md:76 /api/system 域；修改属敏感操作须后端审计，permission.md §6）。
- * 后端系统域未交付：读取呈统一错误态，禁止 mock / 预置假配置。
+ * PUT /api/system/configs（sysops/routes.go:99-100 已挂载；修改属敏感操作，
+ * 服务端同事务逐项审计，permission.md §6）。
+ * group 值即后端下发的展示名（configs.go:45-58 冻结键清单：库存预警/作业任务/智能能力），
+ * 页面原样分区渲染，后端新增分组不阻塞页面。
  */
 export default function SettingsPage() {
   const [form] = Form.useForm<ConfigFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
-  // fail-closed：无权限时整个表单只读、隐藏保存入口（types/permission.ts canAccess）
-  const canManage = canAccess(user, SYSTEM_CONFIG_VIEW_PERMISSION)
+  // fail-closed：无 system:config:update 权限时整个表单只读、隐藏保存入口（types/permission.ts canAccess）
+  const canManage = canAccess(user, SYSTEM_CONFIG_UPDATE_PERMISSION)
 
   const configs = useQuery({
     queryKey: ['system', 'configs'],
@@ -126,8 +119,9 @@ export default function SettingsPage() {
 
   const saveMutation = useMutation({
     mutationFn: (payload: SystemConfigSavePayload) => systemApi.configs.save(payload),
-    onSuccess: () => {
-      messageApi.success('保存成功')
+    onSuccess: (result) => {
+      // 响应 {saved: 保存条数}（sysops/routes.go:293），与仅提交变更项的契约对应
+      messageApi.success(`保存成功：${result.saved} 项变更`)
       void queryClient.invalidateQueries({ queryKey: ['system', 'configs'] })
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
@@ -161,7 +155,7 @@ export default function SettingsPage() {
       {contextHolder}
       <SfPageHeader
         title="系统配置"
-        subtitle="基础 / 库存 / 单据 / 安全等全局参数（修改留痕）"
+        subtitle="库存预警 / 作业任务 / 智能能力等运行参数（修改留痕，逐项审计）"
         extra={
           canManage ? (
             <Button
@@ -183,7 +177,7 @@ export default function SettingsPage() {
         <SfError
           error={configs.error}
           onRetry={configs.refetch}
-          description="系统配置接口 GET /api/system/configs 尚未交付（系统域后端未启动），接口就绪后自动展示真实配置"
+          description="系统配置读取失败，可点击重试；若持续失败请联系管理员检查后端服务"
         />
       ) : items.length === 0 ? (
         <Card size="small">
@@ -193,7 +187,7 @@ export default function SettingsPage() {
         <Form<ConfigFormValues> form={form} layout="vertical" initialValues={initialValues}>
           <Flex vertical gap={16}>
             {groups.map(({ group, items: groupItems }) => (
-              <SfDetailSection key={group} title={groupLabel(group)}>
+              <SfDetailSection key={group} title={group}>
                 <Row gutter={[16, 0]}>
                   {groupItems.map((item) => (
                     <Col key={item.key} xs={24} md={12} xl={8}>

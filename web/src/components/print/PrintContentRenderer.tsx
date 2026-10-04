@@ -26,18 +26,19 @@ function labelFontSize(paperKey: string | undefined): number {
 
 /** 标签布局：主码文本 + 条码/二维码 + 已绑定字段行（printing.md §2 库位标签示例） */
 function LabelLayout({ template, row }: Required<Pick<PrintContentRendererProps, 'template' | 'row'>>) {
-  const fields = template.fields ?? []
   const fontSize = labelFontSize(template.paper)
-  const fieldEntries = fields
-    .map((field) => ({ label: field.label, value: row.values?.[field.key] }))
+  // 快照 fields 为「绑定键 → 文案」映射（TemplateSnapshot.Fields map[string]string，
+  // internal/printing/models.go:196-203/224-232；键序由后端快照承载）
+  const fieldEntries = Object.entries(template.fields ?? {})
+    .map(([key, label]) => ({ label, value: row.values?.[key] }))
     .filter((entry): entry is { label: string; value: string } => Boolean(entry.value))
 
   return (
     <div style={{ textAlign: 'center' }}>
       <div style={{ fontSize: fontSize + 3, fontWeight: 700, wordBreak: 'break-all' }}>{row.code}</div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, margin: '6px 0' }}>
-        <BarcodeView value={row.code} format={template.barcodeSymbology ?? 'CODE128'} height={template.paper === 'THERMAL_40_30' ? 28 : 44} fontSize={fontSize - 1} />
-        {template.qrcodeEnabled && <QrCodeView value={row.code} size={template.paper === 'THERMAL_40_30' ? 48 : 72} />}
+        <BarcodeView value={row.code} format={template.barcode_symbology ?? 'CODE128'} height={template.paper === 'THERMAL_40_30' ? 28 : 44} fontSize={fontSize - 1} />
+        {template.qrcode_enabled && <QrCodeView value={row.code} size={template.paper === 'THERMAL_40_30' ? 48 : 72} />}
       </div>
       {fieldEntries.map((entry) => (
         <div key={entry.label} style={{ fontSize, lineHeight: 1.5, textAlign: 'left' }}>
@@ -65,10 +66,9 @@ function resolveLineColumns(lines: Array<Record<string, string>>): string[] {
 
 /** 单据布局：页眉（公司名/单据名）+ 表头信息 + 明细表 + 页脚（printing.md §2 单据类模板） */
 function DocumentLayout({ template, row, printedAt, printedBy }: PrintContentRendererProps) {
-  const fields = template.fields ?? []
   const lines = row.lines ?? []
   const columns = resolveLineColumns(lines)
-  const headerText = template.headerText ?? template.name
+  const headerText = template.header_text ?? template.name
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -83,9 +83,9 @@ function DocumentLayout({ template, row, printedAt, printedBy }: PrintContentRen
         }}
       >
         <span>单据号：{row.code}</span>
-        {fields.map((field) => (
-          <span key={field.key}>
-            {field.label}：{row.values?.[field.key] ?? '-'}
+        {Object.entries(template.fields ?? {}).map(([key, label]) => (
+          <span key={key}>
+            {label}：{row.values?.[key] ?? '-'}
           </span>
         ))}
       </div>
@@ -136,5 +136,5 @@ function DocumentLayout({ template, row, printedAt, printedBy }: PrintContentRen
  */
 export function PrintContentRenderer(props: PrintContentRendererProps) {
   const { template, row } = props
-  return isLabelObjectType(template.objectType) ? <LabelLayout template={template} row={row} /> : <DocumentLayout {...props} />
+  return isLabelObjectType(template.object_type) ? <LabelLayout template={template} row={row} /> : <DocumentLayout {...props} />
 }

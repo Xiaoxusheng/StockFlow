@@ -1,28 +1,30 @@
 import { http } from './client'
-import { downloadFile } from './data'
 import type { PageQuery, PageResult } from '@/types/api'
 import type { StatusSemantic } from '@/types/status'
 
-// ---------- 打印中心（printing.md §1–§6 + frontend.md §13，api.md:65 /api/prints 域） ----------
+// ---------- 打印中心（后端 M3 已交付：internal/printing/handler.go:127-145，
+// 出参为 TemplateView/TaskView/HistoryItem snake_case，internal/printing/service.go:119-250） ----------
 //
-// 前端先行契约：后端打印域未交付，全部端点按本文档字段冻结后回对；
-// 后端未交付时页面呈统一错误态/空态，前端不伪造内容、不生成假 PDF（requirements.md §10）。
-//
-// 端点清单（api.md:65 /api/prints）：
+// 端点清单（handler.go 路由集全量）：
 //   GET  /api/prints/templates             模板列表
+//   GET  /api/prints/templates/{id}        模板详情
 //   POST /api/prints/templates             新建模板
-//   PUT  /api/prints/templates/:id         修改模板
-//   POST /api/prints/templates/:id/copy    复制模板
-//   PUT  /api/prints/templates/:id/status  启用/停用模板
+//   PUT  /api/prints/templates/{id}        修改模板
+//   POST /api/prints/templates/{id}/copy   复制模板
+//   PUT  /api/prints/templates/{id}/status 启用/停用模板
+//   GET  /api/prints/tasks                 打印任务列表
+//   GET  /api/prints/tasks/{id}            任务详情（携带模板快照与渲染数据包）
 //   POST /api/prints/tasks                 创建打印任务
-//   GET  /api/prints/tasks                 打印任务列表（预览页以 id 精确过滤取单条）
-//   GET  /api/prints/history               打印历史列表（printing.md §1.2：后端在任务执行时落记录）
-//   GET  /api/prints/:id/pdf               任务 PDF 下载（Blob，带认证头走统一下载）
+//   POST /api/prints/tasks/{id}/execute    执行确认（{result: SUCCESS|FAILED, message?}）
+//   GET  /api/prints/history               打印历史（print_tasks 已确认子集）
+//   GET  /api/prints/barcode?text=&symbology=&width=&height=  条码/二维码 PNG（Blob）
+// 后端不产出任务 PDF（无 /api/prints/{id}/pdf 端点）——单据打印走浏览器打印层。
 
-/** 视图出参 ID（对齐基础资料域：后端 database.ID 序列化为字符串，保留 number 兼容） */
+/** 视图出参 ID（后端 database.ID 序列化为字符串，保留 number 兼容） */
 export type PrintId = number | string
 
-// ---------- 业务类型（printing.md §1.1 支持对象中 F12 首批 9 类，frontend.md §13 模板页列） ----------
+// ---------- 业务类型（printing.md §1.1 支持对象中 F12 首批 9 类，frontend.md §13 模板页列；
+// 与 internal/printing objectTypes 冻结清单一致） ----------
 
 export type PrintObjectType =
   | 'SKU_LABEL'
@@ -88,7 +90,8 @@ export function resolvePaperLabel(paper?: string | null): string {
   return spec ? `${spec.label}（${spec.widthMm}×${spec.heightMm}mm）` : paper ?? '-'
 }
 
-// ---------- 条码/二维码（printing.md §4.1：Code128 默认推荐，码制与扫码端 scanner.md §5.1 一致） ----------
+// ---------- 条码/二维码（printing.md §4.1：Code128 默认推荐，码制与扫码端 scanner.md §5.1 一致；
+// 与 internal/printing models.go:92-94 templateSymbologies 值域同源） ----------
 
 export type BarcodeSymbology = 'CODE128' | 'CODE39' | 'EAN13' | 'EAN8' | 'UPC'
 
@@ -104,8 +107,10 @@ export function resolveBarcodeSymbologyLabel(symbology?: string | null): string 
   return BARCODE_SYMBOLOGY_OPTIONS.find((option) => option.value === symbology)?.label ?? symbology ?? '-'
 }
 
-// ---------- 模板字段绑定（printing.md §2：可配置的数据字段绑定；键为前端先行命名，冻结后回对） ----------
+// ---------- 模板字段绑定（printing.md §2：可配置的数据字段绑定；
+// 键与文案和 internal/printing fields.go 预设注册表逐键同源冻结） ----------
 
+/** 模板绑定字段读视图（FieldView = FieldPreset，fields.go:22-25） */
 export interface PrintTemplateField {
   key: string
   label: string
@@ -195,6 +200,7 @@ export const PRINT_LINE_FIELD_ORDER = Object.keys(PRINT_LINE_FIELD_LABELS)
 
 // ---------- 打印模板（printing.md §2：可新增、编辑、复制、停用） ----------
 
+/** 模板状态（models.go:101-102 chk_print_templates_status 同源） */
 export type PrintTemplateStatus = 'ENABLED' | 'DISABLED'
 
 export interface PrintTemplateQuery extends PageQuery {
@@ -203,51 +209,56 @@ export interface PrintTemplateQuery extends PageQuery {
   status?: string
 }
 
+/** 模板（TemplateView，service.go:120-134 字段全量；fields 为预设键序的 {key,label} 列表） */
 export interface PrintTemplateItem {
   id: PrintId
   name: string
-  objectType: PrintObjectType
+  object_type: PrintObjectType
   /** PRINT_PAPERS 键（A4/A5/热敏规格） */
   paper: string
-  status: PrintTemplateStatus
   /** 标签类条码码制（printing.md §4.1；单据类为单据二维码，无需码制） */
-  barcodeSymbology?: BarcodeSymbology
+  barcode_symbology?: BarcodeSymbology
   /** 是否附加二维码（库位二维码/单据二维码，printing.md §4.2） */
-  qrcodeEnabled?: boolean
-  /** 已绑定字段（按预设键过滤后的子集） */
-  fields?: PrintTemplateField[]
+  qrcode_enabled: boolean
+  /** 已绑定字段（预设键序） */
+  fields: PrintTemplateField[]
   /** 单据页眉文本（公司名/单据名；缺省渲染层用模板名兜底） */
-  headerText?: string
-  remark?: string
-  createdAt?: string
-  updatedAt?: string
+  header_text: string
+  status: PrintTemplateStatus
+  remark: string
+  created_at: string
+  updated_at: string
+  created_by: string
 }
 
-/** 新建/修改入参（创建恒 ENABLED，启停走专用接口 /status） */
+/** 新建/修改入参（TemplateInput，service_template.go:19-28；fields 为绑定键列表，
+ * 后端按预设注册表回填文案——不信前端传入文案，models.go:172-173） */
 export interface PrintTemplateSavePayload {
   name: string
-  objectType: PrintObjectType
+  object_type: PrintObjectType
   paper: string
-  barcodeSymbology?: BarcodeSymbology
-  qrcodeEnabled?: boolean
-  fields?: PrintTemplateField[]
-  headerText?: string
+  barcode_symbology?: BarcodeSymbology
+  qrcode_enabled?: boolean
+  fields?: string[]
+  header_text?: string
   remark?: string
 }
 
-/** 创建任务时冻结的模板快照（预览按快照渲染，模板后续修改不影响已创建任务） */
+/** 创建任务时冻结的模板快照（TemplateSnapshot，models.go:224-232；预览按快照渲染，
+ * 模板后续修改不影响已创建任务） */
 export interface PrintTemplateSnapshot {
   name: string
-  objectType: PrintObjectType
+  object_type: PrintObjectType
   paper: string
-  barcodeSymbology?: BarcodeSymbology
-  qrcodeEnabled?: boolean
-  fields?: PrintTemplateField[]
-  headerText?: string
+  barcode_symbology?: BarcodeSymbology
+  qrcode_enabled: boolean
+  fields?: Record<string, string>
+  header_text?: string
 }
 
-// ---------- 打印任务（printing.md §1.2：创建任务 → 选择模板 → 预览 → 执行 → 记录日志） ----------
+// ---------- 打印任务（printing.md §1.2：创建任务 → 预览渲染数据包 → 执行确认 → 历史记录） ----------
 
+/** 任务状态（models.go:104-107 chk_print_tasks_status：render 队列态） */
 export type PrintTaskStatus = 'QUEUED' | 'PROCESSING' | 'SUCCESS' | 'FAILED'
 
 /** 任务状态文案与语义色（types/status.ts 注册表未含打印状态，经 SfStatusTag 显式指定，frontend.md §24） */
@@ -258,27 +269,37 @@ export const PRINT_TASK_STATUS_META: Record<PrintTaskStatus, { label: string; se
   FAILED: { label: '失败', semantic: 'danger' },
 }
 
+/** 执行确认结果（models.go:112-114 chk_print_tasks_result；NULL=尚未确认，回填一次） */
+export type PrintExecuteResult = 'SUCCESS' | 'FAILED'
+
+/** 执行确认入参（ExecuteInput，service_task.go:33-37） */
+export interface PrintTaskExecutePayload {
+  result: PrintExecuteResult
+  message?: string
+}
+
 /** 打印结果文案与语义色（printing.md §1.2 历史记录的打印结果） */
-export const PRINT_RESULT_META: Record<'SUCCESS' | 'FAILED', { label: string; semantic: StatusSemantic }> = {
+export const PRINT_RESULT_META: Record<PrintExecuteResult, { label: string; semantic: StatusSemantic }> = {
   SUCCESS: { label: '成功', semantic: 'success' },
   FAILED: { label: '失败', semantic: 'danger' },
 }
 
-/** 任务是否在途（进入终态后可预览/下载 PDF） */
+/** 任务是否在途（终态后才可执行确认） */
 export function isPrintTaskFinished(status?: string | null): boolean {
   return status === 'SUCCESS' || status === 'FAILED'
 }
 
-/** 任务列表筛选；id 供预览页按任务 ID 精确取单条（后端冻结后可回对为详情端点） */
+/** 任务列表筛选 */
 export interface PrintTaskQuery extends PageQuery {
   objectType?: string
   status?: string
-  id?: string
 }
 
-/** 任务内容行（后端按模板绑定字段装配的真实业务数据快照；预览页据此渲染，前端不造数据） */
+/** 任务内容行（RowView，service.go:160-166：主码内容 + 字段绑定取值 + 单据明细行） */
 export interface PrintContentRow {
-  /** 行业务 ID */
+  /** 行序 */
+  seq: number
+  /** 行身份 ID（以主码内容承载，print_task_rows 无业务 ID 列） */
   id: string
   /** 主码内容：SKU 条码 / 库位编码 / 箱码 / 托盘码 / 单据号 */
   code: string
@@ -288,36 +309,43 @@ export interface PrintContentRow {
   lines?: Array<Record<string, string>>
 }
 
+/** 打印任务（TaskView，service.go:181-200 字段全量；template/rows 仅详情携带） */
 export interface PrintTaskItem {
   id: string
-  objectType: PrintObjectType
-  templateId: PrintId
-  templateName?: string
-  /** 模板快照（列表 omitempty，仅预览/详情场景返回） */
-  template?: PrintTemplateSnapshot
+  /** 任务单号（PT- 前缀，docnum 冻结规则，models.go:118） */
+  print_no: string
+  object_type: PrintObjectType
+  template_id: string
+  /** 快照派生（任务创建时冻结） */
+  template_name?: string
   paper: string
-  status: PrintTaskStatus
+  copies: number
   /** 内容行数（数据量，printing.md §1.2） */
-  totalCount: number
-  copies?: number
-  /** 内容行（列表 omitempty，仅预览/详情场景返回） */
+  total_count: number
+  status: PrintTaskStatus
+  /** 执行确认结果（未确认时省略） */
+  result?: PrintExecuteResult
+  printed_by?: string
+  printed_at?: string
+  error_message?: string
+  created_by: string
+  created_at: string
+  /** 模板快照（仅详情返回） */
+  template?: PrintTemplateSnapshot
+  /** 内容行（仅详情返回） */
   rows?: PrintContentRow[]
-  /** 产物下载地址（后端下发时优先于契约端点 /api/prints/:id/pdf） */
-  pdfUrl?: string
-  createdBy?: string
-  createdAt?: string
-  finishedAt?: string
-  errorMessage?: string
 }
 
-/** 创建打印任务入参：templateId 为 *int64 提交 number；dataIds 为打印对象业务 ID（每条生成一行内容） */
+/** 创建打印任务入参（TaskCreateInput，service_task.go:27-31；dataIds 为打印对象业务 ID，
+ * 每条生成一行内容） */
 export interface PrintTaskCreatePayload {
-  templateId: number
-  dataIds: string[]
+  template_id: number
+  data_ids: string[]
   copies?: number
 }
 
-// ---------- 打印历史（printing.md §1.2：打印人/打印时间/模板/数据量/打印结果；后端落库，前端只读） ----------
+// ---------- 打印历史（printing.md §1.2：打印人/打印时间/模板/数据量/打印结果；
+// = print_tasks 已确认子集，HistoryItem，service.go:238-250） ----------
 
 export interface PrintHistoryQuery extends PageQuery {
   objectType?: string
@@ -327,48 +355,61 @@ export interface PrintHistoryQuery extends PageQuery {
 
 export interface PrintHistoryItem {
   id: string
-  taskId?: string
-  objectType: PrintObjectType
-  templateId?: PrintId
-  templateName?: string
-  printedBy?: string
-  printedAt?: string
-  totalCount?: number
-  result: 'SUCCESS' | 'FAILED'
-  errorMessage?: string
+  print_no: string
+  object_type: PrintObjectType
+  template_id?: string
+  template_name?: string
+  printed_by: string
+  printed_at: string
+  total_count: number
+  result: PrintExecuteResult
+  error_message?: string
 }
 
 // ---------- API ----------
 
-/** 模板/任务下拉一次取全的页大小（量级有限；失败时调用方降级为空，不阻塞表单） */
-export const PRINT_OPTIONS_PAGE_SIZE = 200
+/** 模板/任务下拉一次取全的页大小（上限对齐后端 MaxPageSize=100，response.go:47；失败时调用方降级为空，不阻塞表单） */
+export const PRINT_OPTIONS_PAGE_SIZE = 100
+
+/** 条码/二维码 PNG 请求（GET /api/prints/barcode，handler.go:366-392：
+ * text 必填、symbology 缺省 CODE128、width/height 可选整型；返回 PNG Blob） */
+export function fetchBarcodePng(params: {
+  text: string
+  symbology?: BarcodeSymbology
+  width?: number
+  height?: number
+}): Promise<Blob> {
+  return http.get<Blob>('/api/prints/barcode', {
+    params,
+    responseType: 'blob',
+    timeout: 30_000,
+  })
+}
 
 export const printingApi = {
   templates: {
     list: (query: PrintTemplateQuery) =>
       http.get<PageResult<PrintTemplateItem>>('/api/prints/templates', { params: query }),
+    detail: (id: PrintId) => http.get<PrintTemplateItem>(`/api/prints/templates/${id}`),
     create: (payload: PrintTemplateSavePayload) => http.post<PrintTemplateItem>('/api/prints/templates', payload),
     update: (id: PrintId, payload: PrintTemplateSavePayload) =>
-      http.put<unknown>(`/api/prints/templates/${id}`, payload),
-    /** POST /api/prints/templates/:id/copy：后端生成副本（名称追加副本标识），前端刷新列表 */
+      http.put<PrintTemplateItem>(`/api/prints/templates/${id}`, payload),
+    /** POST /api/prints/templates/{id}/copy：后端生成副本（printing:template:create），前端刷新列表 */
     copy: (id: PrintId) => http.post<PrintTemplateItem>(`/api/prints/templates/${id}/copy`),
-    /** PUT /api/prints/templates/:id/status：启用/停用（printing.md §2，停用即不可再被任务选用） */
+    /** PUT /api/prints/templates/{id}/status：启用/停用（printing.md §2，停用即不可再被任务选用），返回更新后模板 */
     setStatus: (id: PrintId, payload: { status: PrintTemplateStatus }) =>
-      http.put<{ status: PrintTemplateStatus }>(`/api/prints/templates/${id}/status`, payload),
+      http.put<PrintTemplateItem>(`/api/prints/templates/${id}/status`, payload),
   },
   tasks: {
     list: (query: PrintTaskQuery) => http.get<PageResult<PrintTaskItem>>('/api/prints/tasks', { params: query }),
+    /** 任务详情（GET /api/prints/tasks/{id}，携带模板快照与渲染数据包，预览页据此渲染） */
+    detail: (id: string) => http.get<PrintTaskItem>(`/api/prints/tasks/${id}`),
     create: (payload: PrintTaskCreatePayload) => http.post<PrintTaskItem>('/api/prints/tasks', payload),
+    /** 执行确认（POST /api/prints/tasks/{id}/execute，{result, message?}，结果回填一次） */
+    execute: (id: string, payload: PrintTaskExecutePayload) =>
+      http.post<PrintTaskItem>(`/api/prints/tasks/${id}/execute`, payload),
   },
   history: {
     list: (query: PrintHistoryQuery) => http.get<PageResult<PrintHistoryItem>>('/api/prints/history', { params: query }),
   },
-}
-
-/**
- * 任务 PDF 下载：优先任务上后端下发的 pdfUrl（文件中心地址），缺省回落契约端点
- * GET /api/prints/:id/pdf；统一走认证 Blob 下载，失败呈可读错误态，前端绝不生成假 PDF。
- */
-export async function downloadPrintPdf(task: Pick<PrintTaskItem, 'id' | 'pdfUrl'>): Promise<void> {
-  await downloadFile(task.pdfUrl ?? `/api/prints/${task.id}/pdf`, `打印任务_${task.id}.pdf`)
 }

@@ -1,78 +1,114 @@
-import { useState } from 'react'
-import { Card, Typography } from 'antd'
+import { useMemo, useState } from 'react'
+import { Card } from 'antd'
+import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
   purchaseApi,
-  type PurchaseReturnItem,
+  type PurchaseReturnOrder,
   type PurchaseReturnQuery,
   type PurchaseReturnStatus,
 } from '@/api/purchase'
+import { toStatusKey } from '@/api/masterdata'
+import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import type { StatusSemantic } from '@/types/status'
+import { formatDateTime } from '@/utils/format'
 
-const { Text } = Typography
+/**
+ * 采购退货单状态 → SfStatusTag（internal/returns/models.go:27-36 八态，经
+ * api/purchase.ts PurchaseReturnStatus 回对）。types/status.ts 注册表已收录
+ * draft/pending_approval/approved/receiving/shipped/completed/cancelled（文案/语义
+ * 一致，SfStatusTag 以注册表优先）；IN_QC 为退货语境专有键未注册，经 SfStatusTag
+ * 的 label/semantic 兜底；后端返回未知值时中性灰 + 原始文案，不崩溃。
+ */
+const RETURN_STATUS_TAG: Record<PurchaseReturnStatus, { label: string; semantic: StatusSemantic }> = {
+  DRAFT: { label: '草稿', semantic: 'neutral' },
+  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
+  APPROVED: { label: '已审核', semantic: 'success' },
+  RECEIVING: { label: '收货中', semantic: 'processing' },
+  IN_QC: { label: '质检中', semantic: 'processing' },
+  SHIPPED: { label: '已发货', semantic: 'processing' },
+  COMPLETED: { label: '已完成', semantic: 'success' },
+  CANCELLED: { label: '已取消', semantic: 'neutral' },
+}
 
-/** 状态选项与 business-flow.md §9.2 采购退货流程（退货申请 → 审核 → 退货出库 → 供应商）一致 */
-const STATUS_OPTIONS: Array<{ label: string; value: PurchaseReturnStatus }> = [
-  { label: '草稿', value: 'draft' },
-  { label: '待审核', value: 'pending_review' },
-  { label: '已审核', value: 'approved' },
-  { label: '处理中', value: 'processing' },
-  { label: '已完成', value: 'completed' },
-  { label: '已取消', value: 'cancelled' },
-]
+const STATUS_OPTIONS = Object.entries(RETURN_STATUS_TAG).map(([value, tag]) => ({
+  label: tag.label,
+  value,
+}))
 
-const COLUMNS: ColumnsType<PurchaseReturnItem> = [
-  { title: '退货单号', dataIndex: 'returnNo', width: 170, fixed: 'left' },
-  { title: '采购单号', dataIndex: 'poNo', width: 170, render: (v?: string) => v ?? '-' },
-  {
-    title: '供应商',
-    dataIndex: 'supplierName',
-    width: 180,
-    ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
-  },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100 },
-  {
-    title: '退货数量',
-    dataIndex: 'totalQty',
-    width: 100,
-    align: 'right',
-    render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '已退货',
-    dataIndex: 'returnedQty',
-    width: 100,
-    align: 'right',
-    render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
-  },
-  {
-    title: '状态',
-    dataIndex: 'status',
-    width: 100,
-    render: (v: string) => <SfStatusTag status={v} />,
-  },
-  {
-    title: '创建时间',
-    dataIndex: 'createdAt',
-    width: 170,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
-  },
-]
+function renderStatus(status: PurchaseReturnStatus) {
+  const tag = RETURN_STATUS_TAG[status]
+  return <SfStatusTag status={toStatusKey(status)} label={tag?.label} semantic={tag?.semantic} />
+}
 
-/** 采购退货列表（/purchases/returns；GET /api/purchases/returns 前端先行骨架，后端未交付呈统一错误态） */
+/** 采购退货列表（/purchases/returns；GET /api/purchase-returns，退货域承载
+ * internal/returns/handler.go:315-334——列表出参为 ReturnOrderView snake_case
+ * （service_sales.go:124-136），type 后端固定 PURCHASE。warehouse_id 为裸 ID，
+ * 经仓库 options 本地映射补充，映射失败降级为 ID，不造假数据） */
 export default function PurchaseReturnListPage() {
   const [params, setParams] = useState<PurchaseReturnQuery>({})
-  const list = usePagedList<PurchaseReturnItem, PurchaseReturnQuery>({
+
+  // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const warehouseNames = useMemo(
+    () => buildWarehouseMaps(warehouseOptionsQuery.data ?? []).name,
+    [warehouseOptionsQuery.data],
+  )
+
+  const list = usePagedList<PurchaseReturnOrder, PurchaseReturnQuery>({
     queryKey: ['purchase', 'returns'],
     fetch: (q) => purchaseApi.returns.list(q),
     params,
   })
+
+  const columns: ColumnsType<PurchaseReturnOrder> = [
+    { title: '退货单号', dataIndex: 'return_no', width: 180, fixed: 'left' },
+    { title: '来源单号', dataIndex: 'source_no', width: 180, render: (v: string) => v || '-' },
+    {
+      title: '仓库',
+      dataIndex: 'warehouse_id',
+      width: 130,
+      ellipsis: true,
+      render: (_: unknown, record: PurchaseReturnOrder) =>
+        warehouseNames.get(String(record.warehouse_id)) ?? `仓库 #${record.warehouse_id}`,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (v: PurchaseReturnStatus) => renderStatus(v),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  // 搜索参数对齐 internal/returns/handler.go:315-334：status/source_no/warehouse_id
+  // （type 由后端固定 PURCHASE，前端不传）
+  const searchFields: SearchField[] = [
+    { name: 'source_no', label: '来源单号', control: 'input', placeholder: '来源采购单号' },
+    { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
+    {
+      name: 'warehouse_id',
+      label: '仓库',
+      control: 'select',
+      options: (warehouseOptionsQuery.data ?? []).map((w) => ({
+        label: `${w.name}（${w.code}）`,
+        value: String(w.id),
+      })),
+    },
+  ]
 
   const handleSearch = (values: Record<string, unknown>) => {
     setParams(values as PurchaseReturnQuery)
@@ -86,18 +122,11 @@ export default function PurchaseReturnListPage() {
         subtitle="退货申请 → 审核 → 退货出库 → 供应商"
       />
       <Card size="small">
-        <SfSearchForm
-          fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '退货单号 / 采购单号 / 供应商' },
-            { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
-          ]}
-          onSearch={handleSearch}
-        />
-        <SfTable<PurchaseReturnItem>
+        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfTable<PurchaseReturnOrder>
           storageKey="purchase-returns"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -107,7 +136,7 @@ export default function PurchaseReturnListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购退货单"
-          scrollX={1090}
+          scrollX={760}
         />
       </Card>
     </div>

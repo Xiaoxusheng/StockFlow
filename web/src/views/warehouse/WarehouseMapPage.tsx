@@ -227,7 +227,7 @@ export default function WarehouseMapPage() {
 
   const warehousesQuery = useQuery({
     queryKey: ['warehouse', 'warehouses', 'map-options'],
-    queryFn: () => warehouseApi.list({ page: 1, pageSize: 200 }),
+    queryFn: () => warehouseApi.list({ page: 1, pageSize: 100 }),
   })
   const warehouseOptions = (warehousesQuery.data?.items ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,

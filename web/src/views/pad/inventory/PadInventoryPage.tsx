@@ -34,15 +34,15 @@ const CHANGE_TYPE_LABEL: Record<InventoryChangeType, string> = {
   ADJUST: '调整',
 }
 
-/** 汇总条七计数（api/inventory.ts StockSummary 前端先行契约；失败呈「-」不拖垮整页） */
+/** 汇总条七计数（api/inventory.ts StockSummary，对齐 GET /api/inventory/summary 的 snake_case DashboardSummary；失败呈「-」不拖垮整页） */
 const SUMMARY_CELLS: Array<{ label: string; key: keyof StockSummary; danger?: boolean }> = [
-  { label: 'SKU 数', key: 'skuCount' },
-  { label: '库存总量', key: 'totalQty' },
-  { label: '可用', key: 'availableQty' },
-  { label: '锁定', key: 'lockedQty' },
-  { label: '冻结', key: 'frozenQty' },
-  { label: '临期', key: 'nearExpiryQty', danger: true },
-  { label: '异常', key: 'abnormalQty', danger: true },
+  { label: 'SKU 数', key: 'sku_count' },
+  { label: '库存总量', key: 'total_qty' },
+  { label: '可用', key: 'available_qty' },
+  { label: '锁定', key: 'locked_qty' },
+  { label: '冻结', key: 'frozen_qty' },
+  { label: '临期', key: 'near_expiry_qty', danger: true },
+  { label: '异常', key: 'abnormal_qty', danger: true },
 ]
 
 interface StockLabels {
@@ -66,7 +66,7 @@ export default function PadInventoryPage() {
   const [selected, setSelected] = useState<StockItem | null>(null)
   const [skuIdFilter, setSkuIdFilter] = useState<InventoryId | undefined>(undefined)
 
-  // 汇总条（前端先行契约）：失败呈「-」，不阻塞列表
+  // 汇总条（GET /api/inventory/summary snake_case）：失败呈「-」，不阻塞列表
   const summary = useQuery({
     queryKey: ['pad', 'inventory', 'summary'],
     queryFn: inventoryApi.stockSummary,
@@ -159,7 +159,7 @@ export default function PadInventoryPage() {
       </div>
       {summary.error && (
         <p className="sf-pad-muted-note">
-          库存汇总接口暂不可用（前端先行契约），数值以「-」占位，不影响库存列表
+          库存汇总接口暂不可用，数值以「-」占位，不影响库存列表
         </p>
       )}
     </section>

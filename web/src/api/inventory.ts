@@ -43,15 +43,22 @@ export interface StockItem {
   updated_at: string
 }
 
-/** 库存统计（frontend.md §10.2 第一行） */
+/**
+ * 库存统计（GET /api/inventory/summary，reports 实现、inventory 前缀挂载：
+ * internal/reports/routes.go:47 + DashboardSummary，repository.go:364-378 snake_case 输出；
+ * 权限点 reports:report:read）。abnormal_qty = 冻结 + 残次（待检属正常流转态不计入）；
+ * near_expiry_qty 含已过期批次。数值为 float8 聚合。
+ */
 export interface StockSummary {
-  skuCount: number
-  totalQty: number
-  availableQty: number
-  lockedQty: number
-  frozenQty: number
-  nearExpiryQty: number
-  abnormalQty: number
+  sku_count: number
+  total_qty: number
+  available_qty: number
+  locked_qty: number
+  frozen_qty: number
+  /** 临期/已过期库存量（效期 ≤ 阈值天数的批次现存量，含已过期） */
+  near_expiry_qty: number
+  /** 异常库存量 = 冻结 + 残次（待检属正常流转态，不计入异常） */
+  abnormal_qty: number
 }
 
 // ---------- 库存流水（GET /api/inventory-ledgers，后端 T5 已交付） ----------
@@ -99,8 +106,10 @@ export interface LedgerItem {
   created_at: string
 }
 
-// ---------- 库存预警（/api/inventory/alerts） ----------
+// ---------- 库存预警（GET /api/inventory/alerts，reports 实现、inventory 前缀挂载：
+// internal/reports/routes.go:48 + AlertItem，repository.go:407-421 snake_case 输出） ----------
 
+/** 预警级别（handler.go:197-202 白名单校验值域） */
 export type StockAlertLevel = 'low_stock' | 'overstock' | 'near_expiry' | 'expired' | 'slow_moving'
 
 export interface StockAlertQuery extends PageQuery {
@@ -108,20 +117,30 @@ export interface StockAlertQuery extends PageQuery {
   keyword?: string
 }
 
+/** 库存预警行（AlertItem，repository.go:407-421 字段全量；无 id/时间字段——
+ * 效期类携带 batch_no，slow_moving 携带 last_moved_at，message 由后端模板组装） */
 export interface StockAlertItem {
-  id: number | string
   level: StockAlertLevel
-  skuCode: string
-  productName: string
-  warehouseName: string
-  binCode?: string
-  currentQty: number
-  threshold?: number
+  warehouse_id: number
+  warehouse_code: string
+  warehouse_name: string
+  sku_id: number
+  sku_code: string
+  sku_name: string
+  current_qty: number
+  threshold: number
+  /** 批次号（效期类预警携带；其余为空） */
+  batch_no?: string
+  /** 末次移动时间（slow_moving 携带；其余为空） */
+  last_moved_at?: string
+  /** 预警说明（携计算依据） */
   message: string
-  createdAt: string
 }
 
-// ---------- 库存锁定（/api/inventory/locks；契约未冻结，值域对齐 db/migrations/000005 inventory_locks + inventory-rules.md §4） ----------
+// ---------- 库存锁定（GET /api/inventory/locks，后端已交付：internal/inventory/handler.go:479-516；
+// 出参为 LockView snake_case（handler.go:421-438），仅裸 ID 无联表编码/操作人字段——
+// 页面经 api/options.ts 一次取全基础资料后本地映射补充；qty 为 stock.Qty 裸数字出参
+//（numeric(18,4)，internal/stock/qty.go:72-74 MarshalJSON 直出小数字面量） ----------
 
 export type InventoryLockStatus = 'ACTIVE' | 'RELEASED' | 'CONSUMED'
 
@@ -132,37 +151,41 @@ export type InventoryLockType =
   | 'MANUAL_FREEZE'
   | 'EXCEPTION_FREEZE'
 
+/** 锁定记录筛选（handler.go:479-516 读参：warehouse_id/sku_id/lock_type/status/source_type/source_no） */
 export interface InventoryLockQuery extends PageQuery {
-  keyword?: string
-  /** 按 SKU 过滤（库存详情页「库存锁定」页签复用本端点，frontend.md §10.3） */
-  skuCode?: string
-  warehouseCode?: string
-  lockType?: InventoryLockType
+  warehouse_id?: InventoryId
+  sku_id?: InventoryId
+  lock_type?: InventoryLockType
   status?: InventoryLockStatus
+  /** 来源单据类型（与 source_no 配对，inventory-rules.md §4 规则 1） */
+  source_type?: string
+  source_no?: string
 }
 
+/** 锁定记录（LockView，handler.go:421-438 字段全量；released_at 零值为 null） */
 export interface InventoryLockItem {
-  id: number | string
-  skuCode: string
-  productName: string
-  warehouseCode?: string
-  warehouseName: string
-  binCode?: string
-  batchNo?: string
-  lockType: InventoryLockType
-  /** 来源单据类型（与 sourceNo 配对，inventory-rules.md §4 规则 1） */
-  sourceType: string
-  sourceNo: string
+  id: InventoryId
+  warehouse_id: InventoryId
+  bin_id: InventoryId
+  sku_id: InventoryId
+  /** 0 = 非批次 */
+  batch_id: InventoryId
+  lock_type: InventoryLockType
+  source_type: string
+  source_no: string
   qty: number
   status: InventoryLockStatus
-  remark?: string
-  createdByName?: string
-  createdAt: string
-  releasedByName?: string
-  releasedAt?: string
+  released_at: string | null
+  released_by: InventoryId
+  remark: string
+  created_at: string
+  updated_at: string
 }
 
-// ---------- 库存调整（/api/inventory/adjustments；契约未冻结，值域对齐 db/migrations/000005 inventory_adjustments + business-flow.md §11.1） ----------
+// ---------- 库存调整（GET /api/inventory/adjustments，后端已交付：internal/inventory/handler.go:524-556；
+// 出参为 AdjustmentView snake_case（handler.go:451-466），仅裸 ID 无联表编码/申请人字段；
+// 后端无 approved_at——执行信息仅 executed_at/executed_by（handler.go:451-466 字段全量）；
+// qty 为 stock.Qty 裸数字出参（numeric(18,4)，internal/stock/qty.go:72-74） ----------
 
 export type InventoryAdjustmentStatus =
   | 'DRAFT'
@@ -172,34 +195,35 @@ export type InventoryAdjustmentStatus =
   | 'EXECUTED'
   | 'CANCELLED'
 
-/** 调整类型（business-flow.md §11.1 中文值域，与 DB CHECK 约束一致） */
+/** 调整类型（business-flow.md §11.1 中文值域，handler.go:540 allowed 清单同源） */
 export type InventoryAdjustmentType = '盘盈' | '盘亏' | '损耗' | '报废' | '其他'
 
+/** 调整单筛选（handler.go:524-556 读参：warehouse_id/sku_id/adjust_type/status） */
 export interface InventoryAdjustmentQuery extends PageQuery {
-  keyword?: string
-  warehouseCode?: string
-  adjustType?: InventoryAdjustmentType
+  warehouse_id?: InventoryId
+  sku_id?: InventoryId
+  adjust_type?: InventoryAdjustmentType
   status?: InventoryAdjustmentStatus
 }
 
+/** 调整单（AdjustmentView，handler.go:451-466 字段全量；executed_at 零值为 null） */
 export interface InventoryAdjustmentItem {
-  id: number | string
-  adjustmentNo: string
-  skuCode: string
-  productName: string
-  warehouseCode?: string
-  warehouseName: string
-  binCode?: string
-  batchNo?: string
-  adjustType: InventoryAdjustmentType
+  id: InventoryId
+  adjustment_no: string
+  warehouse_id: InventoryId
+  sku_id: InventoryId
+  bin_id: InventoryId
+  /** 0 = 非批次 */
+  batch_id: InventoryId
+  adjust_type: InventoryAdjustmentType
   qty: number
   /** 申请必填原因（business-flow.md §11.1） */
   reason: string
   status: InventoryAdjustmentStatus
-  createdByName?: string
-  createdAt: string
-  approvedAt?: string
-  executedAt?: string
+  executed_by: InventoryId
+  executed_at: string | null
+  created_at: string
+  updated_at: string
 }
 
 // ---------- 批次台账（GET /api/batches，后端 T5 已交付：inventory.go:55；
@@ -268,48 +292,10 @@ export interface SerialItem {
   updated_at: string
 }
 
-// ---------- 库存转移（/api/inventory/transfers；前端先行骨架：调拨单 M1 未建表，
-// 维度与状态机对齐 business-flow.md §10.1（仓库→仓库 / 库位→库位），后端冻结时再对齐字段） ----------
-
-/** 调拨维度（business-flow.md §10.1；枚举前端先行，后端冻结前仅用于筛选传参） */
-export type InventoryTransferType = 'warehouse' | 'bin'
-
-/** 调拨单状态机（business-flow.md §10.1；枚举前端先行） */
-export type InventoryTransferStatus =
-  | 'draft'
-  | 'pending_review'
-  | 'pending_outbound'
-  | 'transferring'
-  | 'pending_inbound'
-  | 'completed'
-  | 'cancelled'
-
-export interface InventoryTransferQuery extends PageQuery {
-  keyword?: string
-  transferType?: InventoryTransferType
-  status?: InventoryTransferStatus
-}
-
-export interface InventoryTransferItem {
-  id: number | string
-  /** 调拨单号（business-flow.md §13：TR-日期-流水） */
-  transferNo: string
-  transferType: InventoryTransferType
-  sourceWarehouseName: string
-  targetWarehouseName: string
-  sourceBinCode?: string
-  targetBinCode?: string
-  skuCode: string
-  productName: string
-  qty: number
-  status: InventoryTransferStatus
-  createdByName?: string
-  createdAt: string
-  completedAt?: string
-}
-
-// ---------- 库存追溯（/api/inventory/trace；前端先行骨架：追溯数据源为 inventory_ledgers
-// （append-only，db/migrations/000005），字段对齐其列；查询支持 SKU / 序列号 / 批次号 / 单据号） ----------
+// ---------- 库存追溯（GET /api/inventory/trace，后端已交付：returns 域实现、inventory 前缀挂载，
+// internal/returns/handler.go:669-696 + service_trace.go 查询编排。查询主键为 sku_id /
+// serial_no（至少其一），响应为单个非分页 TraceResult 对象（response.OK，无 items/total）；
+// 各 qty 字段为 stock.Qty 字符串化 numeric(18,4) 出参，internal/stock/qty.go:72-74） ----------
 
 /** 库存变更类型（inventory_ledgers CHECK 约束） */
 export type InventoryChangeType =
@@ -324,33 +310,116 @@ export type InventoryChangeType =
   | 'INSPECT_DEFECTIVE'
   | 'ADJUST'
 
-export interface TraceQuery extends PageQuery {
-  skuCode?: string
-  serialNo?: string
-  batchNo?: string
-  bizNo?: string
+/** 追溯查询入参（handler.go:675-696 读参：serial_no/sku_id/warehouse_id/limit） */
+export interface TraceQuery {
+  /** SKU ID（与 serial_no 至少其一，service_trace.go:92-94） */
+  sku_id?: InventoryId
+  /** 序列号（与 sku_id 至少其一；命中后自动定位 SKU，service_trace.go:134-147） */
+  serial_no?: string
+  /** 仓库 ID（0/缺省 = 数据权限内全部；多仓范围必须显式指定，service_trace.go:113-131） */
+  warehouse_id?: InventoryId
+  /** 追溯链上限（1-500，缺省 100，service_trace.go:87-90） */
+  limit?: number
 }
 
-export interface TraceItem {
-  id: number | string
-  /** 事件时间（inventory_ledgers.created_at；append-only 无 updated_at） */
-  occurredAt: string
-  changeType: InventoryChangeType
-  bizType: string
-  bizNo: string
-  skuCode: string
-  productName: string
-  warehouseName: string
-  binCode?: string
-  batchNo?: string
-  serialNo?: string
-  /** 状态三态口径（backend-m1-plan.md §8.4：受影响状态列 status_from → status_to） */
-  statusFrom?: string
-  statusTo?: string
-  qtyChange: number
-  qtyAfter: number
-  operatorName: string
+/** 追溯链流水（TraceLedger，internal/returns/ports.go:97-118；append-only 主轴，时间正序） */
+export interface TraceLedgerItem {
+  id: InventoryId
+  ledger_no: string
+  sku_id: InventoryId
+  warehouse_id: InventoryId
+  bin_id: InventoryId
+  batch_id: InventoryId
+  serial_no?: string
+  change_type: InventoryChangeType
+  business_type: string
+  business_no: string
+  status_from: string
+  status_to: string
+  qty_before: string
+  qty_change: string
+  qty_after: string
+  operator_name: string
+  request_id?: string
   remark?: string
+  /** YYYY-MM-DD HH:mm:ss（ports.go:117 CreatedAtStr） */
+  created_at: string
+}
+
+/** 追溯当前库存行（TraceStockRow，ports.go:129-144；六状态数量为字符串化 numeric(18,4)） */
+export interface TraceStockRow {
+  warehouse_id: InventoryId
+  zone_id: InventoryId
+  shelf_id: InventoryId
+  bin_id: InventoryId
+  sku_id: InventoryId
+  batch_id: InventoryId
+  total_qty: string
+  available_qty: string
+  locked_qty: string
+  frozen_qty: string
+  pending_inspect_qty: string
+  defective_qty: string
+  updated_at: string
+}
+
+/** 序列号当前台账（TraceSerialRow，ports.go:148-159；last_source_* 为最近状态变化追溯指针） */
+export interface TraceSerialRow {
+  serial_no: string
+  sku_id: InventoryId
+  batch_id: InventoryId
+  warehouse_id: InventoryId
+  bin_id: InventoryId
+  status: SerialStatus
+  last_source_type: string
+  last_source_no: string
+  last_event_at: string
+}
+
+/** 追溯来源单据行证据（TraceDocLine，service_trace.go:50-54） */
+export interface TraceDocumentLine {
+  line_no: number
+  sku_id: InventoryId
+  qty: string
+}
+
+/** 追溯来源单据富化（TraceDocument，service_trace.go:44-48；found=false 为正常情形，不视为错误） */
+export interface TraceDocumentItem {
+  /** sales_order / purchase_order */
+  type: string
+  no: string
+  found: boolean
+  warehouse_id: InventoryId
+  lines?: TraceDocumentLine[]
+}
+
+/** 追溯关联操作日志（TraceOperation，service_trace.go:57-69；operation_logs 只读投影，
+ * 经流水 request_id 关联） */
+export interface TraceOperationItem {
+  id: InventoryId
+  request_id: string
+  module: string
+  object_type: string
+  object_id: InventoryId
+  action: string
+  operator_id: InventoryId
+  operator_name: string
+  success: boolean
+  created_at: string
+}
+
+/** 追溯编排结果（TraceResult，service_trace.go:72-84；非分页单对象） */
+export interface TraceResult {
+  sku_id: InventoryId
+  serial_no?: string
+  /** 0 = 数据权限内全部仓库 */
+  warehouse_id: InventoryId
+  stock_rows: TraceStockRow[]
+  serial?: TraceSerialRow
+  chain: TraceLedgerItem[]
+  chain_truncated: boolean
+  documents: TraceDocumentItem[]
+  operations: TraceOperationItem[]
 }
 
 // ---------- 库存详情（frontend.md §10.3；后端 T5 已交付 GET /api/inventory/{id}：
@@ -428,10 +497,10 @@ export const inventoryApi = {
     http.get<PageResult<BatchItem>>('/api/batches', { params: query }),
   serials: (query: SerialQuery) =>
     http.get<PageResult<SerialItem>>('/api/serials', { params: query }),
-  transfers: (query: InventoryTransferQuery) =>
-    http.get<PageResult<InventoryTransferItem>>('/api/inventory/transfers', { params: query }),
+  /** 库存追溯（GET /api/inventory/trace，returns 域编排：sku_id/serial_no 至少其一；
+   * 响应为单个 TraceResult 非分页对象，无 items/total） */
   trace: (query: TraceQuery) =>
-    http.get<PageResult<TraceItem>>('/api/inventory/trace', { params: query }),
+    http.get<TraceResult>('/api/inventory/trace', { params: query }),
   /** 库存行详情：GET /api/inventory/{id}（:id 为库存行 int64 id，handler.go:260-275） */
   stockDetail: (id: InventoryId) =>
     http.get<InventoryDetail>(`/api/inventory/${encodeURIComponent(String(id))}`),
