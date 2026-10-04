@@ -14,6 +14,15 @@
 
 ## 文档记录
 
+## [2026-10-04] 修复：部署回归实测修复——000013 CHECK 错置、000015 非法索引、文件中心容器存储权限
+
+- **db/migrations/000013**：`chk_device_logs_level CHECK (level IN ('INFO','WARN','ERROR'))` 误置于 `device_configs` 表（该表无 `level` 列，任何 PostgreSQL 上迁移必然失败——生产首启实测复现 `pq: column "level" does not exist`）；按 internal/devices/models.go 值域注释移回 `device_logs` 建表语句。
+- **db/migrations/000015**：移除 `idx_inventory_ledgers_creator_created (created_by, created_at)`——`inventory_ledgers` 无 `created_by` 列（操作者列为 `operator_id`，000005），且流水列表 `LedgerQuery`（internal/inventory/query.go）无创建人筛选；其余 8 张主单据表 `created_by` 索引核实有效保留。down 同步。
+- **部署物**：Dockerfile 预建 `/app/data` 并 `chown app:app`（M3 文件中心 storage.root 默认 `./data/files`，非 root 容器内 mkdir 失败导致启动 panic）；docker-compose.yml app 服务新增命名卷 `filesdata:/app/data` 持久化文件中心与 sysops 备份物理文件。
+- 本地未暴露的原因：集成测试走 GORM AutoMigrate 建表，不执行 SQL 迁移文件；门禁 `go build/vet/test` 不加载迁移 SQL。两处缺陷均由服务器真库迁移首启暴露。
+- 同步更新：deployment.md §10（filesdata 卷与 bind mount 属主要求）。
+- 影响范围：全新库首启迁移路径修复；已应用 000013/000015 的环境不存在（生产库首启即本次部署）。
+
 ## [2026-10-02] 文档：frontend.md 升级 v1.1（前端完整规范，105 章重组）
 
 - 将"前端完整开发提示词"（105 章）并入 frontend.md 并整体重写为三端前端规范：总体要求与开工检查、全局 Design Token（--sf-*）与 Light/Dark 主题、信息密度基准值、PC Layout 与 Sidebar 菜单树（新增设备中心）、Dashboard 四层结构、表格系统（能力/视觉/密度/工具栏）、详情页与 Timeline、表单分区、状态与反馈（含错误页、作业端轻量 Loading）、库存中心 UI（实时库存/库存详情 Tabs/层级分布/盘点前端与扫码页）、库位地图、Excel 前端、打印前端（预览：缩放/翻页/PDF）、设备管理前端（设备中心/设备详情/二维码激活）、工作台/全局搜索/通知/附件、批量与危险操作、权限 UI、状态分域与缓存与实时同步、五断点响应式与 PWA 边界、Pad UI（横竖屏/拍照/底部操作栏/触摸）、Scan UI（作业页面要点/扫码中心/登录/成功错误视觉）、扫码接入与组件联动、Sf* 组件封装清单、视觉状态与动画规范、工程规范与目录结构、页面交付清单（PC/Pad/Scan）、验收标准、最终禁止清单、实施阶段 F1–F20。
@@ -55,6 +64,13 @@
 ## 模块交付记录
 
 （按 development-plan.md 的 22 个阶段，每阶段完成后在此追加记录）
+
+## [2026-10-04] 构建：阶段 20 CI 关卡（GitHub Actions 与本地门禁同源，补 race 缺口）
+
+- 新增 `.github/workflows/ci.yml`：push 与 pull_request 触发，ubuntu-latest 三个并行 job——**lint**（gofmt -l cmd internal 有输出即失败（Makefile fmt-check 同款）+ go vet ./... + go vet -tags integration ./...）；**test**（go test -count=1 ./... 与 go test -race -count=1 ./...——补齐 2026-10-03 M3 基座起挂账的"本机无 gcc 缺 race 关卡"复验项）；**guards**（make guard-status guard-docnum guard-inventory guard-asynq guard-readonly guard-datax guard-devices，守卫命令单一来源在 Makefile、与清偿轮 F3 接线一致，workflow 不复刻防漂移；guard-status 沿 Makefile 语义仅输出人工复核清单不失败）。
+- Go 版本读 go.mod（setup-go go-version-file）；go mod download 缓存经 setup-go cache: true（go.sum 键控）；permissions 收敛 contents: read；单测零外部依赖（testing.md 约定）故 CI 无需 services。
+- 本机验证：actionlint v1.7.12 通过；js-yaml 解析 + 结构断言全过；gofmt -l cmd internal 空；go vet ./... 与 go vet -tags integration ./... 全过；go test -count=1 ./... 24 包全 ok；六项失败型守卫零命中，guard-status 输出 7 行既有人工复核清单（抽查 internal/datax/service_recover.go:58 WHERE 守卫在下一行，属 Makefile 注释所述跨行情形，报告不失败）。go test -race 本机不可跑（无 gcc、CGO_ENABLED=0），由 ubuntu-latest 承载——**待 push 后首次 Actions 运行验证**。
+- 影响范围：仅新增 .github/workflows/ci.yml 与文档回写（deployment.md §7 升 v1.3、本文件、tasks/current.md）；业务代码零改动。
 
 ## [2026-10-04] 后端：清偿轮（核对员债务清单 F3–F21 逐项处置 + 文档回写，T6 正式收口）
 

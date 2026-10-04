@@ -96,6 +96,10 @@ services:
     ports:
       # 默认只绑回环（配合反代）；临时直连验证改 "0.0.0.0:8080:8080"
       - "${APP_BIND:-127.0.0.1}:8080:8080"
+    volumes:
+      # 文件中心存储根（storage.root 默认 ./data/files = /app/data/files）：
+      # 持久化到命名卷；镜像内 /app/data 已按运行用户 app 属主预建，卷首挂继承属主
+      - filesdata:/app/data
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null 2>&1 || exit 1"]
       interval: 10s
@@ -124,6 +128,8 @@ services:
 volumes:
   pgdata:
   redisdata:
+  # 文件中心本地存储（M3 文件中心 / sysops 备份物理文件）
+  filesdata:
 
 networks:
   stockflow:

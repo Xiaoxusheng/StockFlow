@@ -1,6 +1,8 @@
 # StockFlow 部署与运维规范
 
-> 版本：v1.2 ｜ 关联文档：[database](database.md)、[architecture](architecture.md)、[permission](permission.md)
+> 版本：v1.3 ｜ 关联文档：[database](database.md)、[architecture](architecture.md)、[permission](permission.md)
+>
+> v1.3（2026-10-04 阶段 20 CI 关卡）：§7 补 CI 承载说明——新增 `.github/workflows/ci.yml`（push/pull_request 触发），lint/test/guards 三并行 job 与 §7.1 第 1 项 `make ci` 同源；go test -race 关卡由 ubuntu-latest（自带 gcc）承载。既有章节编号保持不变。
 >
 > v1.2（2026-10-03 Docker Compose 单机部署，changelog 同日条目）：新增 §10 Docker Compose 部署（单机，目标目录 /home/stockflow）——后端多阶段 Dockerfile、postgres + redis + migrate + app 编排（可选 web profile）、一次性 migrate 容器与 §7 发布纪律对齐。
 >
@@ -207,6 +209,8 @@ CPU、内存、磁盘
    6. 观察错误率与关键日志
 ```
 
+CI 由 GitHub Actions 承载（`.github/workflows/ci.yml`，阶段 20）：push 与 pull_request 触发，三个并行 job 与检查单第 1 项 `make ci` 同源——**lint**（gofmt -l cmd internal 有输出即失败 + go vet ./... + go vet -tags integration ./...）、**test**（go test -count=1 ./... + go test -race -count=1 ./...，race 由 ubuntu-latest 自带 gcc 承载）、**guards**（Makefile 七守卫目标，命令单一来源在 Makefile，与 backend-m1-plan §8.6 清偿轮 F3 接线一致）；Go 版本读 go.mod，go mod download 经 setup-go 缓存。
+
 ### 7.1 发布检查单
 
 生产发布逐项勾验（2026-10-03 新增）：
@@ -272,6 +276,8 @@ server {
 ## 10. Docker Compose 部署（单机，目标目录 /home/stockflow）
 
 仓库根自带完整部署物：`Dockerfile`（后端多阶段构建）、`docker-compose.yml`（postgres + redis + migrate + app，可选 `web` profile）、`.env.example`、`web/Dockerfile` + `web/nginx.conf`（前端静态托管 + /api 反代）。迁移由一次性 `migrate` 容器（migrate/migrate v4.20.1，与 Makefile 固定版本一致）显式执行，应用默认 `SF_DATABASE_AUTO_MIGRATE=false`，符合 §7 发布纪律。
+
+文件中心存储根（`storage.root` 默认 `./data/files`，容器内即 `/app/data/files`）：镜像内 `/app/data` 已按运行用户 `app` 属主预建，compose 以命名卷 `filesdata:/app/data` 持久化（含 sysops 备份物理文件）。如改用宿主机 bind mount，需先 `chown` 为镜像内 `app` 用户（alpine `adduser -S app`，UID 100/GID 101）再启动。
 
 ### 10.1 前置条件
 

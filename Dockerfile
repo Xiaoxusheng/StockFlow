@@ -20,6 +20,9 @@ WORKDIR /app
 COPY --from=build /out/stockflow-server /app/stockflow-server
 # 运行期兜底迁移用（SF_DATABASE_AUTO_MIGRATE=true 时按 file://db/migrations 相对路径读取）
 COPY --from=build /src/db/migrations /app/db/migrations
+# 文件中心存储根（storage.root 默认 ./data/files = /app/data/files）：预建目录并交给
+# 运行用户 app，否则非 root 容器内 mkdir /app/data 报 permission denied（M3 文件中心启动即 panic）
+RUN mkdir -p /app/data && chown -R app:app /app/data
 USER app
 EXPOSE 8080
 ENTRYPOINT ["/app/stockflow-server"]
