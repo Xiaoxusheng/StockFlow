@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Card, Typography } from 'antd'
+import { Button, Card, message, Typography } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   INSPECTION_METHOD_LABEL,
+  QUALITY_CREATE_PERMISSION,
   QUALITY_RESULT_TAG_META,
   qualityApi,
   type InspectionMethod,
@@ -15,13 +17,17 @@ import {
   type QualitySourceType,
 } from '@/api/quality'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
+import { SfToolbar } from '@/components/table/SfToolbar'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime, formatNumber } from '@/utils/format'
+import QualityCreateModal from './QualityCreateModal'
 
 const { Text } = Typography
 
@@ -56,7 +62,9 @@ const STATUS_OPTIONS = (
 
 function StatusTag({ value }: { value: QualityOrderStatus }) {
   const meta = QC_STATUS_TAG_META[value]
-  return <SfStatusTag status={value} label={meta?.label} semantic={meta?.semantic} />
+  // 显式 label + semantic、不传 status：SfStatusTag 文案优先级 meta?.label ?? label ?? status，
+  // status 一旦被注册表收录，label 会被注册表文案覆盖（盘点「待盘」被「待处理」覆盖同款教训）
+  return <SfStatusTag label={meta?.label ?? value} semantic={meta?.semantic ?? 'neutral'} />
 }
 
 /**
@@ -66,7 +74,8 @@ function StatusTag({ value }: { value: QualityOrderStatus }) {
  */
 function ResultTag({ value }: { value: string }) {
   const meta = QUALITY_RESULT_TAG_META[value as QualityResult]
-  return <SfStatusTag status={value} label={meta?.label} semantic={meta?.semantic} />
+  // 中文九值域不命中注册表，仍走显式 label + semantic（不传 status，同 StatusTag 口径）
+  return <SfStatusTag label={meta?.label ?? value} semantic={meta?.semantic ?? 'neutral'} />
 }
 
 function renderQty(value: number): ReactNode {
@@ -86,15 +95,27 @@ function warehouseNameOf(names: Map<string, string>, id: QualityInspectionItem['
  * 故本页不放 SKU/批次列；检验/合格/不合格数量为单头汇总（qty_inspected/qty_qualified/
  * qty_defective，§4.2 质检记录字段）。搜索参数 keyword/status/source_type/source_no/
  * warehouse_id（handleQCList 实测：keyword 对 qc_no/source_no 模糊，source_no 精确）。
- * NonconformingListPage/QualityTracePage 后端无对应端点，保持各自现状（错误态），不在本页范围。
+ * 工具栏提供「手动建单」（POST /api/quality 已注册，purchase.go:65；入库质检补录场景，
+ * 按钮经 canAccess(purchase:quality:create) 把关）。
+ * NonconformingListPage/QualityTracePage 端点未立项，保持各自现状（错误态），不在本页范围。
  */
 export default function QualityInspectionListPage() {
   const [params, setParams] = useState<QualityInspectionQuery>({})
+  const [createOpen, setCreateOpen] = useState(false)
+  const user = useAuthStore((s) => s.user)
+  const queryClient = useQueryClient()
+  const [messageApi, contextHolder] = message.useMessage()
+  const canCreate = canAccess(user, QUALITY_CREATE_PERMISSION)
   const list = usePagedList<QualityInspectionItem, QualityInspectionQuery>({
     queryKey: ['quality', 'orders'],
     fetch: (q) => qualityApi.inspections(q),
     params,
   })
+
+  const handleCreated = (order: QualityInspectionItem) => {
+    void queryClient.invalidateQueries({ queryKey: ['quality', 'orders'] })
+    messageApi.success(`已创建质检单 ${order.qc_no}，列表已刷新`)
+  }
 
   // 仓库 id → 名称映射（单头只下发 warehouse_id，api/options.ts 一次取全后本地映射）
   const warehousesQuery = useQuery({
@@ -184,11 +205,19 @@ export default function QualityInspectionListPage() {
 
   return (
     <div className="sf-page">
+      {contextHolder}
       <SfPageHeader
         title="质检"
         subtitle="质检单：免检 / 抽检 / 全检，处理结果九值（business-flow.md §4）"
       />
       <Card size="small">
+        {canCreate && (
+          <SfToolbar>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              手动建单
+            </Button>
+          </SfToolbar>
+        )}
         <SfSearchForm
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '质检单号 / 来源单号' },
@@ -215,6 +244,11 @@ export default function QualityInspectionListPage() {
           scrollX={1740}
         />
       </Card>
+      <QualityCreateModal
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={handleCreated}
+      />
     </div>
   )
 }

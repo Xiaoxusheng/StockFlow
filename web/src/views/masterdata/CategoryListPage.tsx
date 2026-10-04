@@ -18,7 +18,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import {
-  OPTIONS_PAGE_SIZE,
   masterdataApi,
   toStatusKey,
   type CategoryItem,
@@ -26,6 +25,7 @@ import {
   type CategorySavePayload,
   type EnabledStatus,
 } from '@/api/masterdata'
+import { fetchCategoryOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -83,18 +83,19 @@ export default function CategoryListPage() {
     params,
   })
 
-  // 上级分类下拉：一次取全，编辑时排除自身；接口失败时降级为空数组，不阻塞其余字段填写
+  // 上级分类下拉：分页取全（fetchCategoryOptions，超一页不截断），编辑时排除自身；
+  // 接口失败时降级为空数组，不阻塞其余字段填写
   const categories = useQuery({
     queryKey: ['masterdata', 'categories', 'options'],
-    queryFn: () => masterdataApi.categories.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryFn: fetchCategoryOptions,
   })
-  const parentOptions = (categories.data?.items ?? [])
+  const parentOptions = (categories.data ?? [])
     .filter((item) => editing === null || String(item.id) !== String(editing.id))
     .map((item) => ({ label: `${item.name}（${item.code}）`, value: String(item.id) }))
   // 后端 CategoryView 无 parent_name 装配字段（service_category.go:24-33），
   // 列表「上级分类」用一次取全的数据源按 parent_id 兜底映射（同一 API 的真实数据）
   const parentNameById = useMemo(
-    () => new Map((categories.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    () => new Map((categories.data ?? []).map((item) => [String(item.id), item.name])),
     [categories.data],
   )
 

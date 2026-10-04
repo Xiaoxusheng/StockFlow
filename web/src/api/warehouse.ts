@@ -253,6 +253,8 @@ export const warehouseApi = {
     http.get<PageResult<WarehouseItem>>('/api/warehouses', { params: query }),
   create: (payload: WarehousePayload) =>
     http.post<WarehouseItem>('/api/warehouses', payload),
+  /** 详情（GET /api/warehouses/:id，handler.go:38 → getWarehouse，WarehouseView 同列表行） */
+  detail: (id: WarehouseSpaceId) => http.get<WarehouseItem>(`/api/warehouses/${id}`),
   update: (id: WarehouseSpaceId, payload: WarehousePayload) =>
     http.put<WarehouseItem>(`/api/warehouses/${id}`, payload),
   /** 软删除（warehouses 为 database.md §5.1 软删除对象；级联校验由后端执行） */
@@ -270,6 +272,8 @@ export const zoneApi = {
     http.get<PageResult<ZoneItem>>('/api/zones', { params: query }),
   create: (payload: ZonePayload) =>
     http.post<ZoneItem>('/api/zones', payload),
+  /** 详情（GET /api/zones/:id，handler.go:47 → getZone，ZoneView 同列表行） */
+  detail: (id: WarehouseSpaceId) => http.get<ZoneItem>(`/api/zones/${id}`),
   update: (id: WarehouseSpaceId, payload: ZoneUpdatePayload) =>
     http.put<ZoneItem>(`/api/zones/${id}`, payload),
   /** zones 无删除接口：停用即下线（backend-m1-plan.md §5.4.1） */
@@ -283,6 +287,8 @@ export const shelfApi = {
     http.get<PageResult<ShelfItem>>('/api/shelves', { params: query }),
   create: (payload: ShelfPayload) =>
     http.post<ShelfItem>('/api/shelves', payload),
+  /** 详情（GET /api/shelves/:id，handler.go:54 → getShelf，ShelfView 同列表行） */
+  detail: (id: WarehouseSpaceId) => http.get<ShelfItem>(`/api/shelves/${id}`),
   update: (id: WarehouseSpaceId, payload: ShelfUpdatePayload) =>
     http.put<ShelfItem>(`/api/shelves/${id}`, payload),
   /** shelves 无删除接口：停用即下线（backend-m1-plan.md §5.4.1） */
@@ -296,6 +302,8 @@ export const binApi = {
     http.get<PageResult<BinItem>>('/api/bins', { params: query }),
   create: (payload: BinPayload) =>
     http.post<BinItem>('/api/bins', payload),
+  /** 详情（GET /api/bins/:id，handler.go:61 → getBin，BinView 不含 map 聚合的占用字段） */
+  detail: (id: WarehouseSpaceId) => http.get<BinItem>(`/api/bins/${id}`),
   update: (id: WarehouseSpaceId, payload: BinUpdatePayload) =>
     http.put<BinItem>(`/api/bins/${id}`, payload),
   /** 软删除（bins 为 database.md §5.1 软删除对象；级联校验由后端执行） */

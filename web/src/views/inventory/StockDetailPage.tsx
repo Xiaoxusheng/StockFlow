@@ -129,17 +129,17 @@ const LEVEL_LABEL: Record<DistributionLevel, string> = {
 }
 
 function nodeLevel(node: StockDistributionNode): DistributionLevel {
-  if (node.binCode) return 'bin'
-  if (node.zoneCode) return 'zone'
+  if (node.bin_code) return 'bin'
+  if (node.zone_code) return 'zone'
   return 'warehouse'
 }
 
 function nodeTitle(node: StockDistributionNode): string {
-  return node.binCode ?? node.zoneCode ?? node.warehouseName ?? node.warehouseCode
+  return node.bin_code ?? node.zone_code ?? node.warehouse_name ?? node.warehouse_code
 }
 
 function nodeKey(node: StockDistributionNode): string {
-  return `${node.warehouseCode}/${node.zoneCode ?? ''}/${node.binCode ?? ''}`
+  return `${node.warehouse_code}/${node.zone_code ?? ''}/${node.bin_code ?? ''}`
 }
 
 /**
@@ -225,10 +225,10 @@ function DistributionTab({ stockId }: { stockId: string }) {
               </Flex>
               <Flex align="center" gap={12}>
                 <Flex vertical align="flex-end">
-                  <Text className="sf-num">{formatNumber(node.totalQty)}</Text>
-                  {node.availableQty !== undefined && (
+                  <Text className="sf-num">{formatNumber(node.total_qty)}</Text>
+                  {node.available_qty !== undefined && (
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      可用 {formatNumber(node.availableQty)}
+                      可用 {formatNumber(node.available_qty)}
                     </Text>
                   )}
                 </Flex>

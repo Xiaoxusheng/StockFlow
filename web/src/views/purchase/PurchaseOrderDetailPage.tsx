@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Descriptions, Flex, Table, Typography } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
 import {
@@ -22,6 +22,7 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
+import { PurchaseOrderActions } from './PurchaseOrderActions'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime, formatMoney, formatNumber } from '@/utils/format'
 
@@ -167,12 +168,19 @@ function buildItemColumns(skuItems: Map<string, SkuItem>): ColumnsType<PurchaseO
 export default function PurchaseOrderDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const query = useQuery({
     queryKey: ['purchase', 'detail', id],
     queryFn: () => purchaseApi.detail(id as string),
     enabled: Boolean(id),
   })
+
+  /** 操作成功：详情 refetch + 列表缓存失效（usePagedList queryKey 同步刷新） */
+  const handleChanged = () => {
+    query.refetch()
+    queryClient.invalidateQueries({ queryKey: ['purchase', 'orders'] })
+  }
 
   // 供应商/仓库/SKU options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞详情）
   const supplierOptionsQuery = useQuery({
@@ -244,6 +252,7 @@ export default function PurchaseOrderDetailPage() {
         statusLabel={statusTag?.label}
         statusSemantic={statusTag?.semantic}
         onBack={() => navigate('/purchases')}
+        actions={<PurchaseOrderActions order={order} onChanged={handleChanged} />}
         summary={
           <SfSummaryBar
             items={[

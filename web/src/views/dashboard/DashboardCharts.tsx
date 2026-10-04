@@ -59,7 +59,7 @@ export function WarehouseBar({ items }: { items: DashboardWarehouseStock[] }) {
   return (
     <Suspense fallback={<Skeleton active paragraph={{ rows: 4 }} />}>
       <Bar
-        data={items.map((w) => ({ warehouse: w.warehouseName, 库存量: w.totalQty }))}
+        data={items.map((w) => ({ warehouse: w.warehouse_name, 库存量: w.total_qty }))}
         xField="warehouse"
         yField="库存量"
         height={240}
@@ -69,7 +69,7 @@ export function WarehouseBar({ items }: { items: DashboardWarehouseStock[] }) {
   )
 }
 
-/** 第四层库位利用率（数据来自 warehouse-stock.binUtilization） */
+/** 第四层库位利用率（数据来自 warehouse-stock.bin_utilization） */
 export function BinUtilizationList({ items }: { items: DashboardWarehouseStock[] }) {
   if (items.length === 0) {
     return <Text type="secondary">暂无仓库数据</Text>
@@ -77,12 +77,12 @@ export function BinUtilizationList({ items }: { items: DashboardWarehouseStock[]
   return (
     <Flex vertical gap={12}>
       {items.map((w) => (
-        <Flex key={w.warehouseCode} align="center" gap={12}>
+        <Flex key={w.warehouse_code} align="center" gap={12}>
           <Text style={{ width: 80 }} ellipsis>
-            {w.warehouseName}
+            {w.warehouse_name}
           </Text>
           <Progress
-            percent={w.binUtilization}
+            percent={w.bin_utilization}
             size="small"
             style={{ flex: 1, marginBottom: 0 }}
             format={(p) => formatPercent(p ?? 0, 0)}

@@ -1,7 +1,7 @@
 import type { KeyboardEvent, ReactNode } from 'react'
-import { Button } from 'antd'
-import type { ExceptionItem } from '@/api/exception'
-import { EXCEPTION_TYPE_LABEL } from '@/api/exception'
+import { Button, message } from 'antd'
+import type { ExceptionItem, ExceptionStatus } from '@/api/exception'
+import { EXCEPTION_STATUS_TAG } from '@/api/exception'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { EMPTY_TEXT, formatDateTime } from '@/utils/format'
 
@@ -21,11 +21,19 @@ export interface ExceptionCardProps {
   onClick?: () => void
 }
 
+/** 异常状态 → SfStatusTag（六态大写枚举经 EXCEPTION_STATUS_TAG 显式指定 label/semantic，
+ * OPEN/PENDING_REVIEW 注册表不命中按覆盖路径生效，见 api/exception.ts 注释） */
+export function ExceptionStatusTag({ status }: { status: ExceptionStatus }) {
+  const meta = EXCEPTION_STATUS_TAG[status]
+  return <SfStatusTag status={status} label={meta?.label} semantic={meta?.semantic} />
+}
+
 /**
  * 异常卡（frontend.md §20.2 卡片列表 / §20.9 大触摸热区；business-flow.md §11.2）：
- * exceptionNo / exceptionType / title / warehouseName / skuCode / bizNo / status / discoveredAt。
- * 异常类型是分类不是状态，按普通文本渲染（api/exception.ts 约定）；
- * 生命周期七态经 SfStatusTag（types/status.ts 注册表，未知值兜底原始文案）。
+ * exception_no / type / source_type / detail / source_no / status / created_at
+ * （ExceptionView snake_case，internal/returns/service_exception.go:64-88——无仓库/标题联表
+ * 字段，禁止假造）。异常类型是分类不是状态，按普通文本渲染（api/exception.ts 约定）；
+ * 生命周期六态经 SfStatusTag（未知值兜底原始文案）。
  */
 export function ExceptionCard({ item, selected = false, onClick }: ExceptionCardProps) {
   return (
@@ -38,20 +46,19 @@ export function ExceptionCard({ item, selected = false, onClick }: ExceptionCard
       onKeyDown={onClick ? pressActivate(onClick) : undefined}
     >
       <div className="sf-pad-task-card__head">
-        <span className="sf-pad-task-card__no">{item.exceptionNo}</span>
-        <SfStatusTag status={item.status} />
+        <span className="sf-pad-task-card__no">{item.exception_no}</span>
+        <ExceptionStatusTag status={item.status} />
       </div>
       <div className="sf-pad-task-card__meta">
-        <span>{EXCEPTION_TYPE_LABEL[item.exceptionType] ?? item.exceptionType}</span>
-        <span>{item.warehouseName || EMPTY_TEXT}</span>
-        {item.skuCode ? <span>SKU {item.skuCode}</span> : null}
+        <span>{item.type}</span>
+        <span>{item.source_type || EMPTY_TEXT}</span>
       </div>
       <div className="sf-pad-task-card__qty">
-        <span style={{ overflowWrap: 'anywhere' }}>{item.title}</span>
+        <span style={{ overflowWrap: 'anywhere' }}>{item.detail || EMPTY_TEXT}</span>
       </div>
       <div className="sf-pad-task-card__foot">
-        <span>来源：{item.bizNo || EMPTY_TEXT}</span>
-        <span>{formatDateTime(item.discoveredAt)}</span>
+        <span>来源：{item.source_no || EMPTY_TEXT}</span>
+        <span>{formatDateTime(item.created_at)}</span>
       </div>
     </div>
   )
@@ -67,7 +74,8 @@ export interface ActionPlaceholderProps {
 
 /**
  * 动作占位按钮（frontend.md §9.1 Disabled 口径，同地基 PadActionBar 禁用包装模式）：
- * 端点未交付的动作（认领/处理/关闭/拍照）disabled + 点按 Toast 原因，不假装可用。
+ * 后端端点未交付的动作（拍照取证——异常域无图片挂接端点）disabled + 点按 Toast 原因，
+ * 不假装可用。生命周期动作已接线，走 PadExceptionAction。
  */
 export function ActionPlaceholder({ label, icon, reason, notify }: ActionPlaceholderProps) {
   return (
@@ -88,5 +96,58 @@ export function ActionPlaceholder({ label, icon, reason, notify }: ActionPlaceho
         {label}
       </Button>
     </span>
+  )
+}
+
+export interface PadExceptionActionProps {
+  label: string
+  icon?: ReactNode
+  /** 给定即禁用并说明原因（权限缺失 / 状态机前置态不满足），§21.7 口径 */
+  disabledReason?: string
+  loading?: boolean
+  onClick?: () => void
+}
+
+/**
+ * Pad 异常守卫动作按钮（死按钮门禁口径，同 PadTransferPage TransferAction 模式）：
+ * disabledReason 缺省时为真实提交按钮；给定时外包 span 接管点按把原因以 Toast 送达。
+ */
+export function PadExceptionAction({ label, icon, disabledReason, loading = false, onClick }: PadExceptionActionProps) {
+  const [messageApi, contextHolder] = message.useMessage()
+  if (!disabledReason) {
+    return (
+      <Button
+        block
+        size="large"
+        icon={icon}
+        loading={loading}
+        onClick={onClick}
+        style={{ height: 'var(--sf-pad-touch-min)' }}
+      >
+        {label}
+      </Button>
+    )
+  }
+  return (
+    <>
+      {contextHolder}
+      <span
+        role="button"
+        tabIndex={0}
+        aria-label={`${label}（不可用：${disabledReason}）`}
+        style={{ display: 'block', cursor: 'not-allowed' }}
+        onClick={() => messageApi.warning(disabledReason)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            messageApi.warning(disabledReason)
+          }
+        }}
+      >
+        <Button block size="large" icon={icon} disabled style={{ height: 'var(--sf-pad-touch-min)' }}>
+          {label}
+        </Button>
+      </span>
+    </>
   )
 }

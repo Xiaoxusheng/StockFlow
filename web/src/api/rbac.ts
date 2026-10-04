@@ -113,10 +113,11 @@ export interface DepartmentUpdatePayload {
 // ---------- 全量拉取与组树辅助 ----------
 
 /** 后端单页上限（internal/response/response.go:47 MaxPageSize） */
-const MAX_PAGE_SIZE = 100
+export const MAX_PAGE_SIZE = 100
 
-/** 循环拉取全量平铺数据（下拉/组树等一次取全场景；上限 100 页兜底，防脏数据死循环） */
-async function fetchAllPaged<T extends { id: string }>(
+/** 循环拉取全量平铺数据（下拉/组树/选项等一次取全场景；上限 100 页兜底，防脏数据死循环）。
+ * 导出供其他域模块「取全」场景复用（如用户表单的仓库绑定选项——单页 100 不保证取全） */
+export async function fetchAllPaged<T extends { id: string | number }>(
   fetchPage: (page: number) => Promise<PageResult<T>>,
 ): Promise<T[]> {
   const all: T[] = []
@@ -150,6 +151,10 @@ function buildDepartmentTree(items: DepartmentItem[]): DepartmentNode[] {
 export const rbacApi = {
   // 角色
   roles: (query: RoleQuery) => http.get<PageResult<RoleItem>>('/api/roles', { params: query }),
+  /** 角色全量（分配角色弹窗选项 / 角色 ID→名称映射等一次取全场景；
+   * 角色数可超单页上限 100，单页拉取会静默截断） */
+  rolesAll: (): Promise<RoleItem[]> =>
+    fetchAllPaged((page) => rbacApi.roles({ page, pageSize: MAX_PAGE_SIZE })),
   role: (id: string) => http.get<RoleDetail>(`/api/roles/${id}`),
   createRole: (payload: RoleCreatePayload) => http.post<RoleItem>('/api/roles', payload),
   updateRole: (id: string, payload: RoleUpdatePayload) => http.put<RoleItem>(`/api/roles/${id}`, payload),

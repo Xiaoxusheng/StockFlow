@@ -18,7 +18,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import {
-  OPTIONS_PAGE_SIZE,
   masterdataApi,
   toStatusKey,
   type EnabledStatus,
@@ -26,6 +25,7 @@ import {
   type ProductQuery,
   type ProductSavePayload,
 } from '@/api/masterdata'
+import { fetchCategoryOptions, fetchUnitOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -120,25 +120,26 @@ export default function ProductListPage() {
     params,
   })
 
-  // 表单依赖下拉：分类 / 单位一次取全；接口失败时降级为空数组，不阻塞其余字段填写
+  // 表单依赖下拉：分类 / 单位分页取全（fetchCategoryOptions/fetchUnitOptions，超一页不截断）；
+  // 接口失败时降级为空数组，不阻塞其余字段填写
   const categories = useQuery({
     queryKey: ['masterdata', 'categories', 'options'],
-    queryFn: () => masterdataApi.categories.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryFn: fetchCategoryOptions,
   })
   const units = useQuery({
     queryKey: ['masterdata', 'units', 'options'],
-    queryFn: () => masterdataApi.units.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryFn: fetchUnitOptions,
   })
 
-  const categoryOptions = (categories.data?.items ?? []).map((item) => ({
+  const categoryOptions = (categories.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
     value: String(item.id),
   }))
-  const unitOptions = (units.data?.items ?? []).map((item) => ({
+  const unitOptions = (units.data ?? []).map((item) => ({
     label: item.name,
     value: String(item.id),
   }))
-  const categoryFilterOptions = (categories.data?.items ?? []).map((item) => ({
+  const categoryFilterOptions = (categories.data ?? []).map((item) => ({
     label: item.name,
     value: String(item.id),
   }))
@@ -146,11 +147,11 @@ export default function ProductListPage() {
   // 后端列表不装配 category_name/unit_name（omitempty，service_product.go:29/34 仅详情返回），
   // 列表展示用一次取全的下拉数据源按 id 兜底映射（同一 API 的真实数据，非前端造数）
   const categoryNameById = useMemo(
-    () => new Map((categories.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    () => new Map((categories.data ?? []).map((item) => [String(item.id), item.name])),
     [categories.data],
   )
   const unitNameById = useMemo(
-    () => new Map((units.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    () => new Map((units.data ?? []).map((item) => [String(item.id), item.name])),
     [units.data],
   )
 

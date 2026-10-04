@@ -22,6 +22,17 @@ export default defineConfig({
       '/api': {
         target: apiProxyTarget,
         changeOrigin: true,
+        // 代理故障可见化（默认静默 500）：连接失败/转发异常时在 dev server 终端打印
+        configure(proxy) {
+          proxy.on('error', (err: unknown, req, res) => {
+            const e = err as { code?: string; message?: string }
+            console.error('[vite proxy]', req.url, '→', apiProxyTarget, e.code ?? e.message)
+            if ('writeHead' in res && typeof res.writeHead === 'function') {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ code: 'DEV_PROXY_ERROR', message: e.message }))
+            }
+          })
+        },
       },
     },
   },

@@ -31,7 +31,11 @@ export interface MenuItem {
 
 export const MENU_TREE: MenuItem[] = [
   { path: '/dashboard', label: 'Dashboard', icon: <DashboardOutlined /> },
-  { path: '/workbench', label: '我的工作台', icon: <CarryOutOutlined />, permission: 'workbench:view' },
+  // 我的工作台：个人汇总页无资源域语义，与 Dashboard 同性质不带码（canAccess 对缺省码放行，
+  // types/permission.ts:75）。原 workbench:view 在后端权限清单零命中（grep internal/ db/ 零输出，
+  // M1–M3 冻结码无 workbench 域），fail-closed 会导致非超管永远看不到入口；任务域码立项前
+  // 端点未交付时页面呈统一错误态（requirements.md §10 预期行为）。
+  { path: '/workbench', label: '我的工作台', icon: <CarryOutOutlined /> },
   {
     path: '/warehouse-ops',
     label: '仓储中心',
@@ -59,7 +63,13 @@ export const MENU_TREE: MenuItem[] = [
       { path: '/inventory/serials', label: '序列号', permission: 'inventory:serial:view' },
       { path: '/inventory/adjustments', label: '库存调整', permission: 'inventory:adjustment:view' },
       { path: '/inventory/transfers', label: '库存转移', permission: 'inventory:transfer:view' },
-      { path: '/inventory/alerts', label: '库存预警', permission: 'inventory:alert:view' },
+      // 库存预警菜单码归一为 inventory:stock:view（matchBackendPermission 经 RESOURCE_ALIASES
+      // stock→['stock','inventory'] 命中后端冻结码 inventory:inventory:list）——端点
+      // GET /api/inventory/alerts 自 d314103 起挂 inventory:inventory:list（internal/reports/
+      // routes.go:56，库存域读口径裁决），与实时库存（:55）同码同源：凡可见实时库存者即可见
+      // 预警且不会 403。原 inventory:alert:view 资源段 alert 在后端权限清单零命中
+      // （grep -rn ':alert:' internal/ db/ 零输出），非超管用户看不到菜单入口。
+      { path: '/inventory/alerts', label: '库存预警', permission: 'inventory:stock:view' },
       { path: '/inventory/trace', label: '库存追溯', permission: 'inventory:trace:view' },
       { path: '/inventory/analytics', label: '库存分析', permission: 'inventory:analytics:view' },
     ],
@@ -157,7 +167,12 @@ export const MENU_TREE: MenuItem[] = [
       { path: '/system/roles', label: '角色', permission: 'system:role:view' },
       { path: '/system/permissions', label: '权限', permission: 'system:permission:view' },
       { path: '/system/departments', label: '部门', permission: 'system:department:view' },
-      { path: '/system/notifications', label: '通知', permission: 'system:notification:view' },
+      // 备份：system:backup:view 经 matchBackendPermission 命中后端冻结码 system:backup:list/
+      // read/create（internal/auth/permissions.go:362-365，view 动作 = 持任意动作即放行）；
+      // 通知为个人收件箱、认证即可用且无权限点（permissions.go:295-296），真实入口为顶栏
+      // NotificationDrawer——原「系统管理-通知」菜单项已移除（path 无路由点入 404、
+      // 权限码 system:notification:view 后端不存在非超管恒隐藏，双重假入口）。
+      { path: '/system/backups', label: '备份', permission: 'system:backup:view' },
       { path: '/system/logs', label: '日志', permission: 'system:log:view' },
       { path: '/system/jobs', label: '定时任务', permission: 'system:job:view' },
       { path: '/system/settings', label: '系统配置', permission: 'system:config:view' },

@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Card } from 'antd'
+import { Button, Card } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  SALES_RETURN_CREATE_PERMISSION,
   salesApi,
   type SalesReturnOrder,
   type SalesReturnQuery,
@@ -10,11 +12,14 @@ import {
 } from '@/api/sales'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SalesReturnCreateDrawer } from './SalesReturnCreateDrawer'
 import { formatDateTime } from '@/utils/format'
 
 /**
@@ -50,9 +55,15 @@ function SalesReturnStatusTag({ status }: { status: SalesReturnStatus }) {
  * 原骨架漂移调用 GET /api/sales/returns（路由不存在，审计已核实问题 #14），本版切换
  * salesApi.returns.list。搜索参数 source_no/status/warehouse_id（returns/handler.go:154-171
  * 实测入参）。后端列表视图 ReturnOrderView（service_sales.go:124-136）无客户名称/数量汇总列，
- * 原骨架 customerName/totalQty 列如实删除，不造假。退货创建入口随退货域页面统一建设，本页不放假入口。 */
+ * 原骨架 customerName/totalQty 列如实删除，不造假。
+ * 创建入口为 SalesReturnCreateDrawer（POST /api/returns，仅持 returns:salesreturn:create
+ * 权限可见）。 */
 export default function SalesReturnListPage() {
   const [params, setParams] = useState<SalesReturnQuery>({})
+  const [createOpen, setCreateOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  const canCreate = canAccess(user, SALES_RETURN_CREATE_PERMISSION)
   const list = usePagedList<SalesReturnOrder, SalesReturnQuery>({
     queryKey: ['sales', 'returns'],
     fetch: (q) => salesApi.returns.list(q),
@@ -108,6 +119,17 @@ export default function SalesReturnListPage() {
       <SfPageHeader
         title="销售退货"
         subtitle="退货申请 → 审核 → 收货 → 质检"
+        extra={
+          canCreate ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateOpen(true)}
+            >
+              新建销售退货
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm
@@ -143,6 +165,15 @@ export default function SalesReturnListPage() {
           scrollX={740}
         />
       </Card>
+      <SalesReturnCreateDrawer
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false)
+          queryClient.invalidateQueries({ queryKey: ['sales', 'returns'] })
+          list.refetch()
+        }}
+      />
     </div>
   )
 }

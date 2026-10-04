@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import { Button, Descriptions, Flex, Table, Typography } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
 import {
@@ -18,6 +18,7 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
+import { InboundOrderActions } from './InboundOrderActions'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
@@ -96,16 +97,25 @@ function buildSteps(order: InboundOrder, totals: { qty: number; received: number
 }
 
 /** 入库单详情（/inbound/:id，frontend.md §7 结构；GET /api/inbounds/{id} 返回 {order,items}，
- * service_inbound.go:336-356；明细为 InboundItem 裸模型 snake_case，models.go:187-199） */
+ * service_inbound.go:336-356；明细为 InboundItem 裸模型 snake_case，models.go:187-199）。
+ * Header 操作区（编辑入口/取消/差额关闭）由 InboundOrderActions 承载，
+ * 成功后 refetch 详情并失效列表缓存。 */
 export default function InboundDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const query = useQuery({
     queryKey: ['inbound', 'detail', id],
     queryFn: () => inboundApi.detail(id as string),
     enabled: Boolean(id),
   })
+
+  /** 操作成功：详情 refetch + 列表缓存失效（usePagedList queryKey 同步刷新） */
+  const handleChanged = () => {
+    query.refetch()
+    queryClient.invalidateQueries({ queryKey: ['inbound', 'orders'] })
+  }
 
   // SKU options（GET /api/skus）：sku_id→编码/商品名称本地映射；仓库 options：warehouse_id→名称。
   // 拉取失败降级为 ID 展示，不阻塞详情（api/options.ts 约定）
@@ -227,9 +237,12 @@ export default function InboundDetailPage() {
           />
         }
         actions={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/inbound')}>
-            返回列表
-          </Button>
+          <>
+            <InboundOrderActions order={order} onChanged={handleChanged} />
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/inbound')}>
+              返回列表
+            </Button>
+          </>
         }
       />
       <Flex vertical gap={16}>

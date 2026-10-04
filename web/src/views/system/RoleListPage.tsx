@@ -86,14 +86,16 @@ function RoleFormModal({ editing, submitting, onCancel, onSubmit }: RoleFormModa
           label="角色编码"
           rules={[
             { required: true, message: '请输入角色编码' },
-            { pattern: /^[a-z][a-z0-9_]{2,31}$/, message: '3–32 位小写字母、数字或下划线，以字母开头' },
+            // 对齐后端 roleCodeRe（internal/auth/service_rbac.go:23）：2-64 位小写字母/数字/下划线
+            { pattern: /^[a-z][a-z0-9_]{1,63}$/, message: '2–64 位小写字母、数字或下划线，以字母开头' },
           ]}
           extra="编码用于权限判断（如 warehouse_manager），创建后不可修改"
         >
           <Input disabled={isEdit} placeholder="如 warehouse_manager" autoComplete="off" />
         </Form.Item>
         <Form.Item name="name" label="角色名称" rules={[{ required: true, message: '请输入角色名称' }]}>
-          <Input placeholder="如 仓库管理员" allowClear maxLength={32} />
+          {/* 后端 maxNameLen=64（service_rbac.go:27） */}
+          <Input placeholder="如 仓库管理员" allowClear maxLength={64} />
         </Form.Item>
       </Form>
     </Modal>

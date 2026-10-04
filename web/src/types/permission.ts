@@ -3,8 +3,8 @@
  * 前端权限仅是体验优化，一切以后端校验为准（permission.md §5）。
  *
  * 字段对齐后端冻结契约（JSON tag 为准，禁止前端自造 snake_case 之外的拼写）：
- * - 用户视图：internal/auth/service_auth.go:70-87（UserView，database.ID 序列化为字符串）；
- * - 权限点集：GET /api/auth/me 的 MeResult.permissions（service_auth.go:402-410），
+ * - 用户视图：internal/auth/service_auth.go UserView（database.ID 序列化为字符串）；
+ * - 权限点集：GET /api/auth/me 的 MeResult.permissions（service_auth.go MeResult），
  *   编码为三段冻结码「域:资源:动作」（internal/auth/permissions.go）。
  */
 export interface UserInfo {
@@ -18,13 +18,13 @@ export interface UserInfo {
   data_scope?: string
   status?: string
   must_change_password?: boolean
-  /** JSONTime 序列化 "YYYY-MM-DD HH:mm:ss"，零值为 null（internal/database/model.go:59-64） */
+  /** JSONTime 序列化 "YYYY-MM-DD HH:mm:ss"，零值为 null（internal/database/model.go JSONTime.MarshalJSON） */
   locked_until?: string | null
   last_login_at?: string | null
   last_login_ip?: string
   created_at?: string | null
   updated_at?: string | null
-  /** 超级管理员（MeResult.is_super，service_auth.go:404）：canAccess 直通的真实数据源 */
+  /** 超级管理员（MeResult.is_super，service_auth.go MeResult 顶层字段）：canAccess 直通的真实数据源 */
   is_super?: boolean
   /** 角色编码（如 super_admin）。/api/auth/me 不返回角色，仅 DEV 旁路与扩展使用 */
   roles?: string[]
@@ -44,6 +44,21 @@ const RESOURCE_ALIASES: Record<string, readonly string[]> = {
 }
 
 /**
+ * 跨域同名资源段的域段限定（matchBackendPermission 忽略域段的补充校验）：
+ * 「资源:动作」两段匹配建立在 M1 清单资源段全局唯一的假设上；当同一资源段出现在
+ * 多个后端域、或菜单指向的资源域尚未立项时，必须限定允许的后端域段，否则会误亮。
+ * - task：后端 task 域未立项，task 资源段当前仅属 printing 域（printing:task:*，
+ *   internal/auth/permissions.go:323-326）——菜单 /tasks（我的任务）指向未交付端点
+ *   GET /api/tasks，不限定会误亮入口（持打印任务权限的非超管直接命中）。
+ *   限定后任务域码立项前不可见（fail-closed，与端点未交付状态一致）；
+ *   立项时把实际冻结码域段加入白名单即可。
+ * - 既有别名映射（stock/department）资源段全局唯一，不受影响。
+ */
+const DOMAIN_BOUND_RESOURCES: Record<string, readonly string[]> = {
+  task: ['task'],
+}
+
+/**
  * 菜单码与后端权限码的归一匹配（集中在本文件，不改 config/menu.tsx）：
  * - 取菜单码末两段为「资源段:动作段」（两段/三段码均适用，域前缀忽略）；
  * - 权限码必须为三段且资源段命中（含别名）；
@@ -56,9 +71,11 @@ function matchBackendPermission(perms: string[], menuCode: string): boolean {
   const resource = segs[segs.length - 2]
   const action = segs[segs.length - 1]
   const candidates = RESOURCE_ALIASES[resource] ?? [resource]
+  const allowedDomains = DOMAIN_BOUND_RESOURCES[resource]
   return perms.some((perm) => {
     const parts = perm.split(':')
     if (parts.length !== 3) return false
+    if (allowedDomains && !allowedDomains.includes(parts[0])) return false
     if (!candidates.includes(parts[1])) return false
     return action === 'view' ? true : parts[2] === action
   })

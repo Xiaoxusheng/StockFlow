@@ -28,6 +28,7 @@ import {
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { SfConfirm } from '@/components/common/SfConfirm'
+import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -88,12 +89,12 @@ const DEVICE_TYPE_OPTIONS = (Object.keys(DEVICE_TYPE_LABEL) as DeviceType[]).map
   value,
 }))
 
-/** 二维码内容：契约优先取后端组装的 qr_content；缺失时按 devices.md §6.1
- * 「设备注册输入=设备编码+服务器地址」以 server_url + device_code 兜底拼接 */
-function buildQrContent(activation: DeviceActivation): string {
-  if (activation.qr_content) return activation.qr_content
-  return `${activation.server_url}?device=${encodeURIComponent(activation.device_code)}`
-}
+/**
+ * 二维码内容：仅使用后端组装的 qr_content（冻结 JSON 三字段 {server_url,device_code,token}，
+ * service_device.go:199-210 qrContent——Scan 端激活依赖其中的一次性 token，plan §8.2）。
+ * 前端不自行拼装替代内容：缺 token 的「{server_url}?device={code}」URL 码扫之无法激活；
+ * qr_content 缺失（异常场景）时唯一正确取回路径是「重新生成激活码」。
+ */
 
 /** 绑定仓库展示：DeviceActivationPayload 仅携带 warehouse_id 裸 ID（service_device.go:187-197），
  * 经仓库 options 本地映射；0=未绑定仓库，映射失败降级 #ID */
@@ -114,10 +115,11 @@ function ActivationPanel({ activation, warehouseNames, regenerating, onRegenerat
 }) {
   const [qrDataUrl, setQrDataUrl] = useState<string>()
   const [qrError, setQrError] = useState<Error>()
-  const qrContent = buildQrContent(activation)
+  const qrContent = activation.qr_content
 
   // 本地真实渲染：内容变化时用 qrcode 库生成 PNG data URL（不走任何图片占位/假图）
   useEffect(() => {
+    if (!qrContent) return
     let cancelled = false
     setQrDataUrl(undefined)
     setQrError(undefined)
@@ -147,7 +149,11 @@ function ActivationPanel({ activation, warehouseNames, regenerating, onRegenerat
       <Card size="small" title="激活二维码">
         <Flex gap={24} wrap="wrap" align="flex-start">
           <Flex vertical align="center" gap={8}>
-            {qrError ? (
+            {!qrContent ? (
+              <SfEmpty
+                description="二维码内容缺失（qr_content 仅在创建/重新生成时返回）；请点击下方「重新生成激活码」取回新二维码"
+              />
+            ) : qrError ? (
               <SfError error={qrError} description="二维码生成失败" />
             ) : qrDataUrl ? (
               <img src={qrDataUrl} width={QR_SIZE} height={QR_SIZE} alt="设备激活二维码" />

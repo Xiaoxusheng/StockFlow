@@ -49,17 +49,17 @@ function DispositionTag({ value }: { value?: QualityDisposition }) {
 }
 
 const COLUMNS: ColumnsType<NonconformingItem> = [
-  { title: '质检单号', dataIndex: 'qcNo', width: 150, fixed: 'left' },
-  { title: '来源单据', dataIndex: 'sourceNo', width: 160, render: (v?: string) => v ?? '-' },
-  { title: 'SKU 编码', dataIndex: 'skuCode', width: 130 },
+  { title: '质检单号', dataIndex: 'qc_no', width: 150, fixed: 'left' },
+  { title: '来源单据', dataIndex: 'source_no', width: 160, render: (v?: string) => v ?? '-' },
+  { title: 'SKU 编码', dataIndex: 'sku_code', width: 130 },
   {
     title: '商品名称',
-    dataIndex: 'productName',
+    dataIndex: 'product_name',
     width: 180,
     ellipsis: true,
     render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
-  { title: '批次号', dataIndex: 'batchNo', width: 110, render: (v?: string) => v ?? '-' },
+  { title: '批次号', dataIndex: 'batch_no', width: 110, render: (v?: string) => v ?? '-' },
   {
     title: '不合格数量',
     dataIndex: 'qty',
@@ -86,16 +86,16 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
     width: 110,
     render: (v?: NonconformingDestination) => (v ? (DESTINATION_LABEL[v] ?? v) : '-'),
   },
-  { title: '处理人', dataIndex: 'handlerName', width: 100, render: (v?: string) => v ?? '-' },
+  { title: '处理人', dataIndex: 'handler_name', width: 100, render: (v?: string) => v ?? '-' },
   {
     title: '处理时间',
-    dataIndex: 'handledAt',
+    dataIndex: 'handled_at',
     width: 160,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
   {
     title: '记录时间',
-    dataIndex: 'createdAt',
+    dataIndex: 'created_at',
     width: 160,
     render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
@@ -103,8 +103,10 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
 
 /**
  * 不合格品列表（frontend.md §9.1 质量中心模块；菜单 /quality/nonconforming，config/menu.tsx:107）。
- * GET /api/quality/nonconforming 为前端先行契约：M1 后端未交付质量域（backend-m1-plan.md §13），
- * 后端就绪前页面呈统一错误态（SfTable error 兜底），属预期行为，禁止 mock（约束 6）。
+ * GET /api/quality/nonconforming 端点未立项：质检主链路后端 M2/M3 已交付（GET/POST /api/quality
+ * 等，internal/purchase/purchase.go:64-68），缺的是 nonconforming 与 trace 两个查询端点
+ * （孪生缺口同批待补），后端就绪前页面呈统一错误态（SfTable error 兜底），属预期行为，
+ * 禁止 mock（requirements.md §10）。
  * 处理结果与去向（退供应商/报废/返工/降级/转不良品仓/特批放行）对齐 business-flow.md §4.3；
  * 单据锚点为关联质检单号 QC-（§13.1），转不良品仓须产生库存变动与流水（inventory-rules）。
  */

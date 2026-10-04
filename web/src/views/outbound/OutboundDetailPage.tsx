@@ -1,23 +1,39 @@
 import { useMemo } from 'react'
-import { Descriptions, Flex, Table, Typography } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { Button, Descriptions, Flex, Table, Typography, message } from 'antd'
+import { RetweetOutlined } from '@ant-design/icons'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
 import {
+  ALLOCATION_EXECUTE_PERMISSION,
   outboundApi,
   type CheckTask,
   type CheckTaskStatus,
+  type OutboundAllocationRecord,
   type OutboundOrder,
   type OutboundOrderItem,
   type OutboundOrderStatus,
+  type OutboundReallocatePayload,
   type PackingRecord,
   type PickTask,
   type PickTaskStatus,
   type Shipment,
   type ShipmentStatus,
 } from '@/api/outbound'
+import { resolveErrorMessage } from '@/api/client'
 import { toStatusKey } from '@/api/masterdata'
-import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import {
+  buildIdItemMap,
+  buildSkuMaps,
+  buildWarehouseMaps,
+  fetchBinOptions,
+  fetchSkuOptions,
+  fetchWarehouseOptions,
+  idKey,
+} from '@/api/options'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfEmpty } from '@/components/common/SfEmpty'
@@ -130,11 +146,15 @@ function renderQty(value: number) {
  * 路由参数名 :id（router/index.tsx），#17 修复后跳转传入的值为出库单号。
  * 响应为任务族全量 {outbound, items, allocations, picks, checks, packages, shipments}
  * （internal/sales/handler.go getOutbound）：Header/时间线用单据各环节时间，
- * 明细区渲染出库明细行（各环节累计进度）+ 拣货/复核任务与包裹/发货记录（frontend.md §7）。
+ * 明细区渲染出库明细行（各环节累计进度）+ 分配记录（重新分配经 POST /api/allocations）
+ * + 拣货/复核任务与包裹/发货记录（frontend.md §7）。
  */
 export default function OutboundDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [messageApi, contextHolder] = message.useMessage()
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
 
   const query = useQuery({
     queryKey: ['outbound', 'detail', id],
@@ -151,11 +171,33 @@ export default function OutboundDetailPage() {
     queryKey: ['outbound', 'warehouse-options'],
     queryFn: fetchWarehouseOptions,
   })
+  // 库位 ID → 编码（分配记录 bin_id 为裸 ID；失败降级为 #ID，不阻塞详情）
+  const binOptions = useQuery({
+    queryKey: ['outbound', 'bin-options'],
+    queryFn: fetchBinOptions,
+  })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
   const warehouseNames = useMemo(
     () => buildWarehouseMaps(warehouseOptions.data ?? []).name,
     [warehouseOptions.data],
   )
+  const binItems = useMemo(
+    () => buildIdItemMap(binOptions.data ?? [], (b) => b.id),
+    [binOptions.data],
+  )
+
+  // 重新分配（POST /api/allocations，sales:allocation:execute；整单 line_no=0）。
+  // 后端约束：仅 ALLOCATED/PICKING 且未拣货未发货的行可重分配（service_ship.go:531-555），
+  // 权限/状态不满足时按钮不出现；已拣行后端仍会拒绝（前端权限仅是体验优化）。
+  const reallocateMutation = useMutation({
+    mutationFn: (payload: OutboundReallocatePayload) =>
+      outboundApi.allocations.reallocate(payload),
+    onSuccess: (res) => {
+      messageApi.success(`重新分配完成，本次生成 ${res.allocations.length} 条分配记录`)
+      queryClient.invalidateQueries({ queryKey: ['outbound', 'detail', id] })
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
 
   if (!id) {
     return (
@@ -186,6 +228,7 @@ export default function OutboundDetailPage() {
   const detail = query.data
   const outbound = detail.outbound
   const items = detail.items ?? []
+  const allocations = detail.allocations ?? []
   const picks = detail.picks ?? []
   const checks = detail.checks ?? []
   const packages = detail.packages ?? []
@@ -193,6 +236,10 @@ export default function OutboundDetailPage() {
   const obMeta = OB_STATUS_TAG[outbound.status]
   const warehouseName =
     warehouseNames.get(idKey(outbound.warehouse_id)) ?? idKey(outbound.warehouse_id)
+  // 重新分配仅对 ALLOCATED/PICKING 开放（后端 service_ship.go:531-535 同口径）
+  const canReallocate =
+    canAccess(user, ALLOCATION_EXECUTE_PERMISSION) &&
+    (outbound.status === 'ALLOCATED' || outbound.status === 'PICKING')
 
   const pickColumns: ColumnsType<PickTask> = [
     { title: '拣货任务号', dataIndex: 'pick_no', width: 160 },
@@ -275,8 +322,56 @@ export default function OutboundDetailPage() {
     },
   ]
 
-  const checkColumns: ColumnsType<CheckTask> = [
-    { title: '复核任务号', dataIndex: 'check_no', width: 160 },
+  // 分配记录列（AllocationRecord 裸模型：batch_id/bin_id 为裸 ID，批次无 options 端点
+  // 降级 #ID，库位经 bin options 映射编码；reason 为后端分配理由 JSON 不直接渲染）
+  const allocationColumns: ColumnsType<OutboundAllocationRecord> = [
+    { title: '行号', dataIndex: 'line_no', width: 70, align: 'right', render: renderQty },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      render: (v: number) => skuMaps.code.get(idKey(v)) ?? idKey(v),
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 180,
+      ellipsis: true,
+      render: (_: unknown, record: OutboundAllocationRecord) => {
+        const name = skuMaps.name.get(idKey(record.sku_id))
+        return name ? (
+          <Text style={{ maxWidth: 170 }} ellipsis={{ tooltip: name }}>
+            {name}
+          </Text>
+        ) : (
+          '-'
+        )
+      },
+    },
+    { title: '分配数量', dataIndex: 'qty', width: 100, align: 'right', render: renderQty },
+    { title: '分配策略', dataIndex: 'strategy', width: 110, render: (v: string) => v || '-' },
+    {
+      title: '批次',
+      dataIndex: 'batch_id',
+      width: 100,
+      render: (v: number) => `#${String(v)}`,
+    },
+    {
+      title: '库位',
+      dataIndex: 'bin_id',
+      width: 130,
+      render: (v: number) => binItems.get(idKey(v))?.code ?? `#${String(v)}`,
+    },
+    {
+      title: '分配时间',
+      dataIndex: 'created_at',
+      width: 170,
+      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+  ]
+
+  const checkColumns: ColumnsType<CheckTask> = [    { title: '复核任务号', dataIndex: 'check_no', width: 160 },
     {
       title: 'SKU 编码',
       dataIndex: 'sku_id',
@@ -348,6 +443,7 @@ export default function OutboundDetailPage() {
 
   return (
     <div className="sf-page">
+      {contextHolder}
       <SfDetailHeader
         code={outbound.outbound_no}
         status={toStatusKey(outbound.status)}
@@ -391,6 +487,36 @@ export default function OutboundDetailPage() {
             pagination={false}
             scroll={{ x: 1180 }}
             locale={{ emptyText: () => <SfEmpty description="该出库单暂无明细行" /> }}
+          />
+        </SfDetailSection>
+        <SfDetailSection
+          title="分配记录"
+          extra={
+            canReallocate ? (
+              <SfConfirm
+                okText="重新分配"
+                confirming={reallocateMutation.isPending}
+                title="确认重新分配整单库存？"
+                description="将释放本单全部旧预占锁并按默认策略重新分配，未完结的拣货任务会被取消；已拣货/已发货的行无法重分配（后端校验）。"
+                onConfirm={() =>
+                  reallocateMutation.mutate({ outbound_no: outbound.outbound_no, line_no: 0 })
+                }
+              >
+                <Button danger icon={<RetweetOutlined />} size="small">
+                  重新分配
+                </Button>
+              </SfConfirm>
+            ) : undefined
+          }
+        >
+          <Table<OutboundAllocationRecord>
+            size="small"
+            rowKey="id"
+            columns={allocationColumns}
+            dataSource={allocations}
+            pagination={false}
+            scroll={{ x: 1060 }}
+            locale={{ emptyText: () => <SfEmpty description="该出库单暂无分配记录（审核预占后生成）" /> }}
           />
         </SfDetailSection>
         <SfDetailSection title="拣货任务">

@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
   Form,
   Input,
@@ -14,17 +15,17 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import {
-  OPTIONS_PAGE_SIZE,
   masterdataApi,
   type SkuItem,
   type SkuQuery,
   type SkuSavePayload,
 } from '@/api/masterdata'
+import { fetchProductOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -40,11 +41,19 @@ const ENABLED_FILTER_OPTIONS = [
   { label: '已停用', value: 'false' },
 ]
 
+/** 条码表单行（对应 BarcodeInput，service_sku.go:139-143；code_type 缺省 CODE128） */
+interface SkuBarcodeFormRow {
+  barcode?: string
+  code_type?: string
+  is_primary?: boolean
+}
+
 /** 表单值：InputNumber 可清空为 null，提交前统一转 undefined（对应"未填写"）；
  * 字段名与后端 JSON tag（snake_case）一致 */
 interface SkuFormValues {
   code: string
   product_id?: string
+  barcodes?: SkuBarcodeFormRow[]
   cost_price?: number | null
   sale_price?: number | null
   safety_stock?: number | null
@@ -60,6 +69,11 @@ function toFormValues(record: SkuItem): SkuFormValues {
   return {
     code: record.code,
     product_id: String(record.product_id),
+    barcodes: (record.barcodes ?? []).map((b) => ({
+      barcode: b.barcode,
+      code_type: b.code_type,
+      is_primary: b.is_primary,
+    })),
     cost_price: record.cost_price ?? null,
     sale_price: record.sale_price ?? null,
     safety_stock: record.safety_stock ?? null,
@@ -73,11 +87,18 @@ function toFormValues(record: SkuItem): SkuFormValues {
 }
 
 /** 提交契约（SKUCreateInput/SKUUpdateInput，service_sku.go:146-176）：
- * product_id 为 int64 必须 number；barcodes 省略=更新不修改既有条码 */
+ * product_id 为 int64 必须 number；barcodes 提供即全量替换（service_sku.go:428-437「nil 不修改；
+ * 提供即全量替换」、空数组=清空）——编辑未改动条码时回传原值等价幂等 */
 function toPayload(values: SkuFormValues): SkuSavePayload {
   return {
     code: values.code.trim(),
     product_id: Number(values.product_id),
+    barcodes: (values.barcodes ?? []).map((row) => ({
+      barcode: (row.barcode ?? '').trim(),
+      // code_type 后端自动大写化并缺省 CODE128（service_sku.go buildBarcodes）；空串交后端缺省
+      code_type: row.code_type?.trim().toUpperCase() || undefined,
+      is_primary: row.is_primary ?? false,
+    })),
     cost_price: values.cost_price ?? undefined,
     sale_price: values.sale_price ?? undefined,
     safety_stock: values.safety_stock ?? undefined,
@@ -108,19 +129,19 @@ export default function SkuListPage() {
     params,
   })
 
-  // 表单依赖下拉：所属商品一次取全；接口失败时降级为空数组，不阻塞其余字段填写
+  // 表单依赖下拉：所属商品分页取全（fetchProductOptions，超一页不截断）；接口失败时降级为空数组，不阻塞其余字段填写
   const products = useQuery({
     queryKey: ['masterdata', 'products', 'options'],
-    queryFn: () => masterdataApi.products.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryFn: fetchProductOptions,
   })
-  const productOptions = (products.data?.items ?? []).map((item) => ({
+  const productOptions = (products.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
     value: String(item.id),
   }))
   // 后端列表不装配 product_name（omitempty，service_sku.go:43-44 仅详情返回），
   // 列表展示用一次取全的商品数据源按 product_id 兜底映射（同一 API 的真实数据）
   const productNameById = useMemo(
-    () => new Map((products.data?.items ?? []).map((item) => [String(item.id), item.name])),
+    () => new Map((products.data ?? []).map((item) => [String(item.id), item.name])),
     [products.data],
   )
 
@@ -306,7 +327,7 @@ export default function SkuListPage() {
             </SfConfirm>
             <SfConfirm
               title="确认删除该 SKU？"
-              description="已产生业务数据的 SKU 后端将拒绝删除，建议改用停用。"
+              description="删除为软删除，后端当前不校验库存/单据引用（引用校验随后续版本交付）：已产生业务数据的 SKU 删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。"
               okText="删除"
               confirming={removeMutation.isPending}
               onConfirm={() => removeMutation.mutate(record.id)}
@@ -412,6 +433,65 @@ export default function SkuListPage() {
                   optionFilterProp="label"
                 />
               </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>
+                条码（主条码至多一个；编辑保存即按当前列表全量替换）
+              </Text>
+              <Form.List name="barcodes">
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map((field) => (
+                      <Row key={field.key} gutter={8}>
+                        <Col span={11}>
+                          <Form.Item
+                            name={[field.name, 'barcode']}
+                            rules={[
+                              { required: true, whitespace: true, message: '请输入条码' },
+                              { max: 128, message: '条码不超过 128 字符' },
+                            ]}
+                          >
+                            <Input placeholder="条码值（≤128 字符）" maxLength={128} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={7}>
+                          <Form.Item
+                            name={[field.name, 'code_type']}
+                            rules={[{ max: 32, message: '类型不超过 32 字符' }]}
+                          >
+                            <Input placeholder="类型，缺省 CODE128" maxLength={32} />
+                          </Form.Item>
+                        </Col>
+                        <Col span={4}>
+                          <Form.Item name={[field.name, 'is_primary']} valuePropName="checked">
+                            <Checkbox>主条码</Checkbox>
+                          </Form.Item>
+                        </Col>
+                        <Col span={2}>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => remove(field.name)}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Form.Item style={{ marginBottom: 0 }}>
+                      {/* 上限对齐后端 maxBarcodesPerSKU=50（service_sku.go:26），超出由后端拒绝 */}
+                      <Button
+                        type="dashed"
+                        icon={<PlusOutlined />}
+                        block
+                        disabled={fields.length >= 50}
+                        onClick={() => add({ is_primary: fields.length === 0 })}
+                      >
+                        添加条码
+                      </Button>
+                    </Form.Item>
+                  </>
+                )}
+              </Form.List>
             </Col>
             <Col span={12}>
               <Form.Item name="cost_price" label="采购价">

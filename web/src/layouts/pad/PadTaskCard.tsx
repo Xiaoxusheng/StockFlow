@@ -44,20 +44,20 @@ export function PadTaskCard({ task, selected = false, onClick }: PadTaskCardProp
       onKeyDown={handleKeyDown}
     >
       <div className="sf-pad-task-card__head">
-        <span className="sf-pad-task-card__no">{task.taskNo}</span>
+        <span className="sf-pad-task-card__no">{task.task_no}</span>
         <SfStatusTag status={task.status} />
       </div>
       <div className="sf-pad-task-card__meta">
-        <span>{PAD_TASK_TYPE_LABEL[task.taskType] ?? task.taskType}</span>
-        <span>{task.warehouseName ?? EMPTY_TEXT}</span>
+        <span>{PAD_TASK_TYPE_LABEL[task.task_type] ?? task.task_type}</span>
+        <span>{task.warehouse_name ?? EMPTY_TEXT}</span>
       </div>
       <div className="sf-pad-task-card__qty">
-        <span className="sf-pad-metric">{formatNumber(task.completedQty)}</span>
-        <span className="sf-pad-task-card__qty-unit">/ {formatNumber(task.totalQty)} 已完成</span>
+        <span className="sf-pad-metric">{formatNumber(task.completed_qty)}</span>
+        <span className="sf-pad-task-card__qty-unit">/ {formatNumber(task.total_qty)} 已完成</span>
       </div>
       <div className="sf-pad-task-card__foot">
-        <span>{task.assigneeName ?? EMPTY_TEXT}</span>
-        <span>{formatDateTime(task.createdAt)}</span>
+        <span>{task.assignee_name ?? EMPTY_TEXT}</span>
+        <span>{formatDateTime(task.created_at)}</span>
       </div>
     </div>
   )

@@ -74,7 +74,8 @@ const STATUS_OPTIONS: Array<{ label: string; value: InboundOrderStatus }> = (
   ['RECEIVING', 'DRAFT', 'AWAITING_QC', 'AWAITING_PUTAWAY', 'COMPLETED'] as const
 ).map((value) => ({ value, label: INBOUND_STATUS_TAG_META[value].label }))
 
-/** 异常收货子型（§3.4：service_inbound.go:62-63 注释值域；拍照/附件随异常中心承载） */
+/** 异常收货子型（§3.4：service_inbound.go:62-63 注释值域；拍照留证需改走异常单承载——
+ * 后端 ExceptionCreate 支持 image_refs（service_exception.go:80），前端建单封装未立项） */
 const EXCEPTION_TYPE_OPTIONS = ['少货', '多货', '错货', '破损', '包装异常', '批次异常', '效期异常'].map(
   (value) => ({ label: value, value }),
 )
@@ -264,7 +265,9 @@ function DisabledAction({
  * - 右栏：逐明细行收货录入（合格/拒收数量步进 + 批次 / 效期 / 生产日期 + 序列号逐件录入 +
  *   免检开关 + 目标库位可选 + 异常收货类型/说明），[确认收货] 接线
  *   POST /api/receipts（purchaseApi.receipts.confirm，幂等键重试复用，service_receipt.go）；
- *   [拍照登记收货异常] 保持 disabled（依赖 /api/files 文件上传与 Scan 端拍照集成）；
+ *   [拍照登记收货异常] 保持 disabled：/api/files 上传已交付（internal/datax/handler.go:123-128），
+ *   但收货确认端点无图片承载字段（service_receipt.go 无 image_refs），改走异常单需
+ *   exception.ts 补建单封装（后端 ExceptionCreate 已支持 image_refs，service_exception.go:80）；
  * - 竖屏：顶部当前任务卡 → 信息卡 → 收货操作 → 任务列表滚动区 → 底部 PadActionBar。
  * 批次/效期/序列号前端仅做同口径预检，最终以后端强校验为准（service_receipt.go:141-247）。
  */
@@ -746,7 +749,7 @@ export default function PadReceivePage() {
         <DisabledAction
           label="拍照登记收货异常"
           icon={<CameraOutlined />}
-          reason="拍照上传依赖 /api/files 文件端点与 Scan 端拍照集成（business-flow.md §3.4 / frontend.md §20.6），本轮仅支持文本异常：可在明细行选择异常类型与说明，随收货确认同事务登记"
+          reason="占位待承载：POST /api/files 上传已交付，但收货确认端点（POST /api/receipts）无图片字段（service_receipt.go 无 image_refs），照片无法随收货确认落库；改走异常单需前端 exception.ts 补建单封装（后端异常单已支持 image_refs）。本轮仍仅支持文本异常：可在明细行选择异常类型与说明，随收货确认同事务登记"
         />
       </section>
     </>

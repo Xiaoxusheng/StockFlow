@@ -220,7 +220,7 @@ export default function CustomerListPage() {
             </SfConfirm>
             <SfConfirm
               title="确认删除该客户？"
-              description="已产生销售业务的客户后端将拒绝删除，建议改用停用。"
+              description="删除为软删除，后端当前不校验业务引用（引用校验随后续版本交付）：已产生销售业务的客户删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。"
               okText="删除"
               confirming={removeMutation.isPending}
               onConfirm={() => removeMutation.mutate(record.id)}

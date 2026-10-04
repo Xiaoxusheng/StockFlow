@@ -7,7 +7,8 @@ export interface LoginPayload {
   password: string
 }
 
-/** 登录/刷新结果（后端 LoginResult，internal/auth/service_auth.go:176-183） */
+/** 登录/刷新结果（后端 LoginResult，internal/auth/service_auth.go：access_token/refresh_token
+ * 首次登录与静默续期共用同一结构，刷新时 refresh_token 轮换回存） */
 export interface LoginResult {
   access_token: string
   token_type: string
@@ -18,7 +19,7 @@ export interface LoginResult {
   user: UserInfo | null
 }
 
-/** GET /api/auth/me 响应（后端 MeResult，internal/auth/service_auth.go:402-410） */
+/** GET /api/auth/me 响应（后端 MeResult，internal/auth/service_auth.go） */
 export interface MeResult {
   user: UserInfo | null
   is_super: boolean
@@ -30,20 +31,39 @@ export interface MeResult {
   permissions: string[]
 }
 
-/** 修改本人密码入参（后端 ChangePasswordRequest，internal/auth/handler.go:157-160） */
+/** 修改本人密码入参（后端 ChangePasswordRequest，internal/auth/handler.go） */
 export interface ChangePasswordPayload {
   old_password: string
   new_password: string
 }
 
-/** 密码策略前端镜像（体验校验，以后端 ValidatePassword 为准：internal/auth/password.go:54-75） */
+/** 密码策略固定文案（与后端 AUTH_PASSWORD_WEAK 默认文案同口径，internal/auth/errors.go） */
+export const PASSWORD_POLICY_MESSAGE =
+  '密码不满足安全策略：长度至少 8 位且必须同时包含字母与数字（上限 72 字节）'
+
+/**
+ * 密码策略前端镜像（体验校验，以后端 ValidatePasswordStrength 为准：
+ * internal/auth/password.go——RuneCount ≥ 8、UTF-8 字节 ≤ 72、至少一个
+ * Unicode 字母（unicode.IsLetter ↔ \p{L}）与一个 Unicode 数字（unicode.IsDigit ↔ \p{Nd}）。
+ * 用 validator 而非 pattern：JS 正则按 UTF-16 码元计数，与 Go 的 rune 计数在增补平面
+ * 字符（emoji 等）上不一致；代码点计数 + TextEncoder 字节数可精确镜像后端口径。
+ * 早年仅认 ASCII 字母的正则已放宽——「密码12」这类合法密码不再被前端误拒。
+ * 共用方：改密弹窗（PcLayout）、登录强改（LoginPage）、用户表单（UserListPage）。
+ */
 export const PASSWORD_RULE = {
-  pattern: /^(?=.*[A-Za-z])(?=.*\d).{8,}$/,
-  message: '密码不满足安全策略：长度至少 8 位且必须同时包含字母与数字',
+  validator: (_rule: unknown, value: string | undefined) => {
+    const pw = value ?? ''
+    const ok =
+      [...pw].length >= 8 && // 代码点数 ≥ 8（等价 Go utf8.RuneCountInString）
+      new TextEncoder().encode(pw).length <= 72 && // UTF-8 字节 ≤ 72（bcrypt 输入上限）
+      /\p{L}/u.test(pw) && // Unicode 字母
+      /\p{Nd}/u.test(pw) // Unicode 数字
+    return ok ? Promise.resolve() : Promise.reject(new Error(PASSWORD_POLICY_MESSAGE))
+  },
 } as const
 
 /**
- * 在线会话视图（后端 SessionView，internal/auth/service_auth.go:514-524）。
+ * 在线会话视图（后端 SessionView，internal/auth/service_auth.go）。
  * 管理员可经 DELETE /api/auth/sessions/{id} 强制下线（权限点 auth:session:kick）。
  */
 export interface AuthSession {
@@ -55,13 +75,13 @@ export interface AuthSession {
   user_agent: string
   login_at: string | null
   last_active_at: string | null
-  /** 是否为当前请求会话（handler.go:212-219 标记，便于前端展示「本机」） */
+  /** 是否为当前请求会话（handleSessionList 内标记，便于前端展示「本机」） */
   current: boolean
 }
 
 /**
  * 认证域（后端已交付，internal/auth/handler.go）：
- * - 公开：POST /api/auth/login、POST /api/auth/refresh
+ * - 公开：POST /api/auth/login、POST /api/auth/refresh（静默续期入口，client.ts 401 拦截单飞调用）
  * - 受保护：POST /api/auth/logout、GET /api/auth/me、PUT /api/auth/password、
  *   GET/DELETE /api/auth/sessions
  */
@@ -74,13 +94,13 @@ export const authApi = {
   me: () => http.get<MeResult>('/api/auth/me'),
   /**
    * PUT /api/auth/password（修改本人密码；后端成功后复位 must_change_password
-   * 并强制下线本人其余会话，internal/auth/service_auth.go:443-492）
+   * 并强制下线本人其余会话，internal/auth/service_auth.go ChangePassword）
    */
   changePassword: (payload: ChangePasswordPayload) => http.put<void>('/api/auth/password', payload),
-  /** POST /api/auth/refresh（请求体 {refresh_token}，internal/auth/handler.go:90-92） */
+  /** POST /api/auth/refresh（请求体 {refresh_token}，后端 RefreshRequest） */
   refresh: (payload: { refresh_token: string }) =>
     http.post<LoginResult>('/api/auth/refresh', payload),
-  /** GET /api/auth/sessions（分页信封 {items,page,pageSize,total}，internal/auth/handler.go:186-221） */
+  /** GET /api/auth/sessions（分页信封 {items,page,pageSize,total}，后端 handleSessionList） */
   sessions: (params?: PageQuery) =>
     http.get<PageResult<AuthSession>>('/api/auth/sessions', { params }),
   /** DELETE /api/auth/sessions/{id}（强制下线指定会话，权限点 auth:session:kick） */

@@ -1,21 +1,29 @@
 import { http } from './client'
 
-/** Dashboard 视图（requirements.md §2.1：管理层 / 仓库人员两套指标分列，后端按 view 出数） */
+/**
+ * Dashboard 视图（requirements.md §2.1：管理层 / 仓库人员两套指标分列）。
+ * 仅用于前端按权限 fail-closed 选择指标面板（views/dashboard/dashboardView.ts），
+ * 不作为请求参数下发——数据范围以会话仓库权限快照为准，后端禁止接受前端范围参数
+ * （internal/reports/handler.go:19-24）。
+ */
 export type DashboardView = 'management' | 'operator'
 
-/** 五个 dashboard 端点的公共参数：视图判定 + 自定义时间段（前端先行契约扩展，后端交付前统一错误态） */
-export interface DashboardScopeParams {
-  /** 视图由前端按权限 fail-closed 判定（views/dashboard/dashboardView.ts resolveDashboardView） */
-  view?: DashboardView
-  /** 自定义时间窗起止（YYYY-MM-DD）；仅 trend 图表时间段切换时下发 */
-  from?: string
+/**
+ * Dashboard 端点时间参数（对齐后端报表域冻结口径：requireRange，handler.go:26-53——
+ * time_from/time_to，YYYY-MM-DD，缺省近 30 天，上限 366 天）。禁止 from/to 拼写。
+ * 五个 /api/reports/dashboard/* 端点后端尚未注册（遗留清单挂账项），接线时按本契约回对。
+ */
+export interface DashboardTimeParams {
+  /** 自定义时间窗起（YYYY-MM-DD）；仅 trend 图表时间段切换时下发 */
+  time_from?: string
   /** 自定义时间窗结束（YYYY-MM-DD） */
-  to?: string
+  time_to?: string
 }
 
 /**
  * 今日业务指标（requirements.md §2.1 / frontend.md §5 第一层）。
- * 公共字段两视图均下发；视图附加字段为前端先行契约（可选），后端交付后填充。
+ * 字段名为前端先行契约（camelCase），/api/reports/dashboard/today 立项后按后端
+ * JSON tag 回对（同 DashboardAlertItem/DashboardWarehouseStock 的 snake_case 口径）。
  */
 export interface DashboardTodayMetrics {
   /** —— 两视图公共 —— */
@@ -23,7 +31,7 @@ export interface DashboardTodayMetrics {
   todayOutboundCount: number
   pendingTaskCount: number
   stockAlertCount: number
-  /** —— 管理层视图（view=management，requirements.md §2.1）—— */
+  /** —— 管理层视图（requirements.md §2.1）—— */
   warehouseCount?: number
   skuCount?: number
   totalQty?: number
@@ -34,7 +42,7 @@ export interface DashboardTodayMetrics {
   slowMovingQty?: number
   pendingApprovalCount?: number
   pendingExceptionCount?: number
-  /** —— 仓库人员视图（view=operator，requirements.md §2.1）—— */
+  /** —— 仓库人员视图（requirements.md §2.1）—— */
   pendingReceiveCount?: number
   pendingPutawayCount?: number
   pendingPickCount?: number
@@ -44,7 +52,7 @@ export interface DashboardTodayMetrics {
   pendingCountCount?: number
 }
 
-/** 趋势时间档：预设档 + custom（from/to 真实传参，requirements.md §2.1「自定义时间」） */
+/** 趋势时间档：预设档 + custom（time_from/time_to 真实传参，requirements.md §2.1「自定义时间」） */
 export type TrendRange = '7d' | '30d' | '90d' | 'custom'
 
 export interface TrendPoint {
@@ -62,34 +70,37 @@ export interface DashboardTaskItem {
   link: string
 }
 
+/** 库存预警条目（字段按后端 snake_case 口径对齐，repository.go AlertItem 同源语义） */
 export interface DashboardAlertItem {
   id: number | string
   type: string
   level: string
-  skuCode: string
-  productName: string
+  sku_code: string
+  product_name: string
   message: string
-  createdAt: string
+  created_at: string
 }
 
-/** 仓库库存分析（frontend.md §5 第四层） */
+/** 仓库库存分析（frontend.md §5 第四层；字段按后端 snake_case 口径对齐） */
 export interface DashboardWarehouseStock {
-  warehouseCode: string
-  warehouseName: string
-  skuCount: number
-  totalQty: number
-  binUtilization: number
+  warehouse_code: string
+  warehouse_name: string
+  sku_count: number
+  total_qty: number
+  bin_utilization: number
 }
 
+/** 五个 /api/reports/dashboard/* 端点后端尚未注册（遗留清单挂账项）：
+ * 页面呈统一错误态合规；端点立项接线时按本封装与后端 JSON tag 回对。 */
 export const dashboardApi = {
-  todayMetrics: (params?: DashboardScopeParams) =>
+  todayMetrics: (params?: DashboardTimeParams) =>
     http.get<DashboardTodayMetrics>('/api/reports/dashboard/today', { params }),
-  trend: (range: TrendRange, params?: DashboardScopeParams) =>
+  trend: (range: TrendRange, params?: DashboardTimeParams) =>
     http.get<TrendPoint[]>('/api/reports/dashboard/trend', { params: { range, ...params } }),
-  tasks: (params?: DashboardScopeParams) =>
+  tasks: (params?: DashboardTimeParams) =>
     http.get<DashboardTaskItem[]>('/api/reports/dashboard/tasks', { params }),
-  alerts: (params?: DashboardScopeParams) =>
+  alerts: (params?: DashboardTimeParams) =>
     http.get<DashboardAlertItem[]>('/api/reports/dashboard/alerts', { params }),
-  warehouseStock: (params?: DashboardScopeParams) =>
+  warehouseStock: (params?: DashboardTimeParams) =>
     http.get<DashboardWarehouseStock[]>('/api/reports/dashboard/warehouse-stock', { params }),
 }

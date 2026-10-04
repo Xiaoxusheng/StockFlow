@@ -62,9 +62,11 @@ export const FILE_MODULE_OPTIONS: LabelValueOption[] = Array.from(
   new Map([...IMPORT_TYPE_OPTIONS, ...EXPORT_MODULE_OPTIONS].map((option) => [option.value, option])).values(),
 )
 
-/** 上传白名单前端镜像（api.md §5：图片/Excel/PDF/附件；
+/** 上传白名单前端镜像（internal/storage/whitelist.go:20-32 冻结白名单逐值同源：
+ * 图片/.xlsx/.csv/.pdf/.txt/.zip——Excel 仅收 .xlsx，excelize v2 不支持旧版 .xls，
+ * .doc/.docx 完全不在白名单（2026-10-04 实测 .doc 上传 400 STORAGE_TYPE_NOT_ALLOWED）。
  * 仅作选择器提示，扩展名/MIME/大小上限以后端权威校验为准） */
-export const FILE_UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.xlsx,.xls,.csv,.pdf,.doc,.docx,.zip'
+export const FILE_UPLOAD_ACCEPT = '.png,.jpg,.jpeg,.gif,.webp,.bmp,.xlsx,.csv,.pdf,.txt,.zip'
 
 /** 上传与下载耗时高于默认 15s（对齐 data.ts DATA_REQUEST_TIMEOUT_MS） */
 const FILE_REQUEST_TIMEOUT_MS = 60_000

@@ -43,7 +43,7 @@ const statusLabel = (status: TaskStatus) => STATUS_META[status]?.label ?? status
 /**
  * Pad 任务页（frontend.md §20.2 卡片列表 / §20.3 横屏三栏 / §20.4 竖屏堆叠）：
  * - taskApi.list（前端先行契约）→ PadTaskCard 分组卡片列表（无状态筛选时按状态分组）；
- * - taskType / status 大触摸 chip 筛选（≥44px）；
+ * - task_type / status 大触摸 chip 筛选（≥44px）；
  * - 横屏左列表 + 右选中任务详情摘要（PadInfoCard），竖屏单列（详情内联在列表上方）；
  * - 底部 PadActionBar [返回][扫码][异常]（查询类页省略 [暂停][完成]）。
  */
@@ -55,7 +55,7 @@ export default function PadTasksPage() {
 
   const params = useMemo<TaskQuery>(
     () => ({
-      taskType: typeFilter === 'all' ? undefined : typeFilter,
+      task_type: typeFilter === 'all' ? undefined : typeFilter,
       status: statusFilter === 'all' ? undefined : statusFilter,
     }),
     [typeFilter, statusFilter],
@@ -100,19 +100,19 @@ export default function PadTasksPage() {
 
   const detailNode = selected ? (
     <PadInfoCard
-      title={`任务详情 · ${selected.taskNo}`}
+      title={`任务详情 · ${selected.task_no}`}
       items={[
-        { label: '任务号', value: selected.taskNo },
-        { label: '任务类型', value: PAD_TASK_TYPE_LABEL[selected.taskType] ?? selected.taskType },
+        { label: '任务号', value: selected.task_no },
+        { label: '任务类型', value: PAD_TASK_TYPE_LABEL[selected.task_type] ?? selected.task_type },
         { label: '状态', value: <SfStatusTag status={selected.status} /> },
-        { label: '仓库', value: selected.warehouseName ?? EMPTY_TEXT },
-        { label: '关联单号', value: selected.sourceNo ?? EMPTY_TEXT },
-        { label: '负责人', value: selected.assigneeName ?? EMPTY_TEXT },
-        { label: '计划数量', value: formatNumber(selected.totalQty), emphasis: true },
-        { label: '已完成数量', value: formatNumber(selected.completedQty), emphasis: true },
-        { label: '创建时间', value: formatDateTime(selected.createdAt) },
-        ...(selected.completedAt
-          ? [{ label: '完成时间', value: formatDateTime(selected.completedAt) }]
+        { label: '仓库', value: selected.warehouse_name ?? EMPTY_TEXT },
+        { label: '关联单号', value: selected.source_no ?? EMPTY_TEXT },
+        { label: '负责人', value: selected.assignee_name ?? EMPTY_TEXT },
+        { label: '计划数量', value: formatNumber(selected.total_qty), emphasis: true },
+        { label: '已完成数量', value: formatNumber(selected.completed_qty), emphasis: true },
+        { label: '创建时间', value: formatDateTime(selected.created_at) },
+        ...(selected.completed_at
+          ? [{ label: '完成时间', value: formatDateTime(selected.completed_at) }]
           : []),
       ]}
     />

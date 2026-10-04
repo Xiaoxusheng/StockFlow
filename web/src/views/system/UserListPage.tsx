@@ -17,7 +17,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import type { MenuProps } from 'antd'
 import { resolveErrorMessage } from '@/api/client'
-import { rbacApi, type DepartmentNode } from '@/api/rbac'
+import { PASSWORD_RULE } from '@/api/auth'
+import { fetchAllPaged, MAX_PAGE_SIZE, rbacApi, type DepartmentNode } from '@/api/rbac'
+import { warehouseApi, type WarehouseItem } from '@/api/warehouse'
 import {
   userApi,
   type DataScope,
@@ -51,11 +53,18 @@ const DATA_SCOPE_META: Record<DataScope, { label: string; semantic: StatusSemant
   SELF_IN_CHARGE: { label: '本人负责', semantic: 'neutral' },
 }
 
-/** 强密码策略：长度 ≥ 8 且含字母 + 数字（backend-m1-plan.md §7.2） */
-const PASSWORD_PATTERN = /^(?=.*[A-Za-z])(?=.*\d)\S{8,64}$/
+/** 用户名规则（后端唯一依据 usernameRe，internal/auth/service_rbac.go:22：
+ * 2-64 位，字母开头，可含数字/下划线/点/连字符） */
+const USERNAME_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{1,63}$/
 
-/** 后端单页上限（internal/response/response.go:47 MaxPageSize）——角色选项一次取全 */
-const OPTIONS_PAGE_SIZE = 100
+/** 强密码策略：直接使用 PASSWORD_RULE 单一来源（@/api/auth，顶部 import），
+ * 精确镜像后端 ValidatePasswordStrength（internal/auth/password.go）——Unicode 字母
+ * （unicode.IsLetter）/数字、代码点 ≥ 8、UTF-8 字节 ≤ 72；此前本地 ASCII 正则已
+ * 收敛删除，避免同一根因两处再漂移 */
+
+/** 手机号宽松格式（后端唯一依据 phoneRe，internal/auth/service_rbac.go:1290：
+ * 5-32 位，可 + 前缀，数字与连字符——允许 +86 / 座机等形态） */
+const PHONE_PATTERN = /^\+?[0-9][0-9-]{4,31}$/
 
 const DATA_SCOPE_OPTIONS: Array<{ label: string; value: DataScope }> = [
   { label: '全部数据', value: 'ALL' },
@@ -110,20 +119,51 @@ interface UserFormValues {
   email?: string
   department_id?: string
   data_scope: DataScope
+  /** 绑定仓库（ID 字符串形态，提交转数字）；仅数据范围=指定仓库时生效 */
+  warehouse_ids?: string[]
 }
 
 interface UserFormModalProps {
   editing: UserItem | null
   departmentTreeOptions: DeptTreeOption[]
+  /** 仓库选项（数据范围=指定仓库时的绑定候选；全量拉取自 /api/warehouses） */
+  warehouseOptions: Array<{ label: string; value: string }>
+  warehouseLoading: boolean
   submitting: boolean
   onCancel: () => void
   onSubmit: (values: UserFormValues) => void
 }
 
-/** 新建 / 编辑用户弹窗（新建含初始密码，编辑不允许改用户名与密码） */
-function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, onSubmit }: UserFormModalProps) {
+/**
+ * 新建 / 编辑用户弹窗（新建含初始密码，编辑不允许改用户名与密码）。
+ * 数据范围=指定仓库时必选绑定仓库（后端 service_rbac.go:105 创建强制非空，
+ * 编辑路径以表单显式提交非空 warehouse_ids 规避「改 scope 不带绑定 → 静默空仓库集」）。
+ */
+function UserFormModal({
+  editing,
+  departmentTreeOptions,
+  warehouseOptions,
+  warehouseLoading,
+  submitting,
+  onCancel,
+  onSubmit,
+}: UserFormModalProps) {
   const isEdit = editing !== null
   const [form] = Form.useForm<UserFormValues>()
+  const dataScope = Form.useWatch('data_scope', form)
+
+  // 编辑态绑定仓库仅详情返回（service_rbac.go GetUserDetail）——拉详情回填预选
+  const detailQuery = useQuery({
+    queryKey: ['system', 'user', editing?.id],
+    queryFn: () => userApi.user(editing!.id),
+    enabled: isEdit,
+  })
+
+  useEffect(() => {
+    if (detailQuery.data?.warehouse_ids) {
+      form.setFieldsValue({ warehouse_ids: detailQuery.data.warehouse_ids.map(String) })
+    }
+  }, [detailQuery.data, form])
 
   return (
     <Modal
@@ -158,7 +198,7 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
           label="用户名"
           rules={[
             { required: true, message: '请输入用户名' },
-            { pattern: /^[a-zA-Z0-9_]{3,32}$/, message: '3–32 位字母、数字或下划线' },
+            { pattern: USERNAME_PATTERN, message: '2–64 位，字母开头，可含数字、下划线、点或连字符' },
           ]}
         >
           <Input disabled={isEdit} placeholder="登录账号" autoComplete="off" />
@@ -169,18 +209,22 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
             label="初始密码"
             rules={[
               { required: true, message: '请输入初始密码' },
-              { pattern: PASSWORD_PATTERN, message: '长度至少 8 位且需包含字母和数字' },
+              PASSWORD_RULE,
             ]}
             extra="首次登录将要求修改密码"
           >
-            <Input.Password placeholder="长度 ≥ 8 位，含字母和数字" autoComplete="new-password" />
+            <Input.Password placeholder="长度 8–72 位，含字母和数字" autoComplete="new-password" />
           </Form.Item>
         )}
         <Form.Item name="real_name" label="姓名">
           <Input placeholder="真实姓名" allowClear />
         </Form.Item>
-        <Form.Item name="phone" label="手机号" rules={[{ pattern: /^1\d{10}$/, message: '请输入 11 位手机号' }]}>
-          <Input placeholder="手机号" allowClear maxLength={11} />
+        <Form.Item
+          name="phone"
+          label="手机号"
+          rules={[{ pattern: PHONE_PATTERN, message: '5–32 位，可 + 开头、含数字与连字符（支持 +86 / 座机）' }]}
+        >
+          <Input placeholder="手机号" allowClear maxLength={32} />
         </Form.Item>
         <Form.Item name="email" label="邮箱" rules={[{ type: 'email', message: '邮箱格式不正确' }]}>
           <Input placeholder="邮箱" allowClear />
@@ -198,6 +242,28 @@ function UserFormModal({ editing, departmentTreeOptions, submitting, onCancel, o
         <Form.Item name="data_scope" label="数据范围" rules={[{ required: true, message: '请选择数据范围' }]}>
           <Select options={DATA_SCOPE_OPTIONS} placeholder="请选择数据范围" />
         </Form.Item>
+        {dataScope === 'SPECIFIED_WAREHOUSE' && (
+          <Form.Item
+            name="warehouse_ids"
+            label="绑定仓库"
+            rules={[{ required: true, type: 'array', message: '数据范围为指定仓库时必须绑定至少一个仓库' }]}
+            validateStatus={isEdit && detailQuery.error ? 'error' : undefined}
+            extra={
+              isEdit && detailQuery.error
+                ? `已绑定仓库加载失败：${resolveErrorMessage(detailQuery.error)}，请重新选择后保存`
+                : undefined
+            }
+          >
+            <Select
+              mode="multiple"
+              loading={warehouseLoading}
+              options={warehouseOptions}
+              placeholder={warehouseLoading ? '正在加载仓库…' : '选择该用户可见的仓库（可多选）'}
+              optionFilterProp="label"
+              allowClear
+            />
+          </Form.Item>
+        )}
       </Form>
     </Modal>
   )
@@ -293,10 +359,10 @@ function ResetPasswordModal({ user, submitting, onCancel, onSubmit }: ResetPassw
           label="新密码"
           rules={[
             { required: true, message: '请输入新密码' },
-            { pattern: PASSWORD_PATTERN, message: '长度至少 8 位且需包含字母和数字' },
+            PASSWORD_RULE,
           ]}
         >
-          <Input.Password placeholder="长度 ≥ 8 位，含字母和数字" autoComplete="new-password" />
+          <Input.Password placeholder="长度 8–72 位，含字母和数字" autoComplete="new-password" />
         </Form.Item>
         <Text type="secondary">重置后请通知该用户重新登录，并建议其尽快自行修改密码。</Text>
       </Form>
@@ -323,11 +389,17 @@ export default function UserListPage() {
     params,
   })
 
-  // 部门（筛选项 / 表单选择 / 部门列映射）与角色（分配角色 / 角色列映射）选项数据
+  // 部门（筛选项 / 表单选择 / 部门列映射）、角色（分配角色 / 角色列映射）与
+  // 仓库（数据范围=指定仓库的绑定候选）选项数据——均一次取全，防单页 100 静默截断
   const departmentsQuery = useQuery({ queryKey: ['system', 'departments'], queryFn: rbacApi.departmentTree })
   const rolesQuery = useQuery({
-    queryKey: ['system', 'roles', 'options'],
-    queryFn: () => rbacApi.roles({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    queryKey: ['system', 'roles', 'all'],
+    queryFn: rbacApi.rolesAll,
+  })
+  const warehousesQuery = useQuery({
+    queryKey: ['warehouse', 'options'],
+    queryFn: () =>
+      fetchAllPaged((page) => warehouseApi.list({ page, pageSize: MAX_PAGE_SIZE })),
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'users'] })
@@ -399,17 +471,20 @@ export default function UserListPage() {
 
   const handleUserFormSubmit = (values: UserFormValues) => {
     if (modal?.kind === 'edit') {
-      updateMutation.mutate({
-        id: modal.user.id,
-        payload: {
-          real_name: values.real_name,
-          phone: values.phone,
-          email: values.email,
-          // 编辑态总是传数字：清空选择 → 0 = 显式清空部门（service_rbac.go:219-225 三态语义）
-          department_id: values.department_id ? Number(values.department_id) : 0,
-          data_scope: values.data_scope,
-        },
-      })
+      const payload: UserUpdatePayload = {
+        real_name: values.real_name,
+        phone: values.phone,
+        email: values.email,
+        // 编辑态总是传数字：清空选择 → 0 = 显式清空部门（service_rbac.go:219-225 三态语义）
+        department_id: values.department_id ? Number(values.department_id) : 0,
+        data_scope: values.data_scope,
+      }
+      // 指定仓库：显式提交全量绑定（warehouse_ids 为全量替换语义，service_rbac.go:235-242）；
+      // 其他范围不传该字段，避免无意义的绑定重写
+      if (values.data_scope === 'SPECIFIED_WAREHOUSE' && values.warehouse_ids) {
+        payload.warehouse_ids = values.warehouse_ids.map(Number)
+      }
+      updateMutation.mutate({ id: modal.user.id, payload })
     } else if (modal?.kind === 'create') {
       createMutation.mutate({
         username: values.username,
@@ -419,6 +494,10 @@ export default function UserListPage() {
         email: values.email,
         department_id: values.department_id ? Number(values.department_id) : undefined,
         data_scope: values.data_scope,
+        // 指定仓库必绑（后端 service_rbac.go:105 强制非空；表单 required 已拦截空集）
+        ...(values.data_scope === 'SPECIFIED_WAREHOUSE' && values.warehouse_ids
+          ? { warehouse_ids: values.warehouse_ids.map(Number) }
+          : {}),
       })
     }
   }
@@ -440,8 +519,13 @@ export default function UserListPage() {
   const departmentOptions = flattenDepartments(departmentTree)
   const departmentTreeOptions = toTreeOptions(departmentTree)
   const departmentNames = collectDepartmentNames(departmentTree)
-  const roleNames = new Map((rolesQuery.data?.items ?? []).map((role) => [role.id, role.name]))
-  const roleOptions = (rolesQuery.data?.items ?? []).map((role) => ({ label: role.name, value: role.id }))
+  const roles = rolesQuery.data ?? []
+  const roleNames = new Map(roles.map((role) => [role.id, role.name]))
+  const roleOptions = roles.map((role) => ({ label: role.name, value: role.id }))
+  const warehouseOptions = (warehousesQuery.data ?? []).map((w: WarehouseItem) => ({
+    label: `${w.name}（${w.code}）`,
+    value: String(w.id),
+  }))
 
   const columns: ColumnsType<UserItem> = [
     { title: '用户名', dataIndex: 'username', width: 120, fixed: 'left' },
@@ -578,6 +662,8 @@ export default function UserListPage() {
         <UserFormModal
           editing={modal.kind === 'edit' ? modal.user : null}
           departmentTreeOptions={departmentTreeOptions}
+          warehouseOptions={warehouseOptions}
+          warehouseLoading={warehousesQuery.isPending}
           submitting={createMutation.isPending || updateMutation.isPending}
           onCancel={() => setModal(null)}
           onSubmit={handleUserFormSubmit}

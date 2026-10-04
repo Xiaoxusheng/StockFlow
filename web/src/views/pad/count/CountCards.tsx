@@ -27,13 +27,15 @@ export function CountStatusTag({ status }: { status: CountStatus }) {
 
 /**
  * 明细行状态：qty_counted=null=待盘（未登记与「登记为 0」语义不同，inventory-rules.md §9），
- * 有值即已盘。后端 CountItemView 无独立状态字段（handler.go:115-128），前端按口径推导仅用于展示。
+ * 有值即已盘。后端 CountItemView 无独立状态字段（handler.go:115-128），前端按口径推导仅用于
+ * 展示——显式 label + semantic、不传 status：pending 注册表键为通用「待处理」文案，status 与
+ * label 同传时 SfStatusTag 取 meta?.label 会覆盖「待盘」盘点口径（保持与 PC 明细状态列一致）。
  */
 export function CountItemStateTag({ item }: { item: Pick<CountItem, 'qty_counted'> }) {
   return item.qty_counted == null ? (
-    <SfStatusTag status="pending" label="待盘" semantic="pending" />
+    <SfStatusTag label="待盘" semantic="pending" />
   ) : (
-    <SfStatusTag status="counted" label="已盘" semantic="success" />
+    <SfStatusTag label="已盘" semantic="success" />
   )
 }
 

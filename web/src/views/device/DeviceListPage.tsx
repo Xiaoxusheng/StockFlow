@@ -22,6 +22,7 @@ import {
 } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDeviceStatus } from '@/components/device/SfDeviceStatus'
+import { ScanDirectCard } from '@/components/device/ScanDirectCard'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -165,6 +166,9 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
           </Button>
         }
       />
+      {/* 扫码设备页提供 PC 扫码直达入口（HID 扫码枪为主输入，scanner.md §2.3/§5.3）：
+          POST /api/scanner/resolve 用户 JWT 链识别后按类型直达（printing.md §4.3） */}
+      {deviceType === 'scanner' && <ScanDirectCard />}
       <SfSearchForm
         fields={[
           { name: 'keyword', label: '关键词', control: 'input', placeholder: '设备编号 / 名称' },

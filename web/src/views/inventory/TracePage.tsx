@@ -226,17 +226,6 @@ export default function TracePage() {
   const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
   const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
   const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
-  const batches = useQuery({ queryKey: ['options', 'batches'], queryFn: fetchBatchOptions })
-
-  const maps: TraceNameMaps = useMemo(
-    () => ({
-      warehouseNames: buildWarehouseMaps(warehouses.data ?? []).name,
-      skuCodes: buildSkuMaps(skus.data ?? []).code,
-      binCodes: buildBinCodeMap(bins.data ?? []),
-      batchNos: buildIdMap(batches.data ?? [], (b) => b.id, (b) => b.batch_no),
-    }),
-    [warehouses.data, skus.data, bins.data, batches.data],
-  )
 
   // 序列号台账与追溯链依赖 sku 定位，至少提供 SKU 或序列号（service_trace.go:92-94）
   const traceEnabled = Boolean(params.sku_id || params.serial_no?.trim())
@@ -253,6 +242,31 @@ export default function TracePage() {
   })
 
   const result: TraceResult | undefined = trace.data
+
+  // 批次映射按追溯结果行内 sku_id 集合按需拉取（/api/batches?sku_id= 过滤，handler.go:366-372），
+  // 避免无过滤全量拉取超上限后 batch_id→batch_no 映射降级裸 ID
+  const batchSkuIds = useMemo(() => {
+    if (!result) return []
+    const ids = new Set<string>([String(result.sku_id)])
+    for (const row of result.stock_rows) ids.add(String(row.sku_id))
+    for (const row of result.chain) ids.add(String(row.sku_id))
+    return [...ids].sort()
+  }, [result])
+  const batches = useQuery({
+    queryKey: ['options', 'batches', batchSkuIds],
+    queryFn: () => fetchBatchOptions(batchSkuIds),
+    enabled: batchSkuIds.length > 0,
+  })
+
+  const maps: TraceNameMaps = useMemo(
+    () => ({
+      warehouseNames: buildWarehouseMaps(warehouses.data ?? []).name,
+      skuCodes: buildSkuMaps(skus.data ?? []).code,
+      binCodes: buildBinCodeMap(bins.data ?? []),
+      batchNos: buildIdMap(batches.data ?? [], (b) => b.id, (b) => b.batch_no),
+    }),
+    [warehouses.data, skus.data, bins.data, batches.data],
+  )
   const skuCode = result ? (maps.skuCodes.get(idKey(result.sku_id)) ?? idKey(result.sku_id)) : undefined
 
   return (

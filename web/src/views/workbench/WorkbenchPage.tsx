@@ -19,10 +19,10 @@ interface WorkbenchEntry {
 }
 
 const ENTRIES: WorkbenchEntry[] = [
-  { key: 'todoCount', label: '我的待办' },
-  { key: 'approvalCount', label: '我的审批' },
-  { key: 'taskCount', label: '我的任务', path: '/tasks' },
-  { key: 'exceptionCount', label: '我的异常', path: '/exceptions', danger: true },
+  { key: 'todo_count', label: '我的待办' },
+  { key: 'approval_count', label: '我的审批' },
+  { key: 'task_count', label: '我的任务', path: '/tasks' },
+  { key: 'exception_count', label: '我的异常', path: '/exceptions', danger: true },
 ]
 
 /** 我的工作台（/workbench，menu.tsx 既有菜单；GET /api/workbench/summary 前端先行契约） */

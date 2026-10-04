@@ -41,10 +41,10 @@ export default function PadHomePage() {
 
   const taskCells = workbench.data
     ? [
-        { label: '我的待办', value: workbench.data.todoCount },
-        { label: '我的审批', value: workbench.data.approvalCount },
-        { label: '我的任务', value: workbench.data.taskCount },
-        { label: '我的异常', value: workbench.data.exceptionCount },
+        { label: '我的待办', value: workbench.data.todo_count },
+        { label: '我的审批', value: workbench.data.approval_count },
+        { label: '我的任务', value: workbench.data.task_count },
+        { label: '我的异常', value: workbench.data.exception_count },
       ]
     : []
 

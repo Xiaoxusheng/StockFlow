@@ -51,7 +51,7 @@ export interface UserItem {
   last_login_ip?: string
   /** 仅 GET /api/users/:id 详情返回（service_rbac.go GetUserDetail）——列表项不含该字段 */
   role_ids?: string[]
-  /** 仅详情返回（同上）；M1 用户表单未提供仓库绑定，仅透传 */
+  /** 仅详情返回（同上）；数据范围=SPECIFIED_WAREHOUSE 时由表单显式绑定 */
   warehouse_ids?: string[]
   created_at?: string | null
   updated_at?: string | null

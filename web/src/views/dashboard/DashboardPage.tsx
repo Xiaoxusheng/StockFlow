@@ -65,38 +65,39 @@ function buildOperatorMetrics(data: DashboardTodayMetrics | undefined): Dashboar
  */
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user)
-  // 视图判定 fail-closed：无管理层职能权限一律落仓库人员视图（dashboardView.ts）
+  // 视图判定 fail-closed：无管理层职能权限一律落仓库人员视图（dashboardView.ts）。
+  // 视图仅决定指标面板选择，不作为请求参数下发（数据范围以后端会话仓库权限快照为准）
   const view = resolveDashboardView(user)
-  const scope = { view } as const
 
   const [range, setRange] = useState<TrendRange>('7d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
 
-  // 自定义档：RangePicker 选定后才发请求，from/to 真实传参（YYYY-MM-DD）
+  // 自定义档：RangePicker 选定后才发请求，time_from/time_to 真实传参（YYYY-MM-DD，
+  // 后端报表域冻结参数名——dashboard.ts DashboardTimeParams）
   const trendFrom = range === 'custom' ? customRange?.[0]?.format('YYYY-MM-DD') : undefined
   const trendTo = range === 'custom' ? customRange?.[1]?.format('YYYY-MM-DD') : undefined
   const trendReady = range !== 'custom' || Boolean(trendFrom && trendTo)
 
   const today = useQuery({
-    queryKey: ['dashboard', 'today', view],
-    queryFn: () => dashboardApi.todayMetrics(scope),
+    queryKey: ['dashboard', 'today'],
+    queryFn: () => dashboardApi.todayMetrics(),
   })
   const trend = useQuery({
-    queryKey: ['dashboard', 'trend', view, range, trendFrom, trendTo],
-    queryFn: () => dashboardApi.trend(range, { ...scope, from: trendFrom, to: trendTo }),
+    queryKey: ['dashboard', 'trend', range, trendFrom, trendTo],
+    queryFn: () => dashboardApi.trend(range, { time_from: trendFrom, time_to: trendTo }),
     enabled: trendReady,
   })
   const tasks = useQuery({
-    queryKey: ['dashboard', 'tasks', view],
-    queryFn: () => dashboardApi.tasks(scope),
+    queryKey: ['dashboard', 'tasks'],
+    queryFn: () => dashboardApi.tasks(),
   })
   const alerts = useQuery({
-    queryKey: ['dashboard', 'alerts', view],
-    queryFn: () => dashboardApi.alerts(scope),
+    queryKey: ['dashboard', 'alerts'],
+    queryFn: () => dashboardApi.alerts(),
   })
   const warehouseStock = useQuery({
-    queryKey: ['dashboard', 'warehouse-stock', view],
-    queryFn: () => dashboardApi.warehouseStock(scope),
+    queryKey: ['dashboard', 'warehouse-stock'],
+    queryFn: () => dashboardApi.warehouseStock(),
   })
 
   const metrics =

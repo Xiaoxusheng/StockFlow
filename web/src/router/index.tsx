@@ -53,7 +53,8 @@ const SerialListPage = lazy(() => import('@/views/inventory/SerialListPage'))
 const TransferPage = lazy(() => import('@/views/inventory/TransferPage'))
 const TracePage = lazy(() => import('@/views/inventory/TracePage'))
 
-// 出库作业（P0：拣货/复核/打包/发货；后端 outbound 域未交付，呈统一错误态）
+// 出库作业（P0：拣货/复核/打包/发货；后端 outbound 域 M2 已交付——internal/sales/routes.go:94-112
+// 四作业端点已注册，四页列表只读、作业交互待接线轮）
 const PickingPage = lazy(() => import('@/views/outbound/PickingPage'))
 const CheckingPage = lazy(() => import('@/views/outbound/CheckingPage'))
 const PackingPage = lazy(() => import('@/views/outbound/PackingPage'))
@@ -73,6 +74,9 @@ const PurchaseReturnListPage = lazy(() => import('@/views/purchase/PurchaseRetur
 const InboundDetailPage = lazy(() => import('@/views/inbound/InboundDetailPage'))
 const OutboundDetailPage = lazy(() => import('@/views/outbound/OutboundDetailPage'))
 const PurchaseOrderDetailPage = lazy(() => import('@/views/purchase/PurchaseOrderDetailPage'))
+// 单据创建/草稿编辑共用表单页（采购订单/入库单；列表「新建」与详情「编辑」跳转目标，无菜单路径）
+const PurchaseOrderFormPage = lazy(() => import('@/views/purchase/PurchaseOrderFormPage'))
+const InboundFormPage = lazy(() => import('@/views/inbound/InboundFormPage'))
 
 // 质量中心（前端先行契约：后端质量域未交付，呈统一错误态）
 const QualityInspectionListPage = lazy(() => import('@/views/quality/QualityInspectionListPage'))
@@ -109,11 +113,12 @@ const FileCenterPage = lazy(() => import('@/views/data/FileCenterPage'))
 const DeviceListPage = lazy(() => import('@/views/device/DeviceListPage'))
 const DeviceCreatePage = lazy(() => import('@/views/device/DeviceCreatePage'))
 const DeviceDetailPage = lazy(() => import('@/views/device/DeviceDetailPage'))
-// 系统管理余量（日志/定时任务/系统配置/系统监控）
+// 系统管理余量（日志/定时任务/系统配置/系统监控/数据备份）
 const LogPage = lazy(() => import('@/views/system/LogPage'))
 const JobPage = lazy(() => import('@/views/system/JobPage'))
 const SettingsPage = lazy(() => import('@/views/system/SettingsPage'))
 const MonitorPage = lazy(() => import('@/views/system/MonitorPage'))
+const BackupPage = lazy(() => import('@/views/system/BackupPage'))
 
 // Pad 平板作业端（F14：frontend.md §20 十页；独立终端入口，与 PC '/' 段平级挂 PadLayout，
 // 不进 PC 侧边栏菜单——menu.tsx / IMPLEMENTED_PATHS 均零改动）
@@ -209,11 +214,12 @@ const IMPLEMENTED_PATHS = new Set([
   '/devices/pda',
   '/devices/pads',
   '/devices/printers',
-  // 系统管理余量（日志/定时任务/系统配置/系统监控）
+  // 系统管理余量（日志/定时任务/系统配置/系统监控/数据备份）
   '/system/logs',
   '/system/jobs',
   '/system/settings',
   '/system/monitor',
+  '/system/backups',
 ])
 
 function menuPaths(): string[] {
@@ -330,10 +336,20 @@ export const router = createBrowserRouter([
         path: 'inbound',
         element: <LazyPage><InboundPage /></LazyPage>,
       },
+      // 入库单新建（无菜单路径，静态段先于动态段）
+      {
+        path: 'inbound/new',
+        element: <LazyPage><InboundFormPage /></LazyPage>,
+      },
       // 入库单详情（列表「详情」列进入；动态段无菜单）
       {
         path: 'inbound/:id',
         element: <LazyPage><InboundDetailPage /></LazyPage>,
+      },
+      // 入库单草稿编辑（无菜单路径；与 inbound/:id 互不冲突，静态优先命中）
+      {
+        path: 'inbound/:id/edit',
+        element: <LazyPage><InboundFormPage /></LazyPage>,
       },
       {
         path: 'outbound',
@@ -397,10 +413,20 @@ export const router = createBrowserRouter([
         path: 'purchases',
         element: <LazyPage><PurchaseListPage /></LazyPage>,
       },
+      // 采购订单新建（无菜单路径，静态段先于动态段）
+      {
+        path: 'purchases/new',
+        element: <LazyPage><PurchaseOrderFormPage /></LazyPage>,
+      },
       // 采购订单详情（Timeline 含部分收货进度；动态段无菜单，与 receipts/returns 静态段共存静态优先）
       {
         path: 'purchases/:id',
         element: <LazyPage><PurchaseOrderDetailPage /></LazyPage>,
+      },
+      // 采购订单草稿编辑（无菜单路径；与 purchases/:id 互不冲突，静态优先命中）
+      {
+        path: 'purchases/:id/edit',
+        element: <LazyPage><PurchaseOrderFormPage /></LazyPage>,
       },
       // 采购收货 / 退货（P0 单据域）
       {
@@ -559,7 +585,8 @@ export const router = createBrowserRouter([
         path: 'system/departments',
         element: <LazyPage><DepartmentPage /></LazyPage>,
       },
-      // 系统管理余量（日志/定时任务/系统配置/系统监控；/system/notifications 仍占位）
+      // 系统管理余量（日志/定时任务/系统配置/系统监控/数据备份；通知为顶栏 NotificationDrawer
+      // 个人收件箱，无独立页面路由）
       {
         path: 'system/logs',
         element: <LazyPage><LogPage /></LazyPage>,
@@ -575,6 +602,11 @@ export const router = createBrowserRouter([
       {
         path: 'system/monitor',
         element: <LazyPage><MonitorPage /></LazyPage>,
+      },
+      // 数据备份（system:backup:view；列表/登记/下载/pg_dump 模板，api/system.ts 已接线）
+      {
+        path: 'system/backups',
+        element: <LazyPage><BackupPage /></LazyPage>,
       },
       ...placeholderRoutes(),
     ],

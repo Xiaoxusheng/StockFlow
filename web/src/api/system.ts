@@ -130,7 +130,7 @@ export interface SystemJobQuery extends PageQuery {
 /** 最近一次执行状态（db/migrations/000014 chk_scheduled_jobs_last_run_status 小写值域） */
 export type SystemJobRunStatus = 'success' | 'failed' | 'running' | 'never'
 
-/** 定时任务条目（ScheduledJob，internal/sysops/jobsapi.go:14-25 字段全量；
+/** 定时任务条目（ScheduledJob，internal/sysops/jobsapi.go:14-29 字段全量；
  * 执行时间 cron 表达式 + 启停热更新 + 最近执行三要素） */
 export interface SystemJobItem {
   id: SystemJobId
@@ -140,6 +140,9 @@ export interface SystemJobItem {
   /** 执行时间 cron 表达式 */
   cron: string
   enabled: boolean
+  /** 进程内是否已装配调度（jobsapi.go:26-28：handler 已注册为 true，
+   * 空实现位任务为 false——启停仅落库，服务重启后按 DB 行生效） */
+  scheduled: boolean
   last_run_at?: string | null
   last_run_status?: SystemJobRunStatus
   /** 最近一次执行耗时（毫秒） */
@@ -232,6 +235,63 @@ export interface SystemMonitorMetrics {
   remarks: string[]
 }
 
+// ---------- 数据备份（/api/system/backups，裁决②混合模式：应用侧登记/列表/下载，
+// pg_dump 由部署侧执行器拾取执行——internal/sysops/routes.go:111-114 / backups.go） ----------
+
+/** 菜单权限码（后端冻结三段式，internal/auth/permissions.go:362-365） */
+export const SYSTEM_BACKUP_VIEW_PERMISSION = 'system:backup:view'
+/** 登记备份按钮权限（POST /api/system/backups 后端校验 system:backup:create） */
+export const SYSTEM_BACKUP_CREATE_PERMISSION = 'system:backup:create'
+/** 下载 / pg_dump 模板权限（system:backup:read，routes.go:111/114） */
+export const SYSTEM_BACKUP_READ_PERMISSION = 'system:backup:read'
+
+/** 备份状态机（db/migrations/000014 chk_backup_records_status；backups.go:32-37） */
+export type SystemBackupStatus = 'REQUESTED' | 'RUNNING' | 'SUCCESS' | 'FAILED'
+
+/** 备份触发方式（backups.go:40：AUTO=部署侧执行器调度 / MANUAL=管理端登记） */
+export type SystemBackupTrigger = 'AUTO' | 'MANUAL'
+
+/** 备份记录（backupRecord，internal/sysops/backups.go:42-54 字段全量；ID 为裸 int64） */
+export interface SystemBackupItem {
+  id: number
+  /** 备份文件名（执行器回写前为空串） */
+  file_name: string
+  /** 相对 storage.backups 根的相对路径（下载路径由后端防穿越解析，前端不拼路径） */
+  file_path: string
+  /** 文件大小（字节；未执行为 0） */
+  size_bytes: number
+  trigger: SystemBackupTrigger
+  status: SystemBackupStatus
+  /** 状态说明 / 失败原因（空串省略） */
+  message?: string
+  started_at?: string | null
+  finished_at?: string | null
+  created_at: string
+  created_by: number
+}
+
+/** 备份筛选（routes.go listBackups：status 筛选 + 统一分页） */
+export interface SystemBackupQuery extends PageQuery {
+  status?: SystemBackupStatus
+}
+
+/** 手动登记返回（routes.go:455-469：backup 行 + 提示语「等待部署侧执行器拾取」） */
+export interface SystemBackupRegisterResult {
+  backup: SystemBackupItem
+  message: string
+}
+
+/** pg_dump 命令模板（pgDumpTemplate，backups.go:174-181；密码绝不进模板——
+ * PGPASSWORD/.pgpass 注入，deployment.md §4） */
+export interface SystemPgDumpTemplate {
+  /** pg_dump 命令模板（未注入连接参数保持 <placeholder> 占位） */
+  command: string
+  /** 宿主机 crontab 样例（每日 02:30） */
+  crontab_line: string
+  /** 执行边界注记（应用进程不执行备份；执行器拾取 REQUESTED 回写） */
+  notes: string[]
+}
+
 // ---------- API ----------
 
 export const systemApi = {
@@ -258,5 +318,22 @@ export const systemApi = {
   monitor: {
     /** GET /api/system/monitor：监控指标 + 趋势（deployment.md §5 指标矩阵） */
     metrics: () => http.get<SystemMonitorMetrics>('/api/system/monitor'),
+  },
+  backups: {
+    /** GET /api/system/backups：备份记录分页（status 筛选，created_at 倒序） */
+    list: (query: SystemBackupQuery) =>
+      http.get<PageResult<SystemBackupItem>>('/api/system/backups', { params: query }),
+    /** POST /api/system/backups：登记 REQUESTED 记录（trigger=MANUAL，无请求体）；
+     * 并发在途命中 uk_backup_records_inflight → 409 SYSTEM_BACKUP_INFLIGHT */
+    register: () => http.post<SystemBackupRegisterResult>('/api/system/backups'),
+    /**
+     * GET /api/system/backups/:id/download：备份文件下载（二进制流，非信封——
+     * client.ts:52 非信封响应原样放行）。仅 SUCCESS 记录可下载（backups.go:145-147）；
+     * timeout 置 0 不限时（备份文件可远超 axios 默认 15s）。
+     */
+    download: (id: number) =>
+      http.get<Blob>(`/api/system/backups/${id}/download`, { responseType: 'blob', timeout: 0 }),
+    /** GET /api/system/backups/pg-dump-template：pg_dump 命令模板（system:backup:read） */
+    pgDumpTemplate: () => http.get<SystemPgDumpTemplate>('/api/system/backups/pg-dump-template'),
   },
 }

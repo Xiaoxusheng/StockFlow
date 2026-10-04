@@ -1,4 +1,13 @@
-import { OPTIONS_PAGE_SIZE, masterdataApi, type CustomerItem, type SkuItem, type SupplierItem } from './masterdata'
+import {
+  OPTIONS_PAGE_SIZE,
+  masterdataApi,
+  type CategoryItem,
+  type CustomerItem,
+  type ProductItem,
+  type SkuItem,
+  type SupplierItem,
+  type UnitItem,
+} from './masterdata'
 import { binApi, warehouseApi, type BinItem, type WarehouseItem } from './warehouse'
 import { userApi, type UserItem } from './user'
 import { inventoryApi, type BatchItem } from './inventory'
@@ -50,6 +59,20 @@ export function fetchSkuOptions(): Promise<SkuItem[]> {
   return fetchAllPages((page) => masterdataApi.skus.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
 }
 
+export function fetchProductOptions(): Promise<ProductItem[]> {
+  return fetchAllPages((page) => masterdataApi.products.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
+}
+
+export function fetchCategoryOptions(): Promise<CategoryItem[]> {
+  return fetchAllPages((page) =>
+    masterdataApi.categories.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }),
+  )
+}
+
+export function fetchUnitOptions(): Promise<UnitItem[]> {
+  return fetchAllPages((page) => masterdataApi.units.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
+}
+
 export function fetchCustomerOptions(): Promise<CustomerItem[]> {
   return fetchAllPages((page) => masterdataApi.customers.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
 }
@@ -62,9 +85,32 @@ export function fetchBinOptions(): Promise<BinItem[]> {
   return fetchAllPages((page) => binApi.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
 }
 
-/** 批次 id → batch_no 映射数据源（GET /api/batches；锁定/调整/追溯行仅下发 batch_id 裸 ID） */
-export function fetchBatchOptions(): Promise<BatchItem[]> {
-  return fetchAllPages((page) => inventoryApi.batches({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
+/**
+ * 批次 id → batch_no 映射数据源（GET /api/batches；锁定/调整/追溯行仅下发 batch_id 裸 ID）。
+ *
+ * 行数据均携带 sku_id（InventoryLockItem/InventoryAdjustmentItem/Trace* 行），优先按调用方
+ * 当前行去重后的 sku_id 集合逐个过滤拉取（GET /api/batches 支持 sku_id 过滤，inventory/
+ * handler.go:366-372；PadStockMovePage.tsx:220 同模式）——批次台账量级可能远超一页取全上限
+ * （MAX_PAGES=50 页×100 行），无过滤全量拉取超限后 batch_id→batch_no 映射降级裸 ID。
+ */
+export async function fetchBatchOptions(skuIds?: ReadonlyArray<number | string>): Promise<BatchItem[]> {
+  const ids = [...new Set((skuIds ?? []).map((v) => String(v).trim()).filter(Boolean))]
+  if (ids.length === 0) {
+    // 无 sku_id 可按（页面尚未查询/行数据为空）：退化为无过滤取全，仍受 MAX_PAGES 防御约束
+    return fetchAllPages((page) => inventoryApi.batches({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
+  }
+  const groups = await Promise.all(
+    ids.map((id) =>
+      fetchAllPages((page) =>
+        inventoryApi.batches({ sku_id: id, page, pageSize: OPTIONS_FETCH_PAGE_SIZE }),
+      ),
+    ),
+  )
+  const byId = new Map<string, BatchItem>()
+  for (const rows of groups) {
+    for (const batch of rows) byId.set(idKey(batch.id), batch)
+  }
+  return [...byId.values()]
 }
 
 export function fetchUserOptions(): Promise<UserItem[]> {

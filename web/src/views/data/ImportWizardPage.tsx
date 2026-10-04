@@ -147,7 +147,9 @@ export default function ImportWizardPage() {
   })
   const templates = useMemo(() => templatesQuery.data ?? [], [templatesQuery.data])
   const selectedTemplate = templates.find((template) => template.import_type === importType) ?? null
-  const highRisk = isHighRiskImport(uploadResult?.import_type)
+  // 高危判定优先消费后端清单下发的 high_risk（TemplateItem，service_import.go:43），
+  // 模板清单缺位时按 import_type 本地兜底（isHighRiskImport 与 registry.go:152-154 同判）
+  const highRisk = selectedTemplate?.high_risk ?? isHighRiskImport(uploadResult?.import_type)
 
   // 第 4 步：预览为后端解析后的结构化数据（GET /api/imports/{id}/preview），进入该步时加载
   const previewQuery = useQuery({
@@ -254,8 +256,8 @@ export default function ImportWizardPage() {
 
   const handleConfirmImport = () => {
     if (!uploadResult) return
-    // 初始化库存导入属高危操作：必须二次确认（excel.md §6.1）
-    if (isHighRiskImport(uploadResult.import_type)) {
+    // 高危类型（后端 high_risk 判定）必须二次确认（excel.md §6.1）
+    if (highRisk) {
       setRiskAck(false)
       setRiskModalOpen(true)
       return
@@ -357,11 +359,11 @@ export default function ImportWizardPage() {
                     >
                       下载模板
                     </Button>
-                    {isHighRiskImport(selectedTemplate.import_type) && (
+                    {selectedTemplate.high_risk && (
                       <Alert
                         type="warning"
                         showIcon
-                        message="初始化库存导入属于高危操作"
+                        message="该导入类型属于高危操作"
                         description="导入将直接写入库存并产生库存流水（业务类型=初始化导入），确认导入环节要求二次确认（excel.md §6.1）。"
                       />
                     )}
@@ -380,7 +382,7 @@ export default function ImportWizardPage() {
                 </Text>
               </Flex>
               <Upload.Dragger
-                accept=".xlsx,.xls"
+                accept=".xlsx"
                 maxCount={1}
                 fileList={uploadFileList}
                 beforeUpload={handleBeforeUpload}
@@ -394,7 +396,7 @@ export default function ImportWizardPage() {
                   <InboxOutlined />
                 </p>
                 <p className="ant-upload-text">点击或拖拽文件到此处</p>
-                <p className="ant-upload-hint">仅支持按模板填写的 .xlsx / .xls 文件</p>
+                <p className="ant-upload-hint">仅支持按模板填写的 .xlsx 文件（excelize 不支持旧版 .xls，选 .xls 必被后端拒绝）</p>
               </Upload.Dragger>
               {uploadMutation.isError && (
                 <SfError
@@ -544,7 +546,7 @@ export default function ImportWizardPage() {
                 <Alert
                   type="warning"
                   showIcon
-                  message="初始化库存导入为高危操作"
+                  message="该导入类型为高危操作"
                   description="点击「确认导入」后将弹出二次确认，确认无误才会执行导入（excel.md §6.1）。"
                 />
               )}
@@ -577,11 +579,11 @@ export default function ImportWizardPage() {
                     { label: '失败', value: formatNumber(confirmResult.failed_rows) },
                   ]}
                 />
-                {confirmResult.status === 'PROCESSING' && (
+                {confirmResult.status === 'EXECUTING' && (
                   <Alert
                     type="info"
                     showIcon
-                    message="导入任务仍在后台执行，可稍后在下方任务记录中查看结果（excel.md §4）。"
+                    message="导入任务已进入执行中（EXECUTING），处理完成后可在下方任务记录中查看结果（excel.md §4）。"
                   />
                 )}
                 {confirmResult.errors && confirmResult.errors.length > 0 && (

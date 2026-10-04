@@ -64,7 +64,10 @@ function resolveLineColumns(lines: Array<Record<string, string>>): string[] {
   return keys
 }
 
-/** 单据布局：页眉（公司名/单据名）+ 表头信息 + 明细表 + 页脚（printing.md §2 单据类模板） */
+/** 单据布局：页眉（公司名/单据名）+ 表头信息 + 明细表 + 页脚（printing.md §2 单据类模板）。
+ * 快照 qrcode_enabled 时在页眉右上渲染单据二维码（printing.md §4.2 可生成的码）：
+ * 内容为单据号（row.code），与后端渲染管线逐行预生成同源（service_task.go:397-402），
+ * 扫码经 /api/scanner/resolve 单号前缀直达单据详情（printing.md §4.3） */
 function DocumentLayout({ template, row, printedAt, printedBy }: PrintContentRendererProps) {
   const lines = row.lines ?? []
   const columns = resolveLineColumns(lines)
@@ -72,7 +75,14 @@ function DocumentLayout({ template, row, printedAt, printedBy }: PrintContentRen
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 16, marginBottom: 10 }}>{headerText}</div>
+      <div style={{ position: 'relative', marginBottom: 10 }}>
+        <div style={{ textAlign: 'center', fontWeight: 700, fontSize: 16 }}>{headerText}</div>
+        {template.qrcode_enabled && (
+          <div style={{ position: 'absolute', top: 0, right: 0, lineHeight: 0 }}>
+            <QrCodeView value={row.code} size={64} />
+          </div>
+        )}
+      </div>
       <div
         style={{
           display: 'flex',

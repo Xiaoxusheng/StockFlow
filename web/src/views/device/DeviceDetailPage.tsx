@@ -1,19 +1,29 @@
 import { useMemo, useState } from 'react'
-import { Button, Descriptions, Flex, Modal, Select, Typography, message } from 'antd'
+import type { ReactNode } from 'react'
+import { Alert, Button, Col, Descriptions, Flex, Form, Input, InputNumber, Modal, Row, Select, Switch, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
+import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate, useParams } from 'react-router'
 import dayjs from 'dayjs'
 import {
   ACTIVATION_STATUS_META,
   DEVICE_LIST_PATH,
+  DEVICE_SCANLOG_LIST_PERMISSION,
   DEVICE_STATUS_PERMISSION,
   DEVICE_TYPE_LABEL,
   DEVICE_UPDATE_PERMISSION,
+  DEVICE_LOG_LEVEL_META,
   deviceApi,
   type DeviceActivationStatus,
   type DeviceBindPayload,
+  type DeviceConfigPayload,
   type DeviceDetail,
+  type DeviceLogLevel,
+  type DeviceLogItem,
+  type DeviceLogQuery,
+  type ScanLogItem,
+  type ScanLogQuery,
 } from '@/api/device'
 import {
   buildUserNameMap,
@@ -24,6 +34,7 @@ import {
 } from '@/api/options'
 import { toStatusKey } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
+import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
@@ -33,6 +44,7 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SfTable } from '@/components/table/SfTable'
 import { formatDateTime, formatNumber, formatPercent } from '@/utils/format'
 
 const { Text } = Typography
@@ -80,6 +92,121 @@ function idRefText(value: number, names: Map<string, string>, emptyText: string)
   return names.get(idKey(value)) ?? `#${idKey(value)}`
 }
 
+/** 配置下发表单值（九键白名单，devices.md §7.3；仓库下拉存字符串 ID 提交转 number） */
+interface DeviceConfigFormValues {
+  scan_mode?: string
+  sound?: boolean
+  vibrate?: boolean
+  auto_focus?: boolean
+  continuous_scan?: boolean
+  scan_timeout_seconds?: number | null
+  default_warehouse_id?: string
+  task_refresh_seconds?: number | null
+  auto_lock_minutes?: number | null
+}
+
+/** 日志级别标签（级别不在 types/status.ts 注册表，经 SfStatusTag 显式指定，frontend.md §24） */
+function renderLogLevel(level?: string): ReactNode {
+  const meta = level ? DEVICE_LOG_LEVEL_META[level as DeviceLogLevel] : undefined
+  return <SfStatusTag label={meta?.label ?? level ?? '-'} semantic={meta?.semantic ?? 'neutral'} />
+}
+
+/** 扫码结果标签（scan_logs.success） */
+function renderScanSuccess(success?: boolean): ReactNode {
+  return success ? (
+    <SfStatusTag label="成功" semantic="success" />
+  ) : (
+    <SfStatusTag label="失败" semantic="danger" />
+  )
+}
+
+/**
+ * 设备日志分区表（GET /api/devices/{id}/logs，handler.go:194/:503-520，devices.md §7.1
+ * 「查看设备日志」）：使用记录不传 level 取全量，异常记录传 level=ERROR 取错误子集
+ * （chk_device_logs_level 值域 INFO/WARN/ERROR）。详情页内小表固定每页 5 行。
+ */
+function DeviceLogSection({ deviceId, level, emptyText }: { deviceId: string; level?: DeviceLogLevel; emptyText: string }) {
+  const list = usePagedList<DeviceLogItem, DeviceLogQuery>({
+    queryKey: ['devices', 'logs', deviceId, level ?? 'ALL'],
+    fetch: (query) => deviceApi.logs(deviceId, query),
+    params: level ? { level } : {},
+    defaultPageSize: 5,
+  })
+
+  const columns: ColumnsType<DeviceLogItem> = [
+    { title: '发生时间', dataIndex: 'occurred_at', width: 160, render: (value: string) => formatDateTime(value) },
+    { title: '级别', dataIndex: 'level', width: 80, render: renderLogLevel },
+    { title: '事件', dataIndex: 'event_type', width: 150, ellipsis: true, render: (value?: string) => value || '-' },
+    { title: '消息', dataIndex: 'message', ellipsis: true, render: (value?: string) => value || '-' },
+  ]
+
+  return (
+    <SfTable<DeviceLogItem>
+      columns={columns}
+      dataSource={list.items}
+      loading={list.isFetching}
+      error={list.error}
+      onRetry={list.refetch}
+      onRefresh={list.refetch}
+      pagination={list.pagination}
+      total={list.total}
+      onPageChange={list.onPageChange}
+      emptyText={emptyText}
+      scrollX={760}
+      showDensity={false}
+      showColumnSetting={false}
+      showFullscreen={false}
+    />
+  )
+}
+
+/**
+ * 操作记录分区表（GET /api/scanner/logs?device_id=，handler.go:197/:529-581）：
+ * 数据源为扫码审计 scan_logs——谁、在哪台设备、什么时候、扫了什么（devices.md §13.2）；
+ * 需 devices:scanlog:list 权限（后端 RequirePermission），无权限时如实说明、不发无效请求。
+ */
+function ScanLogSection({ deviceId, canView }: { deviceId: string; canView: boolean }) {
+  const list = usePagedList<ScanLogItem, ScanLogQuery>({
+    queryKey: ['devices', 'scan-logs', deviceId],
+    fetch: (query) => deviceApi.scanLogs({ ...query, device_id: deviceId }),
+    params: {},
+    defaultPageSize: 5,
+    enabled: canView,
+  })
+
+  const columns: ColumnsType<ScanLogItem> = [
+    { title: '时间', dataIndex: 'created_at', width: 160, render: (value: string) => formatDateTime(value) },
+    { title: '操作人', dataIndex: 'username', width: 110, ellipsis: true, render: (value?: string) => value || '-' },
+    { title: '识别类型', dataIndex: 'resolve_type', width: 90, render: (value?: string) => value || '-' },
+    { title: '识别对象', dataIndex: 'resolve_code', width: 160, ellipsis: true, render: (value?: string) => value || '-' },
+    { title: '扫码内容', dataIndex: 'raw_code', width: 180, ellipsis: true, render: (value?: string) => value || '-' },
+    { title: '结果', dataIndex: 'success', width: 80, render: (value: boolean) => renderScanSuccess(value) },
+  ]
+
+  if (!canView) {
+    return <SfEmpty description="查看扫码操作记录需要 devices:scanlog:list 权限（当前账号未持有，后端将拒绝该查询）" />
+  }
+
+  return (
+    <SfTable<ScanLogItem>
+      columns={columns}
+      dataSource={list.items}
+      loading={list.isFetching}
+      error={list.error}
+      onRetry={list.refetch}
+      onRefresh={list.refetch}
+      pagination={list.pagination}
+      total={list.total}
+      onPageChange={list.onPageChange}
+      emptyText="该设备暂无扫码记录；扫码解析（/api/scanner/resolve）落审计后在此展示（devices.md §13.2）"
+      scrollX={940}
+      showDensity={false}
+      showColumnSetting={false}
+      showFullscreen={false}
+    />
+  )
+}
+
 /**
  * 设备详情（/devices/:id，无菜单动态段；frontend.md §14.2 分区结构）。
  * 出参 DeviceDetailView = Device 裸模型 + online/config/config_version/scan_total/scan_today
@@ -94,6 +221,8 @@ export default function DeviceDetailPage() {
   const queryClient = useQueryClient()
   const [bindOpen, setBindOpen] = useState(false)
   const [bindUserId, setBindUserId] = useState<string>()
+  const [configOpen, setConfigOpen] = useState(false)
+  const [configForm] = Form.useForm<DeviceConfigFormValues>()
   const permissions = useAuthStore((s) => s.permissions)
 
   /** dev 会话权限快照为 ['*'] 全通过（LoginPage:240-242） */
@@ -116,6 +245,15 @@ export default function DeviceDetailPage() {
     queryFn: fetchUserOptions,
   })
   const warehouseNames = useMemo(() => buildWarehouseMaps(warehouses.data ?? []).name, [warehouses.data])
+  // 配置下发弹窗「默认仓库」下拉（device_configs.default_warehouse_id int 键；DeviceCreatePage 同款映射）
+  const warehouseOptions = useMemo(
+    () =>
+      (warehouses.data ?? []).map((item) => ({
+        label: `${item.name}（${item.code}）`,
+        value: String(item.id),
+      })),
+    [warehouses.data],
+  )
   const userNames = useMemo(() => buildUserNameMap(users.data ?? []), [users.data])
   const userOptions = useMemo(
     () =>
@@ -159,6 +297,65 @@ export default function DeviceDetailPage() {
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
+
+  // 配置下发（PUT /api/devices/{id}/config，devices.md §7.3 白名单校验）：后端
+  // UpsertDeviceConfig 为整体覆盖（repository.go:292 SET config = EXCLUDED.config），
+  // 表单按现有配置全量预填、提交全量值——清空的键即从配置中移除，与界面所见一致
+  const configMutation = useMutation({
+    mutationFn: (payload: DeviceConfigPayload) => deviceApi.config(id as string, payload),
+    onSuccess: (result) => {
+      setConfigOpen(false)
+      messageApi.success(`配置已下发（版本 v${result.version}），设备端将自动同步（devices.md §7.3）`)
+      invalidate()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  const openConfigModal = (detail: DeviceDetail) => {
+    configMutation.reset()
+    // detail.config 为 jsonb 原样出参，键值类型由后端白名单约束，收窄为表单值类型
+    const currentConfig = (detail.config ?? {}) as Partial<DeviceConfigPayload>
+    configForm.setFieldsValue({
+      scan_mode: currentConfig.scan_mode,
+      sound: currentConfig.sound ?? false,
+      vibrate: currentConfig.vibrate ?? false,
+      auto_focus: currentConfig.auto_focus ?? false,
+      continuous_scan: currentConfig.continuous_scan ?? false,
+      scan_timeout_seconds: currentConfig.scan_timeout_seconds,
+      default_warehouse_id: currentConfig.default_warehouse_id
+        ? String(currentConfig.default_warehouse_id)
+        : undefined,
+      task_refresh_seconds: currentConfig.task_refresh_seconds,
+      auto_lock_minutes: currentConfig.auto_lock_minutes,
+    })
+    setConfigOpen(true)
+  }
+
+  const handleConfigSubmit = () => {
+    configForm
+      .validateFields()
+      .then((values) => {
+        const payload: DeviceConfigPayload = {}
+        const scanMode = values.scan_mode?.trim()
+        if (scanMode) payload.scan_mode = scanMode
+        if (values.sound !== undefined) payload.sound = values.sound
+        if (values.vibrate !== undefined) payload.vibrate = values.vibrate
+        if (values.auto_focus !== undefined) payload.auto_focus = values.auto_focus
+        if (values.continuous_scan !== undefined) payload.continuous_scan = values.continuous_scan
+        if (values.scan_timeout_seconds != null) payload.scan_timeout_seconds = values.scan_timeout_seconds
+        if (values.default_warehouse_id) payload.default_warehouse_id = Number(values.default_warehouse_id)
+        if (values.task_refresh_seconds != null) payload.task_refresh_seconds = values.task_refresh_seconds
+        if (values.auto_lock_minutes != null) payload.auto_lock_minutes = values.auto_lock_minutes
+        if (Object.keys(payload).length === 0) {
+          messageApi.warning('请至少填写一项配置')
+          return
+        }
+        configMutation.mutate(payload)
+      })
+      .catch(() => {
+        // 表单校验失败：Form.Item 已内联提示
+      })
+  }
 
   const handleBindOk = () => {
     if (!bindUserId) {
@@ -354,9 +551,14 @@ export default function DeviceDetailPage() {
         <SfDetailSection
           title="设备配置"
           extra={
-            detail.config ? (
-              <Text type="secondary">配置版本 v{detail.config_version}</Text>
-            ) : undefined
+            <Flex gap={8} align="center">
+              {detail.config ? <Text type="secondary">配置版本 v{detail.config_version}</Text> : null}
+              {enabled && hasPerm(DEVICE_UPDATE_PERMISSION) && (
+                <Button size="small" onClick={() => openConfigModal(detail)}>
+                  下发配置
+                </Button>
+              )}
+            </Flex>
           }
         >
           {detail.config && Object.keys(detail.config).length > 0 ? (
@@ -374,17 +576,25 @@ export default function DeviceDetailPage() {
             <SfEmpty description="该设备尚未下发配置（devices.md §7.3：下发后 Scan 端自动同步）" />
           )}
         </SfDetailSection>
-        {/* frontend.md §14.2 规划的使用/异常/操作记录三区：设备日志 GET /api/devices/{id}/logs、
-            扫码日志 /api/scanner/logs 与设备操作审计均未纳入本页数据契约（api/device.ts 未封装），
-            呈真实空态说明，不造假数据 */}
+        {/* frontend.md §14.2 使用/异常/操作记录三区：使用记录=设备运行日志全量、异常记录=ERROR
+            子集（GET /api/devices/{id}/logs，handler.go:194），操作记录=扫码审计
+            （GET /api/scanner/logs?device_id，handler.go:197）——数据源已封装（api/device.ts），
+            空态为真实无数据；设备操作审计（绑定/解绑/停用）后端无管理端查询端点，未纳入 */}
         <SfDetailSection title="使用记录">
-          <SfEmpty description="暂无使用记录（设备日志数据源未纳入管理端页面契约）" />
+          <DeviceLogSection
+            deviceId={String(detail.id)}
+            emptyText="该设备暂无运行日志；设备端批量上报（device_logs）后在此展示"
+          />
         </SfDetailSection>
         <SfDetailSection title="异常记录">
-          <SfEmpty description="暂无异常记录（设备异常数据源未纳入管理端页面契约）" />
+          <DeviceLogSection
+            deviceId={String(detail.id)}
+            level="ERROR"
+            emptyText="暂无异常记录；设备运行日志 ERROR 级别条目将在此展示"
+          />
         </SfDetailSection>
         <SfDetailSection title="操作记录">
-          <SfEmpty description="暂无操作记录（设备操作审计数据源未纳入管理端页面契约）" />
+          <ScanLogSection deviceId={String(detail.id)} canView={hasPerm(DEVICE_SCANLOG_LIST_PERMISSION)} />
         </SfDetailSection>
       </Flex>
 
@@ -406,6 +616,88 @@ export default function DeviceDetailPage() {
           showSearch
           optionFilterProp="label"
         />
+      </Modal>
+
+      <Modal
+        title="下发设备配置"
+        open={configOpen}
+        width={560}
+        forceRender
+        confirmLoading={configMutation.isPending}
+        okText="下发"
+        onOk={handleConfigSubmit}
+        onCancel={() => setConfigOpen(false)}
+      >
+        {configMutation.isError && (
+          <Alert
+            type="error"
+            showIcon
+            message={resolveErrorMessage(configMutation.error)}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="下发展为整体覆盖：表单已按当前配置预填，清空某项并下发即从配置中移除该项"
+        />
+        {/* 键集 = devices.md §7.3 冻结九键（service_device.go:38-48 白名单同源）；
+            后端值校验：bool 开关 / 非负整数 / scan_mode 1-64 字符字符串 */}
+        <Form<DeviceConfigFormValues> form={configForm} layout="vertical">
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="scan_mode" label="扫码模式" extra="1–64 字符，留空=移除该项">
+                <Input placeholder="如：continuous" maxLength={64} allowClear />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="default_warehouse_id" label="默认仓库" extra="留空=移除该项">
+                <Select
+                  options={warehouseOptions}
+                  placeholder="请选择默认仓库"
+                  allowClear
+                  loading={warehouses.isFetching}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="sound" label="声音" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="vibrate" label="震动" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="auto_focus" label="自动聚焦" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="continuous_scan" label="连续扫码" valuePropName="checked">
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="scan_timeout_seconds" label="扫码超时（秒）" extra="0 或留空=移除该项">
+                <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="非负整数" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="task_refresh_seconds" label="任务刷新间隔（秒）" extra="0 或留空=移除该项">
+                <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="非负整数" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="auto_lock_minutes" label="自动锁屏（分钟）" extra="0=关闭自动锁屏，留空=移除该项">
+                <InputNumber min={0} precision={0} style={{ width: '100%' }} placeholder="非负整数" />
+              </Form.Item>
+            </Col>
+          </Row>
+        </Form>
       </Modal>
     </div>
   )

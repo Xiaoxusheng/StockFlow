@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Button, message } from 'antd'
+import { Button, Input, Modal, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { resolveErrorMessage } from '@/api/client'
 import {
+  TRANSFER_CANCEL_PERMISSION,
   TRANSFER_EXECUTE_PERMISSION,
   TRANSFER_STATUS_TAG,
+  TRANSFER_SUBMIT_PERMISSION,
   transferApi,
   type TransferOrder,
   type TransferQuery,
@@ -100,7 +102,11 @@ function TransferAction({
  *   [到货登记] 接线 POST /api/transfers/{id}/arrive（仅 TRANSFERRING，无库存动作，
  *   transfer.go:594-627 —— 到货登记与收货入库是两步迁移，不并入同一按钮流）；
  *   [确认入库] 接线 POST /api/transfers/{id}/receive（仅 AWAITING_RECEIPT，逐行 TransferIn）；
- * - 动作前置权限码 stockops:transfer:execute（permissions.go:221）经 canAccess fail-closed
+ * - 上游流转入口：[提交审核] POST /api/transfers/{id}/submit（仅 DRAFT，DRAFT→PENDING_APPROVAL）、
+ *   [取消] POST /api/transfers/{id}/cancel（DRAFT/PENDING_APPROVAL/APPROVED，TRANSFERRING/
+ *   AWAITING_RECEIPT 取消被拒）——单据产生（登记）与审核（approve）在 PC 调拨列表页
+ *   （views/warehouse/TransferListPage.tsx），Pad 承接草稿/在途单的流转与执行；
+ * - 动作前置权限码 stockops:transfer:*（permissions.go:221）经 canAccess fail-closed
  *   控制（permission.md §5：前端仅体验优化，后端 RequirePermission 仍强校验）；
  * - 仓库/SKU/库位编码经基础资料 options 本地映射（PadInventoryPage 范本），失败降级为 ID；
  * - 横屏三栏：左=调拨单卡列表 + 类型/状态 chip 筛选，中=单据信息 + 明细，右=七态流转 + 动作；
@@ -113,10 +119,15 @@ export default function PadTransferPage() {
   // 按钮级权限码经 canAccess fail-closed 过滤（模式同 PC TransferPage；permission.md §5）
   const user = useAuthStore((state) => state.user)
   const canExecute = canAccess(user, TRANSFER_EXECUTE_PERMISSION)
+  const canSubmit = canAccess(user, TRANSFER_SUBMIT_PERMISSION)
+  const canCancel = canAccess(user, TRANSFER_CANCEL_PERMISSION)
 
   const [typeFilter, setTypeFilter] = useState<TransferType | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<TransferStatus | 'all'>('all')
   const [selected, setSelected] = useState<TransferOrder | null>(null)
+  // 取消弹窗（原因可选，后端 CancelInput reason 可空）
+  const [cancelTarget, setCancelTarget] = useState<TransferOrder | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
 
   const list = usePagedList<TransferOrder, TransferQuery>({
     queryKey: ['pad', 'transfer', 'list'],
@@ -222,18 +233,46 @@ export default function PadTransferPage() {
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
+  // 提交审核：POST /api/transfers/{id}/submit（DRAFT→PENDING_APPROVAL，无库存动作）
+  const submitMutation = useMutation({
+    mutationFn: (id: TransferOrder['id']) => transferApi.submit(id),
+    onSuccess: (detail) => {
+      messageApi.success(`调拨单 ${detail.order.transfer_no} 已提交审核（草稿 → 待审核）`)
+      invalidateTransfer()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+  // 取消：POST /api/transfers/{id}/cancel（DRAFT/PENDING_APPROVAL/APPROVED→CANCELLED，
+  // APPROVED 先释放全部预占锁；reason 可选）
+  const cancelMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: TransferOrder['id']; reason?: string }) =>
+      transferApi.cancel(id, { reason }),
+    onSuccess: (detail) => {
+      messageApi.success(`调拨单 ${detail.order.transfer_no} 已取消（预占已释放）`)
+      setCancelTarget(null)
+      invalidateTransfer()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
 
   /** 动作可用性守卫（canAccess fail-closed + 状态机前置态，§21.7 给出具体原因） */
-  const actionDisabledReason = (action: 'outbound' | 'arrive' | 'receive') => {
+  const actionDisabledReason = (action: 'submit' | 'outbound' | 'arrive' | 'receive' | 'cancel') => {
     if (order == null) return '先从左侧选择一张调拨单卡'
-    if (!canExecute) return `缺少 ${TRANSFER_EXECUTE_PERMISSION} 权限，无法执行调拨动作`
-    const requireStatus: Record<typeof action, { status: TransferStatus; hint: string }> = {
-      outbound: { status: 'APPROVED', hint: '仅「待出库」状态可发起出库' },
-      arrive: { status: 'TRANSFERRING', hint: '仅「调拨中」状态可到货登记' },
-      receive: { status: 'AWAITING_RECEIPT', hint: '仅「待入库」状态可确认入库' },
+    const guards: Record<typeof action, { permission: boolean; permissionName: string; status?: TransferStatus; hint: string }> = {
+      submit: { permission: canSubmit, permissionName: TRANSFER_SUBMIT_PERMISSION, status: 'DRAFT', hint: '仅「草稿」状态可提交审核' },
+      outbound: { permission: canExecute, permissionName: TRANSFER_EXECUTE_PERMISSION, status: 'APPROVED', hint: '仅「待出库」状态可发起出库' },
+      arrive: { permission: canExecute, permissionName: TRANSFER_EXECUTE_PERMISSION, status: 'TRANSFERRING', hint: '仅「调拨中」状态可到货登记' },
+      receive: { permission: canExecute, permissionName: TRANSFER_EXECUTE_PERMISSION, status: 'AWAITING_RECEIPT', hint: '仅「待入库」状态可确认入库' },
+      cancel: { permission: canCancel, permissionName: TRANSFER_CANCEL_PERMISSION, hint: '草稿 / 待审核 / 待出库状态可取消' },
     }
-    const { status, hint } = requireStatus[action]
-    if (order.status !== status) return `${hint}（当前 ${TRANSFER_STATUS_TAG[order.status]?.label ?? order.status}）`
+    const guard = guards[action]
+    if (!guard.permission) return `缺少 ${guard.permissionName} 权限`
+    if (guard.status && order.status !== guard.status) {
+      return `${guard.hint}（当前 ${TRANSFER_STATUS_TAG[order.status]?.label ?? order.status}）`
+    }
+    if (action === 'cancel' && !['DRAFT', 'PENDING_APPROVAL', 'APPROVED'].includes(order.status)) {
+      return `调拨中 / 待入库状态取消被拒（business-flow.md §13.3，当前 ${TRANSFER_STATUS_TAG[order.status]?.label ?? order.status}）`
+    }
     return undefined
   }
 
@@ -273,6 +312,12 @@ export default function PadTransferPage() {
       <h3 className="sf-pad-card-title">调拨动作</h3>
       <div className="sf-pad-tr-action-wrap">
         <TransferAction
+          label="提交审核"
+          disabledReason={actionDisabledReason('submit')}
+          loading={submitMutation.isPending}
+          onClick={() => order && submitMutation.mutate(order.id)}
+        />
+        <TransferAction
           label="发起出库"
           disabledReason={actionDisabledReason('outbound')}
           loading={outboundMutation.isPending}
@@ -290,10 +335,21 @@ export default function PadTransferPage() {
           loading={receiveMutation.isPending}
           onClick={() => order && receiveMutation.mutate(order.id)}
         />
+        <TransferAction
+          label="取消单据"
+          disabledReason={actionDisabledReason('cancel')}
+          loading={cancelMutation.isPending}
+          onClick={() => {
+            if (!order) return
+            setCancelReason('')
+            setCancelTarget(order)
+          }}
+        />
       </div>
       <p className="sf-pad-muted-note">
-        出库 / 入库执行需 stockops:transfer:execute 权限并按状态机前置态启用；
-        到货登记（调拨中 → 待入库）与收货入库（待入库 → 已完成）为两步迁移（transfer.go:39-41），到货无库存动作
+        提交审核 / 取消 / 出库 / 入库需 stockops:transfer:* 权限并按状态机前置态启用；
+        到货登记（调拨中 → 待入库）与收货入库（待入库 → 已完成）为两步迁移（transfer.go:39-41），到货无库存动作；
+        单据登记与审核在 PC 调拨列表页
       </p>
     </section>
   )
@@ -498,6 +554,29 @@ export default function PadTransferPage() {
           {actionBar}
         </>
       )}
+      <Modal
+        title={cancelTarget ? `取消调拨单 · ${cancelTarget.transfer_no}` : '取消调拨单'}
+        open={cancelTarget != null}
+        onCancel={() => setCancelTarget(null)}
+        confirmLoading={cancelMutation.isPending}
+        okText="确认取消"
+        okButtonProps={{ danger: true }}
+        cancelText="返回"
+        onOk={() => cancelMutation.mutate({ id: cancelTarget!.id, reason: cancelReason.trim() || undefined })}
+      >
+        <p>
+          取消后单据进入「已取消」，审核通过单据的源仓预占将一并释放；
+          调拨中 / 待入库状态取消被拒（business-flow.md §13.3，只能反向调拨冲正）。
+        </p>
+        <Input.TextArea
+          rows={3}
+          value={cancelReason}
+          onChange={(e) => setCancelReason(e.target.value)}
+          maxLength={200}
+          showCount
+          placeholder="取消原因（可空）"
+        />
+      </Modal>
     </>
   )
 }

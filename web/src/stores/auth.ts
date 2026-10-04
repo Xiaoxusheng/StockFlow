@@ -69,10 +69,15 @@ export const useAuthStore = create<AuthState>((set) => {
     isSuper: initial?.isSuper ?? false,
     mustChangePassword: initial?.mustChangePassword ?? false,
     setSession: (session) => {
+      // is_super 位于 MeResult 顶层而非 MeResult.user（service_auth.go:444 vs :474），
+      // 而菜单/按钮的 canAccess 判据是 user.is_super——此处统一并入，登录/自愈/刷新三路径全覆盖
+      const nextUser = session.user
+        ? { ...session.user, is_super: session.isSuper ?? session.user.is_super }
+        : null
       const next: StoredSession = {
         token: session.token,
         refreshToken: session.refreshToken ?? null,
-        user: session.user ?? null,
+        user: nextUser,
         permissions: session.permissions ?? [],
         isSuper: session.isSuper ?? false,
         mustChangePassword: session.mustChangePassword ?? false,

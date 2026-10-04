@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Button, Card, Typography } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
 import {
+  PURCHASE_CREATE_PERMISSION,
   purchaseApi,
   type PurchaseOrder,
   type PurchaseQuery,
@@ -17,6 +19,8 @@ import {
   fetchWarehouseOptions,
 } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -55,10 +59,14 @@ function renderStatus(status: PurchaseStatus) {
 
 /** 采购订单列表（/purchases；GET /api/purchases，出参为 PurchaseOrder 裸模型
  * snake_case，internal/purchase/models.go:120-135——供应商/仓库为裸 ID，
- * 经基础资料 options 本地映射补充，映射失败降级为 ID，不造假数据） */
+ * 经基础资料 options 本地映射补充，映射失败降级为 ID，不造假数据）。
+ * 新建入口跳 /purchases/new（PurchaseOrderFormPage，路由见 sharedChanges），
+ * 仅持 purchase:purchase:create 权限可见。 */
 export default function PurchaseListPage() {
   const [params, setParams] = useState<PurchaseQuery>({})
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canCreate = canAccess(user, PURCHASE_CREATE_PERMISSION)
 
   // 供应商/仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
   const supplierOptionsQuery = useQuery({
@@ -177,6 +185,17 @@ export default function PurchaseListPage() {
       <SfPageHeader
         title="采购订单"
         subtitle="草稿 → 待审核 → 已审核 → 到货 → 完成"
+        extra={
+          canCreate ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/purchases/new')}
+            >
+              新建采购订单
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm fields={searchFields} onSearch={handleSearch} />

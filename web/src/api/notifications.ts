@@ -1,10 +1,10 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 
-// ---------- 通知个人收件箱（后端 M3 已交付：internal/sysops/routes.go:117-120；
+// ---------- 通知个人收件箱（后端 M3 已交付：internal/sysops/routes.go 个人收件箱路由组；
 // 认证即可用、无权限点——个人数据自见原则，plan §10.6） ----------
 //
-// 出参为 inboxItem snake_case（internal/sysops/notifications.go:163-170）。
+// 出参为 inboxItem snake_case（internal/sysops/notifications.go）。
 
 /** 通知类型（db/migrations/000014 chk_notifications_type：SYSTEM/APPROVAL/STOCK_ALERT/
  * EXPIRY_ALERT/EXCEPTION/TASK 大写值域） */
@@ -17,7 +17,7 @@ export type NotificationType =
   | 'TASK'
 
 export interface NotificationQuery extends PageQuery {
-  /** 已读筛选（true=仅已读 / false=仅未读，routes.go:459-467） */
+  /** 已读筛选（true=仅已读 / false=仅未读，后端 listNotifications 解析 query 参数） */
   read?: boolean
 }
 

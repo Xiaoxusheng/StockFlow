@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space } from 'antd'
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Spin } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -10,6 +10,7 @@ import {
   warehouseApi,
   zoneApi,
   type ResourceStatus,
+  type WarehouseSpaceId,
   type ZoneItem,
   type ZoneQuery,
   type ZoneUpdatePayload,
@@ -97,6 +98,7 @@ export default function ZoneListPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<ZoneItem | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [formError, setFormError] = useState<unknown>(null)
   const [actionError, setActionError] = useState<unknown>(null)
   const [togglingId, setTogglingId] = useState<number | string | null>(null)
@@ -113,10 +115,8 @@ export default function ZoneListPage() {
     setDrawerOpen(true)
   }
 
-  const openEdit = (record: ZoneItem) => {
-    setEditing(record)
-    setFormError(null)
-    form.resetFields()
+  /** 表单回填（列表行 / 详情单条共用一份字段集） */
+  const fillForm = (record: ZoneItem) => {
     form.setFieldsValue({
       warehouse_id: Number(record.warehouse_id),
       code: record.code,
@@ -124,7 +124,31 @@ export default function ZoneListPage() {
       zone_type: record.zone_type,
       capacity: record.capacity,
     })
+  }
+
+  const refreshDetail = async (id: WarehouseSpaceId) => {
+    setDetailLoading(true)
+    try {
+      const item = await zoneApi.detail(id)
+      setEditing(item)
+      fillForm(item)
+      setFormError(null)
+    } catch (err) {
+      // 详情刷新失败不阻断编辑：保留列表行数据，以非阻断 Alert 提示
+      setFormError(err)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const openEdit = (record: ZoneItem) => {
+    setEditing(record)
+    setFormError(null)
+    form.resetFields()
+    fillForm(record)
     setDrawerOpen(true)
+    // 详情局部刷新：以 GET /api/zones/:id 最新数据覆盖列表行（列表行可能过期）
+    void refreshDetail(record.id)
   }
 
   const handleSubmit = async () => {
@@ -261,7 +285,8 @@ export default function ZoneListPage() {
             onClose={() => setFormError(null)}
           />
         )}
-        <Form form={form} layout="vertical">
+        <Spin spinning={detailLoading}>
+          <Form form={form} layout="vertical">
           <Form.Item
             name="warehouse_id"
             label="所属仓库"
@@ -289,7 +314,8 @@ export default function ZoneListPage() {
           <Form.Item name="capacity" label="容量">
             <InputNumber style={{ width: '100%' }} min={0} precision={2} />
           </Form.Item>
-        </Form>
+          </Form>
+        </Spin>
       </Drawer>
     </div>
   )

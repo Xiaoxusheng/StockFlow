@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Drawer, Switch, Typography, message } from 'antd'
+import { Button, Card, Drawer, Modal, Switch, Tooltip, Typography, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -171,6 +171,7 @@ export default function JobPage() {
   /** 执行日志抽屉当前任务（null=关闭） */
   const [logJob, setLogJob] = useState<SystemJobItem | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
+  const [modalApi, modalContextHolder] = Modal.useModal()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   // fail-closed：无 system:job:status 权限/权限点集为空一律不可启停（types/permission.ts canAccess）
@@ -191,6 +192,22 @@ export default function JobPage() {
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
+
+  /** 启停入口：未装配调度（scheduled=false，jobsapi.go:26-28 空实现位任务）时
+   * 热更新不生效，启停仅落库、服务重启后按 DB 行生效——二次确认向用户言明差异 */
+  const handleToggle = (record: SystemJobItem, enabled: boolean) => {
+    if (record.scheduled) {
+      statusMutation.mutate({ id: record.id, enabled })
+      return
+    }
+    modalApi.confirm({
+      title: `「${record.name}」未在本进程装配调度`,
+      content: '该任务当前由空实现占位，本次启停仅更新数据库配置，服务重启后才会生效。确认继续？',
+      okText: '继续启停',
+      cancelText: '取消',
+      onOk: () => statusMutation.mutate({ id: record.id, enabled }),
+    })
+  }
 
   const columns: ColumnsType<SystemJobItem> = [
     { title: '任务编码', dataIndex: 'code', width: 170, fixed: 'left', ellipsis: true },
@@ -252,15 +269,23 @@ export default function JobPage() {
       width: 170,
       render: (_: unknown, record: SystemJobItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
-          <Switch
-            size="small"
-            checked={record.enabled}
-            checkedChildren="启"
-            unCheckedChildren="停"
-            disabled={!canToggle}
-            loading={statusMutation.isPending && statusMutation.variables?.id === record.id}
-            onChange={(enabled) => statusMutation.mutate({ id: record.id, enabled })}
-          />
+          <Tooltip
+            title={
+              record.scheduled
+                ? undefined
+                : '未装配调度：启停仅落库，服务重启后生效（jobsapi.go scheduled=false）'
+            }
+          >
+            <Switch
+              size="small"
+              checked={record.enabled}
+              checkedChildren="启"
+              unCheckedChildren="停"
+              disabled={!canToggle}
+              loading={statusMutation.isPending && statusMutation.variables?.id === record.id}
+              onChange={(enabled) => handleToggle(record, enabled)}
+            />
+          </Tooltip>
           <Button type="link" size="small" onClick={() => setLogJob(record)}>
             执行日志
           </Button>
@@ -272,6 +297,7 @@ export default function JobPage() {
   return (
     <div className="sf-page">
       {contextHolder}
+      {modalContextHolder}
       <SfPageHeader
         title="定时任务"
         subtitle="预警扫描 / 统计汇总 / 日志清理等后台任务（architecture.md §9）"

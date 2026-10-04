@@ -10,6 +10,7 @@ import {
   Popconfirm,
   Select,
   Space,
+  Spin,
 } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -26,6 +27,7 @@ import {
   type BinQuery,
   type BinUpdatePayload,
   type ResourceStatus,
+  type WarehouseSpaceId,
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -134,6 +136,7 @@ export default function BinListPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<BinItem | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [formError, setFormError] = useState<unknown>(null)
   const [actionError, setActionError] = useState<unknown>(null)
   const [togglingId, setTogglingId] = useState<number | string | null>(null)
@@ -173,10 +176,8 @@ export default function BinListPage() {
     setDrawerOpen(true)
   }
 
-  const openEdit = (record: BinItem) => {
-    setEditing(record)
-    setFormError(null)
-    form.resetFields()
+  /** 表单回填（列表行 / 详情单条共用一份字段集） */
+  const fillForm = (record: BinItem) => {
     form.setFieldsValue({
       warehouse_id: Number(record.warehouse_id),
       zone_id: Number(record.zone_id),
@@ -187,7 +188,31 @@ export default function BinListPage() {
       bin_type: record.bin_type,
       max_capacity: record.max_capacity,
     })
+  }
+
+  const refreshDetail = async (id: WarehouseSpaceId) => {
+    setDetailLoading(true)
+    try {
+      const item = await binApi.detail(id)
+      setEditing(item)
+      fillForm(item)
+      setFormError(null)
+    } catch (err) {
+      // 详情刷新失败不阻断编辑：保留列表行数据，以非阻断 Alert 提示
+      setFormError(err)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const openEdit = (record: BinItem) => {
+    setEditing(record)
+    setFormError(null)
+    form.resetFields()
+    fillForm(record)
     setDrawerOpen(true)
+    // 详情局部刷新：以 GET /api/bins/:id 最新数据覆盖列表行（列表行可能过期）
+    void refreshDetail(record.id)
   }
 
   const handleSubmit = async () => {
@@ -348,7 +373,8 @@ export default function BinListPage() {
             onClose={() => setFormError(null)}
           />
         )}
-        <Form form={form} layout="vertical">
+        <Spin spinning={detailLoading}>
+          <Form form={form} layout="vertical">
           <Form.Item
             name="warehouse_id"
             label="所属仓库"
@@ -412,7 +438,8 @@ export default function BinListPage() {
           <Form.Item name="max_capacity" label="最大容量">
             <InputNumber style={{ width: '100%' }} min={0} precision={2} />
           </Form.Item>
-        </Form>
+          </Form>
+        </Spin>
       </Drawer>
     </div>
   )

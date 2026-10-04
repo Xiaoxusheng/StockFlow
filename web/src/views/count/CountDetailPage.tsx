@@ -594,11 +594,14 @@ export default function CountDetailPage() {
         title: '状态',
         key: 'line_status',
         width: 80,
+        // 明细行盘/未盘为前端推导展示态（qty_counted 是否为 null），显式 label + semantic、
+        // 不传 status：pending 注册表键为通用「待处理」文案，status 与 label 同传时
+        // SfStatusTag meta?.label 优先级更高会覆盖「待盘」盘点口径
         render: (_: unknown, record: CountItem) =>
           isCounted(record) ? (
-            <SfStatusTag status="counted" />
+            <SfStatusTag label="已盘" semantic="success" />
           ) : (
-            <SfStatusTag status="pending" label="待盘" />
+            <SfStatusTag label="待盘" semantic="pending" />
           ),
       },
       {

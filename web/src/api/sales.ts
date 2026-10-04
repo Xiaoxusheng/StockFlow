@@ -110,6 +110,22 @@ export interface SalesOrderApprovePayload {
   opinion?: string
 }
 
+/**
+ * 审核结果（ApproveResult，internal/sales/service.go:388-393 实测）：
+ * 审核通过即预占并联动建出库单，响应不是裸 SalesOrder 而是
+ * {order, outbound_no, lock_count, locked_qty}——驳回时仅含 order（REJECT 分支
+ * service.go:423 ApproveResult{Order: r}，其余字段零值省略），故除 order 外均可选。
+ */
+export interface SalesOrderApproveResult {
+  order: SalesOrder | null
+  /** 联动创建的出库单号（APPROVE 时返回，service.go:477） */
+  outbound_no?: string
+  /** 预占锁行数 = 分配记录数（service.go:391） */
+  lock_count?: number
+  /** 预占数量（stock.Qty 裸数字，service.go:392） */
+  locked_qty?: number
+}
+
 // ---------- 权限码（internal/auth/permissions.go:170-177 三段式冻结） ----------
 
 export const SALES_ORDER_CREATE_PERMISSION = 'sales:sales:create'
@@ -118,6 +134,8 @@ export const SALES_ORDER_SUBMIT_PERMISSION = 'sales:sales:submit'
 export const SALES_ORDER_APPROVE_PERMISSION = 'sales:sales:approve'
 export const SALES_ORDER_CANCEL_PERMISSION = 'sales:sales:cancel'
 export const SALES_ORDER_CLOSE_PERMISSION = 'sales:sales:close'
+/** 销售退货创建（internal/auth/permissions.go:252 三段式冻结） */
+export const SALES_RETURN_CREATE_PERMISSION = 'returns:salesreturn:create'
 
 // ---------- 销售退货（GET /api/returns，后端退货域：internal/returns/handler.go:115-124） ----------
 //
@@ -174,6 +192,33 @@ export interface SalesReturnQuery extends PageQuery {
   warehouse_id?: SalesId
 }
 
+// ---------- 销售退货创建（POST /api/returns，internal/returns/handler.go:195-209 已注册） ----------
+//
+// 入参 SalesReturnCreateInput（internal/returns/service_sales.go:44-50）：后端强校验
+// 退货仓与原销售单发货仓一致、逐行退量 ≤ 已发货量 − 已退量（service_sales.go:254-283、
+// plan §3.1），qty_return 为 numeric(18,4) 文本（stock.ParseQty 解析）、reason 必填。
+
+/** 销售退货行入参（SalesReturnLineInput，service_sales.go:35-41 字段全量） */
+export interface SalesReturnLineInput {
+  line_no: number
+  sku_id: number
+  /** numeric(18,4) 文本（service_sales.go:276 ParseQty），传正数字符串如 "3" */
+  qty_return: string
+  /** 必填（business-flow §9.1，service_sales.go:280） */
+  reason: string
+  remark?: string
+}
+
+/** 创建销售退货入参（SalesReturnCreateInput，service_sales.go:44-50 字段全量） */
+export interface SalesReturnCreatePayload {
+  /** 来源销售单号（精确） */
+  so_no: string
+  customer_id: number
+  warehouse_id: number
+  remark?: string
+  lines: SalesReturnLineInput[]
+}
+
 export const salesApi = {
   orders: {
     list: (query: SalesOrderQuery) =>
@@ -185,9 +230,13 @@ export const salesApi = {
       http.put<SalesOrder>(`/api/sales/${id}`, payload),
     /** 提交审核（DRAFT→PENDING_APPROVAL） */
     submit: (id: SalesId) => http.put<SalesOrder>(`/api/sales/${id}/submit`),
-    /** 审核（APPROVE 通过即预占 / REJECT 驳回） */
+    /**
+     * 审核（APPROVE 通过即预占 / REJECT 驳回）。响应为 ApproveResult 嵌套结构
+     * （internal/sales/service.go:388-393），非裸 SalesOrder——消费方取订单状态
+     * 须走 res.order?.status，直接取 res.status 会得到 undefined。
+     */
     approve: (id: SalesId, payload: SalesOrderApprovePayload) =>
-      http.put<SalesOrder>(`/api/sales/${id}/approve`, payload),
+      http.put<SalesOrderApproveResult>(`/api/sales/${id}/approve`, payload),
     /** 取消（释放预占；原因可选） */
     cancel: (id: SalesId, payload?: { reason?: string }) =>
       http.put<SalesOrder>(`/api/sales/${id}/cancel`, payload),
@@ -198,5 +247,8 @@ export const salesApi = {
   returns: {
     list: (query: SalesReturnQuery) =>
       http.get<PageResult<SalesReturnOrder>>('/api/returns', { params: query }),
+    /** 创建销售退货（POST /api/returns，returns:salesreturn:create；返回 ReturnOrderView） */
+    create: (payload: SalesReturnCreatePayload) =>
+      http.post<SalesReturnOrder>('/api/returns', payload),
   },
 }

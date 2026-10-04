@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { authApi, PASSWORD_RULE, type LoginPayload } from '@/api/auth'
 import { useAuthStore, type SessionInput } from '@/stores/auth'
-import { resolveErrorMessage } from '@/api/client'
+import { matchFieldErrors, resolveErrorMessage } from '@/api/client'
 import type { UserInfo } from '@/types/permission'
 
 const { Title, Text } = Typography
@@ -28,6 +28,7 @@ interface PendingForceChange {
 export function LoginPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
+  const [form] = Form.useForm<ForceChangeFormValues>()
   const setSession = useAuthStore((s) => s.setSession)
   const [messageApi, contextHolder] = message.useMessage()
   const [loading, setLoading] = useState(false)
@@ -42,8 +43,17 @@ export function LoginPage() {
     navigate(safeRedirect, { replace: true })
   }
 
-  /** 权限快照以 GET /api/auth/me 为准（LoginResult.user 不含 permissions 权限点集） */
+  /** 权限快照以 GET /api/auth/me 为准（LoginResult.user 不含 permissions 权限点集）。
+   * 必须先落 token 再调 me：client.ts 请求拦截器从 auth store 取 token，
+   * 退出登录后 store 为空，若先 me() 会无 Authorization 裸奔 401，
+   * 被"登录已过期"拦截清会话——形成退出后永远登不进的死循环。 */
   const enterWithMe = async (token: string, refreshToken: string | null) => {
+    setSession({
+      token,
+      refreshToken,
+      user: null,
+      mustChangePassword: false,
+    })
     const me = await authApi.me()
     enter({
       token,
@@ -97,7 +107,21 @@ export function LoginPage() {
       // 刷新 me 取最新权限快照后进入系统
       await enterWithMe(pending.token, pending.refreshToken)
     } catch (err) {
-      setError(resolveErrorMessage(err))
+      // bind 校验失败（details.fields）：字段级错误落到对应 Form.Item（client.ts
+      // matchFieldErrors 归一匹配 Go 字段名小写键），替代固定文案「请求体格式错误」
+      const fieldErrors = matchFieldErrors(err, ['old_password', 'new_password'])
+      if (fieldErrors) {
+        // 键来自上一行字面量白名单，均为 ForceChangeFormValues 合法字段
+        form.setFields(
+          Object.entries(fieldErrors).map(([name, errors]) => ({
+            name: name as keyof ForceChangeFormValues,
+            errors: [errors],
+          })),
+        )
+        setError(null)
+      } else {
+        setError(resolveErrorMessage(err))
+      }
     } finally {
       setLoading(false)
     }
@@ -147,6 +171,7 @@ export function LoginPage() {
               style={{ marginBottom: 16 }}
             />
             <Form<ForceChangeFormValues>
+              form={form}
               layout="vertical"
               requiredMark={false}
               initialValues={{ old_password: pending.initialPassword }}
@@ -164,7 +189,7 @@ export function LoginPage() {
                 label="新密码"
                 rules={[{ required: true, message: '请输入新密码' }, PASSWORD_RULE]}
               >
-                <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母与数字" autoComplete="new-password" />
+                <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母与数字（上限 72 字节）" autoComplete="new-password" />
               </Form.Item>
               <Form.Item
                 name="confirm_password"

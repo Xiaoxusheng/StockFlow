@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Card } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { Button, Card } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  PURCHASE_RETURN_CREATE_PERMISSION,
   purchaseApi,
   type PurchaseReturnOrder,
   type PurchaseReturnQuery,
@@ -11,10 +13,13 @@ import {
 import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { PurchaseReturnCreateDrawer } from './PurchaseReturnCreateDrawer'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime } from '@/utils/format'
 
@@ -49,9 +54,15 @@ function renderStatus(status: PurchaseReturnStatus) {
 /** 采购退货列表（/purchases/returns；GET /api/purchase-returns，退货域承载
  * internal/returns/handler.go:315-334——列表出参为 ReturnOrderView snake_case
  * （service_sales.go:124-136），type 后端固定 PURCHASE。warehouse_id 为裸 ID，
- * 经仓库 options 本地映射补充，映射失败降级为 ID，不造假数据） */
+ * 经仓库 options 本地映射补充，映射失败降级为 ID，不造假数据）。
+ * 创建入口为 PurchaseReturnCreateDrawer（POST /api/purchase-returns，
+ * 仅持 returns:purchasereturn:create 权限可见）。 */
 export default function PurchaseReturnListPage() {
   const [params, setParams] = useState<PurchaseReturnQuery>({})
+  const [createOpen, setCreateOpen] = useState(false)
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  const canCreate = canAccess(user, PURCHASE_RETURN_CREATE_PERMISSION)
 
   // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
   const warehouseOptionsQuery = useQuery({
@@ -120,6 +131,17 @@ export default function PurchaseReturnListPage() {
       <SfPageHeader
         title="采购退货"
         subtitle="退货申请 → 审核 → 退货出库 → 供应商"
+        extra={
+          canCreate ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => setCreateOpen(true)}
+            >
+              新建采购退货
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm fields={searchFields} onSearch={handleSearch} />
@@ -139,6 +161,15 @@ export default function PurchaseReturnListPage() {
           scrollX={760}
         />
       </Card>
+      <PurchaseReturnCreateDrawer
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          setCreateOpen(false)
+          queryClient.invalidateQueries({ queryKey: ['purchase', 'returns'] })
+          list.refetch()
+        }}
+      />
     </div>
   )
 }

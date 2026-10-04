@@ -133,14 +133,38 @@ export interface QualityExecutePayload {
   lines: QualityExecuteLineInput[]
   /** 九类中文值域之一 */
   result: QualityResult
+  /** 现场照片引用（文件中心 FileItem.id 字符串列表；POST /api/files 上传后回填，
+   * 随 execute 落质检单 image_refs——QCExecuteInput.ImageRefs，service_quality.go:52） */
   image_refs?: string[]
   remark?: string
 }
 
+// ---------- 质检单创建入参（QCCreateInput，internal/purchase/service_quality.go:37-45；
+// POST /api/quality 已注册，internal/purchase/purchase.go:65，权限 purchase:quality:create） ----------
+
+/** 创建明细计划行（QCLineInput：SKU + 批次 + 计划检验数量；同一 SKU 不得重复，
+ * 数量不得超过该 SKU 未处理余量——后端按入库单收货/已处理量强校验） */
+export interface QualityCreateLineInput {
+  sku_id: number
+  batch_no?: string
+  qty_inspected: number
+}
+
+/** 创建入参（source_no=入库单号：入库单须 AWAITING_QC / AWAITING_PUTAWAY；M2 本域
+ * source_type 固定 INBOUND，RETURN 退货质检由后端 returns 域经 QCCreator 窄接口生成） */
+export interface QualityCreatePayload {
+  source_no: string
+  inspection_type: InspectionMethod
+  lines: QualityCreateLineInput[]
+  remark?: string
+}
+
 // ---------- 不合格品 / 质量追溯（前端先行契约，docs/changelog.md [2026-10-02] 集成记录冻结：
-// GET /api/quality/nonconforming、/trace 两端点后端未交付，后端就绪前页面呈统一错误态
-// （SfTable error 兜底），属预期行为，禁止 mock（requirements.md §10）；
-// 字段名与枚举值在后端质量域落地时以后端 Go JSON tag 为准回对） ----------
+// GET /api/quality/nonconforming、/trace 两端点后端未立项（质检主链路 M2/M3 已交付，
+// trace 与 nonconforming 属孪生缺口同批待补），后端就绪前页面呈统一错误态
+// （SfTable error 兜底），属预期行为，禁止 mock（requirements.md §10）。
+// 字段名按后端全站 snake_case JSON tag 惯例拼写（internal/returns/service_trace.go
+// TraceDocument/TraceOperation 等同款），端点立项后以后端 Go JSON tag 为准回对） ----------
 
 /** 不合格品处理结果（六值，business-flow.md §4.3；types/status.ts 质检处置六键同源） */
 export type QualityDisposition =
@@ -190,27 +214,28 @@ export interface NonconformingQuery extends PageQuery {
   destination?: NonconformingDestination
 }
 
-/** 不合格品记录（无独立 NCR 单号，以关联质检单号 QC- 为锚点，changelog 冻结回对清单） */
+/** 不合格品记录（无独立 NCR 单号，以关联质检单号 QC- 为锚点，changelog 冻结回对清单；
+ * 字段名对齐后端 snake_case JSON 惯例——camelCase 前端先行拼写已移除） */
 export interface NonconformingItem {
   id: SalesId
   /** 关联质检单号（QC-日期-流水） */
-  qcNo: string
+  qc_no: string
   /** 来源单号（入库单号 / 退货单号） */
-  sourceNo?: string
-  skuCode: string
-  productName: string
-  batchNo?: string
+  source_no?: string
+  sku_code: string
+  product_name: string
+  batch_no?: string
   /** 不合格数量 */
   qty: number
   /** 不合格原因 */
   reason?: string
   disposition?: QualityDisposition
   destination?: NonconformingDestination
-  handlerName?: string
+  handler_name?: string
   /** 处理时间 */
-  handledAt?: string
+  handled_at?: string
   /** 记录时间 */
-  createdAt: string
+  created_at: string
 }
 
 /** 质量记录类型（质量记录链两段：检验 → 处置，frontend.md §9.1） */
@@ -222,36 +247,41 @@ export const RECORD_TYPE_LABEL: Record<QualityRecordType, string> = {
   disposition: '处置记录',
 }
 
-/** 质量追溯筛选（四维检索：SKU / 批次号 / 序列号 / 单据号 + 分页） */
+/** 质量追溯筛选（四维检索：SKU / 批次号 / 序列号 / 单据号 + 分页；snake_case 对齐后端惯例） */
 export interface QualityTraceQuery extends PageQuery {
-  skuCode?: string
-  batchNo?: string
-  serialNo?: string
-  bizNo?: string
+  sku_code?: string
+  batch_no?: string
+  serial_no?: string
+  biz_no?: string
 }
 
-/** 质量追溯记录（检验与处置两级链路逐条记录） */
+/** 质量追溯记录（检验与处置两级链路逐条记录；snake_case 对齐后端惯例） */
 export interface QualityTraceItem {
   id: SalesId
   /** 记录时间 */
-  occurredAt: string
-  recordType: QualityRecordType
+  occurred_at: string
+  record_type: QualityRecordType
   /** 关联质检单号（QC-） */
-  qcNo?: string
+  qc_no?: string
   /** 来源业务（入库 / 退货等） */
-  bizType?: string
+  biz_type?: string
   /** 来源单据号 */
-  bizNo?: string
-  skuCode: string
-  productName: string
-  batchNo?: string
-  serialNo?: string
+  biz_no?: string
+  sku_code: string
+  product_name: string
+  batch_no?: string
+  serial_no?: string
   /** 检验方式三值（§4.1，与质检单 inspection_type 同值域） */
-  inspectionMethod?: InspectionMethod
-  /** 质检结果（qualified/partially_qualified/unqualified 命中 types/status.ts 质检结果三键，未知值 SfStatusTag 兜底） */
+  inspection_method?: InspectionMethod
+  /**
+   * 质检结果：九类中文值域之一（db/migrations/000007:248 chk_quality_orders_result，
+   * 与质检单 result 同域——检验记录的 result 即其质检单处理结果），
+   * 渲染经 QUALITY_RESULT_TAG_META 的 label/semantic；未知值 SfStatusTag 兜底中性灰。
+   * 旧英文三键假设（qualified/partially_qualified/unqualified）与后端值域不符已移除。
+   */
   result?: string
   disposition?: QualityDisposition
-  inspectorName?: string
+  inspector_name?: string
   remark?: string
 }
 
@@ -266,6 +296,10 @@ export const qualityApi = {
   /** 质检单列表（GET /api/quality） */
   inspections: (query: QualityInspectionQuery) =>
     http.get<PageResult<QualityInspectionItem>>('/api/quality', { params: query }),
+  /** 手动创建质检单（POST /api/quality，purchase.go:65；QCCreateInput → QualityOrder，
+   * 创建即 PENDING，待该入库单后续质检任务） */
+  create: (payload: QualityCreatePayload) =>
+    http.post<QualityInspectionItem>('/api/quality', payload),
   /** 质检单详情（GET /api/quality/{id}，{order, items}） */
   detail: (id: SalesId) => http.get<QualityInspectionDetail>(`/api/quality/${id}`),
   /** 开始质检（POST /api/quality/{id}/start，PENDING→INSPECTING） */

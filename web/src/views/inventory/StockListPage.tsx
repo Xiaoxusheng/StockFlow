@@ -54,7 +54,9 @@ export default function StockListPage() {
         extra={
           <SfExportButton
             module="INVENTORY"
-            permission="inventory:inventory:list"
+            /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create
+               （internal/auth/permissions.go:307）——持列表权限而无导出权限者不渲染该按钮 */
+            permission="datax:export:create"
             scopeParams={{
               warehouse_id: params.warehouse_id,
               zone_id: params.zone_id,

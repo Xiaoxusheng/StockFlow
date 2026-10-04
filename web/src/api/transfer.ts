@@ -166,6 +166,26 @@ export interface StockMutationResult {
   adjustment_no?: string
 }
 
+// ---------- 在途汇总（GET /api/transfers/in-transit，stockops/routes.go:48） ----------
+
+/** 在途筛选（handler.go:367-385：warehouse_id/sku_id 可空；数据权限后端按 WarehouseScope 收窄） */
+export interface TransferInTransitQuery extends PageQuery {
+  warehouse_id?: SalesId
+  sku_id?: SalesId
+}
+
+/** 在途汇总行（InTransitRow，internal/stockops/store.go:211-216，按 SKU+批次聚合；
+ * 数量为 numeric 裸数字，由后端计算，前端禁止算库存） */
+export interface TransferInTransitRow {
+  sku_id: number
+  /** 0=非批次 SKU */
+  batch_id: number
+  /** 自源仓已出未收（源仓视角在途） */
+  out_transit: number
+  /** 向目标仓在途（目标仓视角在途） */
+  in_transit: number
+}
+
 // ---------- 权限码（internal/auth/permissions.go:215-224/243-244 三段式冻结） ----------
 
 export const TRANSFER_CREATE_PERMISSION = 'stockops:transfer:create'
@@ -201,4 +221,7 @@ export const transferApi = {
   /** 仓内移库（POST /api/inventory/moves，stockops:move:execute；同仓库位间可用库存移动） */
   moveBin: (payload: MoveBinPayload) =>
     http.post<StockMutationResult>('/api/inventory/moves', payload),
+  /** 在途汇总（GET /api/transfers/in-transit，handler.go:367-385，按 SKU+批次聚合跨单在途） */
+  inTransitList: (query: TransferInTransitQuery) =>
+    http.get<PageResult<TransferInTransitRow>>('/api/transfers/in-transit', { params: query }),
 }

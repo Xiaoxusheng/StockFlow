@@ -428,24 +428,26 @@ export interface TraceResult {
 /** 库存行详情 = InventoryView 形态（handler.go:274 newInventoryView） */
 export type InventoryDetail = StockItem
 
-// ---------- 库存分布（frontend.md §10.4 层级视图：仓库 → 库区 → 库位，支持点击下钻） ----------
+// ---------- 库存分布（frontend.md §10.4 层级视图：仓库 → 库区 → 库位，支持点击下钻；
+// 前端先行契约（后端 M1 库存查询面未含层级分布），字段名按后端 snake_case JSON tag 惯例预对齐） ----------
 
 /**
  * 分布层级节点：仓库层（children=库区或库位）/ 库区层（children=库位）/ 库位层（叶子）。
  * 仓库未划库区时允许后端直接返回「仓库 → 库位」两层（§10.4 示例即此形态）。
  */
 export interface StockDistributionNode {
-  warehouseCode: string
-  warehouseName?: string
-  zoneCode?: string
-  binCode?: string
-  totalQty: number
-  availableQty?: number
+  warehouse_code: string
+  warehouse_name?: string
+  zone_code?: string
+  bin_code?: string
+  total_qty: number
+  available_qty?: number
   children?: StockDistributionNode[]
 }
 
 // ---------- 库存分析（frontend.md §10.1 口径：库存金额 / 周转率 / 周转天数 / ABC 分析 / 库存趋势；
-// 前端先行契约：分析域后端 M2+ 交付（backend-m1-plan.md §13），就绪前页面呈统一错误态） ----------
+// 前端先行契约：分析域后端 M2+ 交付（backend-m1-plan.md §13），就绪前页面呈统一错误态；
+// 字段名按后端 snake_case JSON tag 惯例预对齐，后端立项时以实际 dto 为准复核） ----------
 
 export interface InventoryAnalyticsQuery {
   /** 趋势窗口天数（默认 30；仅影响 trend 字段） */
@@ -455,28 +457,28 @@ export interface InventoryAnalyticsQuery {
 /** ABC 分类项（按库存金额 80/15/5 阈值分档由后端计算，前端不得自行分档） */
 export interface AnalyticsAbcItem {
   grade: 'A' | 'B' | 'C'
-  skuCount: number
-  valueAmount: number
+  sku_count: number
+  value_amount: number
   /** 金额占比 0~100 */
-  valuePercent: number
+  value_percent: number
 }
 
 /** 库存趋势点（date 为 YYYY-MM-DD） */
 export interface AnalyticsTrendPoint {
   date: string
-  totalQty: number
-  stockValue: number
+  total_qty: number
+  stock_value: number
 }
 
 export interface InventoryAnalytics {
   /** 库存金额（∑ 数量 × 成本价，口径以后端契约为准） */
-  totalStockValue: number
-  totalSkuCount: number
-  totalQty: number
+  total_stock_value: number
+  total_sku_count: number
+  total_qty: number
   /** 库存周转率（次 / 统计周期） */
-  turnoverRate: number
+  turnover_rate: number
   /** 库存周转天数（天） */
-  turnoverDays: number
+  turnover_days: number
   abc: AnalyticsAbcItem[]
   trend: AnalyticsTrendPoint[]
 }

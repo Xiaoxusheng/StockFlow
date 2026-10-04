@@ -46,10 +46,10 @@ export function AlertList({ items }: { items: DashboardAlertItem[] }) {
         >
           <Flex justify="space-between" gap={12}>
             <Text strong style={{ fontSize: 13 }}>
-              {item.skuCode} · {item.productName}
+              {item.sku_code} · {item.product_name}
             </Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              {formatDateTime(item.createdAt)}
+              {formatDateTime(item.created_at)}
             </Text>
           </Flex>
           <Text type="secondary" style={{ fontSize: 12 }}>

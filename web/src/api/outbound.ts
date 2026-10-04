@@ -315,6 +315,25 @@ export interface ShipResult {
   shipped: Record<string, number>
 }
 
+// ---------- 库存分配（GET/POST /api/allocations，routes.go:90-91 已注册；
+// 出参为 AllocationRecord 裸模型 = OutboundAllocationRecord，models.go:94-110） ----------
+
+/** 分配记录列表筛选（AllocationQuery，repository.go:179-186：outbound_no/strategy/sku_id） */
+export interface OutboundAllocationQuery extends PageQuery {
+  outbound_no?: string
+  /** FIFO/FEFO/指定批次/指定仓库/指定库位（models.go:349-355 中文值域） */
+  strategy?: string
+  sku_id?: SalesId
+}
+
+/** 重新分配入参（ReallocateInput，service_ship.go:513-516；line_no=0 表示整单所有
+ * 可重分配行）。后端约束：仅 ALLOCATED/PICKING 状态、未拣货未发货的行可重分配，
+ * 释放旧锁 → allocation_records 整组替换 → 未完结拣货任务取消 → 默认策略重新预占。 */
+export interface OutboundReallocatePayload {
+  outbound_no: string
+  line_no: number
+}
+
 // ---------- 出库单详情（GET /api/outbounds/{no}，handler.go:274-285 任务族全量） ----------
 
 export interface OutboundOrderDetail {
@@ -332,6 +351,9 @@ export interface OutboundOrderDetail {
 export const OUTBOUND_CREATE_PERMISSION = 'sales:outbound:create'
 export const OUTBOUND_CANCEL_PERMISSION = 'sales:outbound:cancel'
 export const OUTBOUND_CLOSE_PERMISSION = 'sales:outbound:close'
+/** 库存分配（internal/auth/permissions.go:187-190；execute=重新分配） */
+export const ALLOCATION_LIST_PERMISSION = 'sales:allocation:list'
+export const ALLOCATION_EXECUTE_PERMISSION = 'sales:allocation:execute'
 export const PICK_CLAIM_PERMISSION = 'sales:pick:claim'
 export const PICK_EXECUTE_PERMISSION = 'sales:pick:execute'
 export const CHECK_CLAIM_PERMISSION = 'sales:check:claim'
@@ -356,6 +378,19 @@ export const outboundApi = {
   /** 差额关闭（PUT /api/outbounds/{no}/close，原因必填） */
   close: (no: string, payload: { reason: string }) =>
     http.put<OutboundOrder>(`/api/outbounds/${encodeURIComponent(no)}/close`, payload),
+  /** 库存分配（GET/POST /api/allocations，routes.go:90-91；execute=重新分配） */
+  allocations: {
+    list: (query: OutboundAllocationQuery) =>
+      http.get<PageResult<OutboundAllocationRecord>>('/api/allocations', { params: query }),
+    /**
+     * 重新分配（POST /api/allocations，sales:allocation:execute；handler.go:466-479）。
+     * 释放旧预占锁 → 分配记录整组替换 → 未完结拣货任务取消 → 默认策略重新预占，
+     * 同事务生效；危险操作，前端须二次确认（frontend.md §16.2）。
+     * 响应为 {allocations: AllocationRecord[]}（非分页信封，handler.go:477）。
+     */
+    reallocate: (payload: OutboundReallocatePayload) =>
+      http.post<{ allocations: OutboundAllocationRecord[] }>('/api/allocations', payload),
+  },
 }
 
 /** 出库四作业任务族 API（拣货 → 复核 → 打包 → 发货，business-flow.md §8） */

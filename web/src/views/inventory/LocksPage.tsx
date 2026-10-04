@@ -188,7 +188,17 @@ export default function LocksPage() {
   const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
   const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
   const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
-  const batches = useQuery({ queryKey: ['options', 'batches'], queryFn: fetchBatchOptions })
+  // 批次映射按当前页行内 sku_id 集合按需拉取（/api/batches?sku_id= 过滤，handler.go:366-372），
+  // 避免无过滤全量拉取超上限后 batch_id→batch_no 映射降级裸 ID
+  const batchSkuIds = useMemo(
+    () => [...new Set(list.items.map((row) => String(row.sku_id)))].sort(),
+    [list.items],
+  )
+  const batches = useQuery({
+    queryKey: ['options', 'batches', batchSkuIds],
+    queryFn: () => fetchBatchOptions(batchSkuIds),
+    enabled: batchSkuIds.length > 0,
+  })
 
   const maps: LockNameMaps = useMemo(
     () => ({

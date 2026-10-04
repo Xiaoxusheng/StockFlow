@@ -4,54 +4,79 @@ import {
   CameraOutlined,
   CheckOutlined,
   LockOutlined,
-  SearchOutlined,
+  PlayCircleOutlined,
+  RocketOutlined,
+  CheckSquareOutlined,
 } from '@ant-design/icons'
-import type { ExceptionItem, ExceptionQuery, ExceptionStatus, ExceptionType } from '@/api/exception'
-import { EXCEPTION_STATUS_TAG, EXCEPTION_TYPE_LABEL, exceptionApi } from '@/api/exception'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { ExceptionId, ExceptionItem, ExceptionQuery, ExceptionStatus, ExceptionType } from '@/api/exception'
+import {
+  EXCEPTION_ASSIGN_PERMISSION,
+  EXCEPTION_CLOSE_PERMISSION,
+  EXCEPTION_EXECUTE_PERMISSION,
+  EXCEPTION_STATUS_TAG,
+  EXCEPTION_TYPES,
+  exceptionApi,
+} from '@/api/exception'
+import { resolveErrorMessage } from '@/api/client'
+import { buildBinCodeMap, buildSkuMaps, fetchBinOptions, fetchSkuOptions } from '@/api/options'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
-import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { PadActionBar, PadInfoCard, PadPageShell, usePadOrientation } from '@/layouts/pad'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { EMPTY_TEXT, formatDateTime } from '@/utils/format'
-import { ActionPlaceholder, ExceptionCard } from './ExceptionCards'
+import { ActionPlaceholder, ExceptionCard, ExceptionStatusTag, PadExceptionAction } from './ExceptionCards'
 
-/** 九类异常 chip（business-flow.md §11.2；文案取 api/exception.ts EXCEPTION_TYPE_LABEL） */
-const TYPE_OPTIONS = (Object.entries(EXCEPTION_TYPE_LABEL) as Array<[ExceptionType, string]>).map(
-  ([value, label]) => ({ label, value }),
-)
+/** 九类异常 chip（后端中文值域即文案：internal/returns/models.go:48-51） */
+const TYPE_OPTIONS: Array<{ label: string; value: ExceptionType }> = EXCEPTION_TYPES.map((value) => ({
+  label: value,
+  value,
+}))
 
-/** 七态生命周期 chip（business-flow.md §11.2；label 取 EXCEPTION_STATUS_TAG） */
-const STATUS_OPTIONS = (
-  Object.entries(EXCEPTION_STATUS_TAG) as Array<[ExceptionStatus, { label: string }]>
-).map(([value, meta]) => ({ label: meta.label, value }))
+/** 六态生命周期 chip（chk_exceptions_status 值域；label 取 EXCEPTION_STATUS_TAG） */
+const STATUS_OPTIONS: Array<{ label: string; value: ExceptionStatus }> = (
+  Object.keys(EXCEPTION_STATUS_TAG) as ExceptionStatus[]
+).map((value) => ({ label: EXCEPTION_STATUS_TAG[value].label, value }))
 
-/** 动作端点未交付的统一占位原因（认领/处理/关闭，M2 后接线；本轮不假装可用） */
-const ACTION_DISABLED_REASON =
-  '异常认领 / 处理 / 关闭端点尚未交付（business-flow.md §11.2 生命周期，M2 后接线），本轮为占位按钮'
+/** 拍照取证占位原因：后端异常域无图片挂接端点（image_refs 有列无写入路径，
+ * service_exception.go:140；文件域 /api/files 已交付但未与异常单打通）——后端侧条目，保持占位 */
 const PHOTO_DISABLED_REASON =
-  '拍照取证属 Pad 拍照链路（frontend.md §20.6 异常为拍照场景），本轮为占位入口，待设备/文件域交付后接线'
+  '拍照取证暂无法接线：后端异常域无图片上传/挂接端点（image_refs 有列无写入路径），待后端补端点后接线，本轮为占位入口'
 
 /**
  * Pad 异常页（/pad/exception，frontend.md §20.2/§20.3/§20.4 + business-flow.md §11.2）：
+ * - 契约回对共享层 api/exception.ts（ExceptionView snake_case，六态 chk_exceptions_status，
+ *   九类中文值域 chk_exceptions_type，internal/returns/service_exception.go:64-88）；
  * - 横屏三栏：左=异常卡列表（exceptionApi.list）+ 九类异常/生命周期大触摸 chip 筛选；
- *   中=异常详情 PadInfoCard（描述/来源单据/责任人/处理人）；右=处理操作区（认领/处理/关闭
- *   动作占位 + 拍照取证入口占位，端点未交付 disabled 注明，M2 后接线）。
- * - 竖屏堆叠：顶部当前异常卡（选中详情内联列表上方，同 PadTasksPage 模式）→ 详情/列表滚动区
- *   → 底部 PadActionBar [返回][扫码][异常]（查看为主，省略 [暂停][完成]）。
- * - 页面以查看为主；九类异常类型按普通文本、生命周期经 SfStatusTag；无假数据、动作不做假提交。
+ *   中=异常详情 PadInfoCard（描述/来源/定位/责任人/处理人/处理记录）；右=处理操作区；
+ * - 生命周期动作接线 returns 域 8 端点（internal/returns/handler.go:139-146）：
+ *   认领=assign（OPEN，分派给当前登录人）、开始处理=start（ASSIGNED）、提交复核=review
+ *   （PROCESSING）、解决=resolve（PENDING_REVIEW，后端同事务释放异常冻结）、关闭=close
+ *   （RESOLVED）；前置权限码 returns:exception:* 经 canAccess fail-closed 控制
+ *   （permission.md §5：前端仅体验优化，后端 RequirePermission 仍强校验）；
+ * - 拍照取证保持占位（后端无图片挂接端点，disabled 注明原因，不假装可用）；
+ * - 竖屏堆叠：顶部当前异常卡（选中详情内联列表上方）→ 详情/列表滚动区 → 底部 PadActionBar。
  */
 export default function PadExceptionPage() {
   const orientation = usePadOrientation()
   const [messageApi, contextHolder] = message.useMessage()
+  const queryClient = useQueryClient()
+  // 按钮级权限码经 canAccess fail-closed 过滤（模式同 PadTransferPage；permission.md §5）
+  const user = useAuthStore((state) => state.user)
+  const canAssign = canAccess(user, EXCEPTION_ASSIGN_PERMISSION)
+  const canExecute = canAccess(user, EXCEPTION_EXECUTE_PERMISSION)
+  const canClose = canAccess(user, EXCEPTION_CLOSE_PERMISSION)
+
   const [typeFilter, setTypeFilter] = useState<ExceptionType | 'all'>('all')
   const [statusFilter, setStatusFilter] = useState<ExceptionStatus | 'all'>('all')
-  const [selectedId, setSelectedId] = useState<ExceptionItem['id'] | null>(null)
+  const [selectedId, setSelectedId] = useState<ExceptionId | null>(null)
 
   const params = useMemo<ExceptionQuery>(
     () => ({
-      exceptionType: typeFilter === 'all' ? undefined : typeFilter,
+      type: typeFilter === 'all' ? undefined : typeFilter,
       status: statusFilter === 'all' ? undefined : statusFilter,
     }),
     [typeFilter, statusFilter],
@@ -64,7 +89,49 @@ export default function PadExceptionPage() {
     defaultPageSize: 30,
   })
 
+  // SKU/库位编码映射（基础资料 options 一次取全；失败降级为 ID，不造假数据）
+  const skuOptions = useQuery({ queryKey: ['pad', 'exception', 'sku-options'], queryFn: fetchSkuOptions })
+  const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
+  const binOptions = useQuery({ queryKey: ['pad', 'exception', 'bin-options'], queryFn: fetchBinOptions })
+  const binCodeMap = useMemo(() => buildBinCodeMap(binOptions.data ?? []), [binOptions.data])
+
   const selected = list.items.find((item) => String(item.id) === String(selectedId)) ?? null
+
+  const invalidateExceptions = () => {
+    void queryClient.invalidateQueries({ queryKey: ['pad', 'exceptions'] })
+  }
+
+  const notifyError = (error: unknown) => messageApi.error(resolveErrorMessage(error))
+
+  // 认领：POST /api/exceptions/{id}/assign（OPEN→ASSIGNED，分派给当前登录人）
+  const assignMutation = useMutation({
+    mutationFn: (id: ExceptionId) =>
+      exceptionApi.assign(id, {
+        assignee_id: Number(user?.id ?? 0),
+        assignee_name: user?.real_name || user?.username || '',
+      }),
+    onSuccess: (view) => {
+      messageApi.success(`已认领异常单 ${view.exception_no}（待处理 → 已分派）`)
+      invalidateExceptions()
+    },
+    onError: notifyError,
+  })
+  // 生命周期迁移动作（start/review/resolve/close 共用形态，返回迁移后 ExceptionView）
+  const lifecycleMutation = useMutation({
+    mutationFn: ({ id, action }: { id: ExceptionId; action: 'start' | 'review' | 'resolve' | 'close' }) =>
+      exceptionApi[action](id),
+    onSuccess: (view, { action }) => {
+      const fromTo: Record<typeof action, string> = {
+        start: '已分派 → 处理中',
+        review: '处理中 → 待复核',
+        resolve: '待复核 → 已解决（异常冻结已按需释放）',
+        close: '已解决 → 已关闭',
+      }
+      messageApi.success(`异常单 ${view.exception_no}：${fromTo[action]}`)
+      invalidateExceptions()
+    },
+    onError: notifyError,
+  })
 
   const handleFilter = (apply: () => void) => {
     apply()
@@ -77,41 +144,103 @@ export default function PadExceptionPage() {
     const key = code.trim().toUpperCase()
     const hit = list.items.find(
       (item) =>
-        item.exceptionNo.toUpperCase() === key ||
-        (item.bizNo ?? '').toUpperCase() === key ||
-        (item.skuCode ?? '').toUpperCase() === key,
+        item.exception_no.toUpperCase() === key || (item.source_no ?? '').toUpperCase() === key,
     )
     if (hit) {
       setSelectedId(hit.id)
-      messageApi.success(`已定位异常单：${hit.exceptionNo}`)
+      messageApi.success(`已定位异常单：${hit.exception_no}`)
     } else {
       messageApi.warning(`未在当前异常列表中找到「${code}」，请检查单号或手工点选`)
     }
   }
 
+  /** 动作可用性守卫（canAccess fail-closed + 状态机前置态，给出具体原因） */
+  const actionDisabledReason = (action: 'assign' | 'start' | 'review' | 'resolve' | 'close') => {
+    if (selected == null) return '先从左侧选择一张异常卡'
+    const guards = {
+      assign: { permission: canAssign, permissionName: EXCEPTION_ASSIGN_PERMISSION, status: 'OPEN' as ExceptionStatus, hint: '仅「待处理」状态可认领' },
+      start: { permission: canExecute, permissionName: EXCEPTION_EXECUTE_PERMISSION, status: 'ASSIGNED' as ExceptionStatus, hint: '仅「已分派」状态可开始处理' },
+      review: { permission: canExecute, permissionName: EXCEPTION_EXECUTE_PERMISSION, status: 'PROCESSING' as ExceptionStatus, hint: '仅「处理中」状态可提交复核' },
+      resolve: { permission: canExecute, permissionName: EXCEPTION_EXECUTE_PERMISSION, status: 'PENDING_REVIEW' as ExceptionStatus, hint: '仅「待复核」状态可解决' },
+      close: { permission: canClose, permissionName: EXCEPTION_CLOSE_PERMISSION, status: 'RESOLVED' as ExceptionStatus, hint: '仅「已解决」状态可关闭' },
+    }
+    const guard = guards[action]
+    if (!guard.permission) return `缺少 ${guard.permissionName} 权限`
+    if (selected.status !== guard.status) return `${guard.hint}（当前 ${EXCEPTION_STATUS_TAG[selected.status]?.label ?? selected.status}）`
+    return undefined
+  }
+
+  const handleAction = (action: 'assign' | 'start' | 'review' | 'resolve' | 'close') => {
+    if (!selected) return
+    if (action === 'assign') {
+      assignMutation.mutate(selected.id)
+    } else {
+      lifecycleMutation.mutate({ id: selected.id, action })
+    }
+  }
+
+  const skuDisplay = (item: ExceptionItem) =>
+    String(item.sku_id) === '0' ? EMPTY_TEXT : (skuMaps.code.get(String(item.sku_id)) ?? `#${String(item.sku_id)}`)
+  const binDisplay = (item: ExceptionItem) =>
+    String(item.bin_id) === '0' ? EMPTY_TEXT : (binCodeMap.get(String(item.bin_id)) ?? `#${String(item.bin_id)}`)
+
   const totalPage = Math.max(1, Math.ceil(list.total / list.pagination.pageSize))
 
   const detailCard = selected ? (
     <PadInfoCard
-      title={`异常详情 · ${selected.exceptionNo}`}
+      title={`异常详情 · ${selected.exception_no}`}
       items={[
-        { label: '异常单号', value: selected.exceptionNo },
-        { label: '生命周期', value: <SfStatusTag status={selected.status} /> },
-        { label: '异常类型', value: EXCEPTION_TYPE_LABEL[selected.exceptionType] ?? selected.exceptionType },
-        { label: '标题', value: selected.title },
-        { label: '仓库', value: selected.warehouseName || EMPTY_TEXT },
-        { label: 'SKU', value: selected.skuCode || EMPTY_TEXT },
-        { label: '来源单据', value: selected.bizNo || EMPTY_TEXT },
-        { label: '责任人', value: selected.ownerName || EMPTY_TEXT },
-        { label: '处理人', value: selected.handlerName || EMPTY_TEXT },
-        { label: '发现时间', value: formatDateTime(selected.discoveredAt) },
-        ...(selected.resolvedAt
-          ? [{ label: '解决时间', value: formatDateTime(selected.resolvedAt) }]
+        { label: '异常单号', value: selected.exception_no },
+        { label: '生命周期', value: <ExceptionStatusTag status={selected.status} /> },
+        { label: '异常类型', value: selected.type },
+        { label: '来源类型', value: selected.source_type || EMPTY_TEXT },
+        { label: '来源单据', value: selected.source_no || EMPTY_TEXT },
+        { label: 'SKU', value: skuDisplay(selected) },
+        { label: '库位', value: binDisplay(selected) },
+        { label: '序列号', value: selected.serial_no || EMPTY_TEXT },
+        { label: '责任人', value: selected.owner_name || EMPTY_TEXT },
+        { label: '处理人', value: selected.assignee_name || EMPTY_TEXT },
+        { label: '登记时间', value: formatDateTime(selected.created_at) },
+        ...(selected.assigned_at ? [{ label: '分派时间', value: formatDateTime(selected.assigned_at) }] : []),
+        ...(selected.resolved_at ? [{ label: '解决时间', value: formatDateTime(selected.resolved_at) }] : []),
+        ...(selected.closed_at ? [{ label: '关闭时间', value: formatDateTime(selected.closed_at) }] : []),
+        ...(String(selected.freeze_lock_id) !== '0'
+          ? [{ label: '异常冻结', value: `锁 #${String(selected.freeze_lock_id)}（解决/关闭时后端释放）` }]
           : []),
-        { label: '描述', value: selected.description || EMPTY_TEXT },
+        { label: '描述', value: selected.detail || EMPTY_TEXT },
+        { label: '备注', value: selected.remark || EMPTY_TEXT },
       ]}
       columns={2}
     />
+  ) : null
+
+  const handleRecordsNode = selected ? (
+    <section className="sf-pad-card" aria-label="处理记录">
+      <h3 className="sf-pad-card-title">处理记录（追加式台账，{selected.handle_records.length} 条）</h3>
+      {selected.handle_records.length === 0 ? (
+        <SfEmpty description="暂无处理记录" />
+      ) : (
+        <div className="sf-pad-tasks-cards">
+          {selected.handle_records.map((record, index) => (
+            <div key={`${String(record.at)}-${record.action}-${index}`} className="sf-pad-task-card">
+              <div className="sf-pad-task-card__head">
+                <span className="sf-pad-task-card__no">{record.action}</span>
+                <span>{formatDateTime(record.at)}</span>
+              </div>
+              <div className="sf-pad-task-card__meta">
+                <span>{record.by_name || `#${String(record.by_id)}`}</span>
+                {record.qty ? <span>数量 {record.qty}</span> : null}
+              </div>
+              {record.note ? (
+                <div className="sf-pad-task-card__qty">
+                  <span style={{ overflowWrap: 'anywhere' }}>{record.note}</span>
+                </div>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   ) : null
 
   const listNode = (
@@ -138,7 +267,7 @@ export default function PadExceptionPage() {
             </Button>
           ))}
         </div>
-        <div className="sf-pad-chip-row" role="group" aria-label="生命周期筛选（七态）">
+        <div className="sf-pad-chip-row" role="group" aria-label="生命周期筛选（六态）">
           <Button
             size="large"
             className="sf-pad-chip"
@@ -166,7 +295,7 @@ export default function PadExceptionPage() {
       ) : list.error ? (
         <SfError
           error={list.error}
-          description="异常域接口（GET /api/exceptions）为前端先行契约，后端异常域交付前呈统一错误态"
+          description="异常单列表（GET /api/exceptions）加载失败"
           onRetry={() => void list.refetch()}
         />
       ) : list.items.length === 0 ? (
@@ -210,31 +339,48 @@ export default function PadExceptionPage() {
     </div>
   )
 
-  // 右栏处理操作区：认领/处理/关闭动作占位 + 拍照取证入口占位（端点未交付，disabled 注明）
+  // 右栏处理操作区：生命周期动作真实接线（权限/状态守卫）+ 拍照取证占位（后端无端点）
   const actionPanel = (
     <section className="sf-pad-card" aria-label="异常处理操作区">
       <h3 className="sf-pad-card-title">处理操作</h3>
       {!selected ? (
-        <SfEmpty description="从左侧选择一张异常卡后，在此进行认领 / 处理 / 关闭" />
+        <SfEmpty description="从左侧选择一张异常卡后，在此进行分派 / 处理 / 关闭" />
       ) : (
         <div style={{ display: 'grid', gap: 'var(--sf-space-2)' }}>
-          <ActionPlaceholder
-            label="认领异常"
+          <PadExceptionAction
+            label="认领异常（分派给自己）"
             icon={<LockOutlined />}
-            reason={ACTION_DISABLED_REASON}
-            notify={(text) => messageApi.info(text)}
+            disabledReason={actionDisabledReason('assign')}
+            loading={assignMutation.isPending}
+            onClick={() => handleAction('assign')}
           />
-          <ActionPlaceholder
-            label="处理异常"
-            icon={<SearchOutlined />}
-            reason={ACTION_DISABLED_REASON}
-            notify={(text) => messageApi.info(text)}
+          <PadExceptionAction
+            label="开始处理"
+            icon={<PlayCircleOutlined />}
+            disabledReason={actionDisabledReason('start')}
+            loading={lifecycleMutation.isPending}
+            onClick={() => handleAction('start')}
           />
-          <ActionPlaceholder
+          <PadExceptionAction
+            label="提交复核"
+            icon={<RocketOutlined />}
+            disabledReason={actionDisabledReason('review')}
+            loading={lifecycleMutation.isPending}
+            onClick={() => handleAction('review')}
+          />
+          <PadExceptionAction
+            label="解决"
+            icon={<CheckSquareOutlined />}
+            disabledReason={actionDisabledReason('resolve')}
+            loading={lifecycleMutation.isPending}
+            onClick={() => handleAction('resolve')}
+          />
+          <PadExceptionAction
             label="关闭异常"
             icon={<CheckOutlined />}
-            reason={ACTION_DISABLED_REASON}
-            notify={(text) => messageApi.info(text)}
+            disabledReason={actionDisabledReason('close')}
+            loading={lifecycleMutation.isPending}
+            onClick={() => handleAction('close')}
           />
           <ActionPlaceholder
             label="拍照取证（占位）"
@@ -243,8 +389,9 @@ export default function PadExceptionPage() {
             notify={(text) => messageApi.info(text)}
           />
           <p className="sf-pad-muted-note" style={{ margin: 0 }}>
-            处理动作端点 M2 后接线（business-flow.md §11.2：发现→创建→分派→处理中→待复核→已解决→已关闭）；
-            本轮仅提供查看与筛选，不做假提交。
+            生命周期：待处理 → 已分派 → 处理中 → 待复核 → 已解决 → 已关闭
+            （business-flow.md §11.2；异常冻结在解决/关闭时由后端同事务释放，inventory-rules.md §4.2）；
+            动作需 returns:exception:* 权限并按状态机前置态启用
           </p>
         </div>
       )}
@@ -259,13 +406,16 @@ export default function PadExceptionPage() {
       {orientation === 'landscape' ? (
         <PadPageShell ratios={ratios} tasksSlot={listNode} contentSlot={
           selected ? (
-            detailCard
+            <>
+              {detailCard}
+              {handleRecordsNode}
+            </>
           ) : (
             <SfEmpty description="从左侧选择一张异常卡，此处展示异常详情" />
           )
         } actionSlot={actionPanel} />
       ) : (
-        // 竖屏：顶部当前异常卡（选中详情内联在列表上方）→ 筛选 + 列表滚动区；动作占位并入详情下方
+        // 竖屏：顶部当前异常卡（选中详情内联在列表上方）→ 筛选 + 列表滚动区；动作并入详情下方
         <PadPageShell
           ratios={ratios}
           tasksSlot={
@@ -273,6 +423,7 @@ export default function PadExceptionPage() {
               {selected && (
                 <div className="sf-pad-tasks-detail">
                   {detailCard}
+                  {handleRecordsNode}
                   {actionPanel}
                 </div>
               )}

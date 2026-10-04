@@ -1,8 +1,14 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 
-// ---------- 任务中心（F8：/workbench + /tasks；后端任务域 M1 未交付，以下为前端先行契约，
-// 字段名待后端交付时以 Go JSON tag 为准对齐，对齐机制同 docs/tasks/current.md 遗留清单） ----------
+// ---------- 任务中心（F8：/workbench + /tasks；后端任务域 M1/M2 未交付，以下为前端先行契约） ----------
+// 命名已对齐后端惯例（无实际错位，端点未上线故调用 404 → 页面统一错误态，requirements.md §10）：
+// - 响应字段 snake_case（后端 DTO JSON tag 惯例，grep internal/ 实测 source_no/serial_no 等）；
+// - 列表筛选 query 参数 snake_case（后端 c.Query 惯例：warehouse_id/source_no 等，grep 实测）；
+// - 分页除外：page/pageSize 双端一致（internal/response/response.go:54-62 ParsePage 读
+//   "page"/"pageSize"，types/api.ts PageQuery/PageResult 同形，共享文件本轮不动）；
+// - 枚举值域后端 dto/迁移 CHECK 冻结前保持现值，未知值由页面回退展示原始值；
+//   端点交付时以 Go JSON tag / CHECK 逐字段复核（对齐机制同 docs/tasks/current.md 遗留清单）。
 
 /**
  * 任务类型（业务依据：上架 business-flow.md §5、拣货 §8.2、复核 §8.3、打包 §7.2、
@@ -21,40 +27,40 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
 
 export interface TaskQuery extends PageQuery {
   keyword?: string
-  taskType?: TaskType
+  task_type?: TaskType
   status?: TaskStatus
-  warehouseCode?: string
+  warehouse_code?: string
 }
 
 export interface TaskItem {
   id: number | string
   /** 任务号（编号规则待后端冻结） */
-  taskNo: string
-  taskType: string
+  task_no: string
+  task_type: string
   /** 关联单据号（入库单 / 出库单 / 盘点单等） */
-  sourceNo?: string
-  warehouseName?: string
+  source_no?: string
+  warehouse_name?: string
   /** 计划数量 */
-  totalQty: number
+  total_qty: number
   /** 已完成数量（作业支持部分完成，business-flow.md §3.3/§8.2） */
-  completedQty: number
+  completed_qty: number
   status: string
   /** 负责人（我的任务 = 指派给当前用户的任务子集） */
-  assigneeName?: string
-  createdAt: string
-  completedAt?: string
+  assignee_name?: string
+  created_at: string
+  completed_at?: string
 }
 
-/** 我的工作台入口计数（frontend.md §15.1 四块；前端先行契约，后端交付时对齐字段名） */
+/** 我的工作台入口计数（frontend.md §15.1 四块；前端先行契约，端点交付时以 Go JSON tag 复核） */
 export interface WorkbenchSummary {
   /** 我的待办 */
-  todoCount: number
+  todo_count: number
   /** 我的审批 */
-  approvalCount: number
+  approval_count: number
   /** 我的任务 */
-  taskCount: number
+  task_count: number
   /** 我的异常 */
-  exceptionCount: number
+  exception_count: number
 }
 
 export const taskApi = {

@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { ReactNode } from 'react'
 import { Button, Input, Modal, Select, message } from 'antd'
 import {
   ArrowLeftOutlined,
-  CameraOutlined,
   CheckOutlined,
   MinusOutlined,
   PauseOutlined,
@@ -25,9 +23,16 @@ import {
   type QualityOrderStatus,
   type QualityResult,
 } from '@/api/quality'
+import {
+  fetchFileObjectUrl,
+  fileApi,
+  resolveFileDownloadPath,
+  type FileItem,
+} from '@/api/file'
 import { buildIdItemMap, buildSkuMaps, fetchSkuOptions } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
 import type { SalesId } from '@/api/sales'
+import { SfAttachment, type AttachmentItem } from '@/components/common/SfAttachment'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
@@ -192,38 +197,6 @@ function QcTaskCard({
   )
 }
 
-/** 禁用动作按钮（死按钮门禁口径，frontend.md §9.1）：外包 span 接管点按，Toast 送达禁用原因 */
-function DisabledAction({
-  label,
-  reason,
-  icon,
-  variant,
-}: {
-  label: string
-  reason: string
-  icon?: ReactNode
-  variant?: 'primary'
-}) {
-  const [messageApi, contextHolder] = message.useMessage()
-  return (
-    <>
-      {contextHolder}
-      <span style={{ display: 'block' }} onClick={() => messageApi.warning(reason)}>
-        <Button
-          block
-          size="large"
-          type={variant === 'primary' ? 'primary' : 'default'}
-          icon={icon}
-          disabled
-          style={{ minHeight: 'var(--sf-pad-card-min-height)' }}
-        >
-          {label}
-        </Button>
-      </span>
-    </>
-  )
-}
-
 /**
  * Pad 质检页（frontend.md §20.3 三栏 / §20.4 竖屏；business-flow.md §4 / §21.4 质检要点）：
  * - 左栏：任务源 = GET /api/quality（qualityApi.inspections，默认筛 PENDING 待质检）→
@@ -234,7 +207,10 @@ function DisabledAction({
  *   逐行合格数量步进（不合格自动补齐）→ [合格]/[部分合格]/[不合格] 快捷判定与
  *   处置九中文值下拉（检验结论与处理结果共用 result 字段），统一提交
  *   POST /api/quality/{id}/execute（service_quality.go:49-67，结果值为中文）；
- *   [拍照留证] 保持 disabled（依赖 /api/files 文件上传与 Scan 端拍照集成）；
+ *   [拍照留证] 真实接线（POST /api/files 已交付，internal/datax/handler.go:123-128）：
+ *   经 SfAttachment 上传（module=QUALITY、business_no=质检单号），文件引用随 execute
+ *   image_refs 落质检单（QCExecuteInput.ImageRefs，service_quality.go:52）；Pad 原生相机 /
+ *   Scan 端拍照集成仍待 Scan 应用交付，Web Pad 经文件选择/系统相机入口完成；
  * - 竖屏：顶部当前质检任务卡 → 信息卡 → 质检判定 → 任务列表滚动区 → 底部 PadActionBar。
  * 结果 / 处置展示一律经 SfStatusTag（§24），不自定颜色。
  */
@@ -253,6 +229,9 @@ export default function PadQualityPage() {
   const [lineStates, setLineStates] = useState<Record<string, QcLineState>>({})
   /** 已初始化判定态的质检单 id（防窗口聚焦重取覆盖录入中内容） */
   const [loadedForId, setLoadedForId] = useState<string | null>(null)
+  /** 拍照留证：本单已上传、待随 execute image_refs 提交的文件（POST /api/files 返回 FileItem） */
+  const [photos, setPhotos] = useState<FileItem[]>([])
+  const [photoUploading, setPhotoUploading] = useState(false)
 
   const params = useMemo<QualityInspectionQuery>(
     () => ({ status: statusFilter === 'all' ? undefined : statusFilter }),
@@ -335,10 +314,75 @@ export default function PadQualityPage() {
     onSuccess: (order) => {
       messageApi.success(`质检结果已提交：${order.qc_no} · 处理结果「${order.result}」`)
       setSelected(order)
+      setPhotos([])
       void queryClient.invalidateQueries({ queryKey: ['pad', 'quality'] })
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
+
+  // ---------- 拍照留证（POST /api/files 已交付：internal/datax/handler.go:123-128；
+  // 上传引用随 execute image_refs 落质检单，QCExecuteInput.ImageRefs service_quality.go:52） ----------
+
+  /** FileItem → SfAttachment 条目（fileName 形状适配；FileItem 为 snake_case 出参） */
+  const photoItems: AttachmentItem[] = useMemo(
+    () =>
+      photos.map((file) => ({
+        id: file.id,
+        fileName: file.file_name,
+        fileType: file.mime_type,
+        size: file.size_bytes,
+        uploader: file.uploader_name,
+        uploadedAt: file.created_at,
+      })),
+    [photos],
+  )
+  const photoFileMap = useMemo(() => new Map(photos.map((file) => [String(file.id), file])), [photos])
+
+  /** 上传：逐文件 POST /api/files（module=QUALITY、business_no=质检单号，文件中心按单据可检索）；
+   * 部分失败不阻塞其余文件，失败原因呈可读信封信息（权限/白名单由后端权威校验） */
+  const handlePhotoUpload = async (files: File[]) => {
+    if (!selected || files.length === 0 || photoUploading) return
+    setPhotoUploading(true)
+    try {
+      const results = await Promise.allSettled(
+        files.map((file) => fileApi.upload({ file, module: 'QUALITY', businessNo: selected.qc_no })),
+      )
+      const uploaded: FileItem[] = []
+      let firstError: unknown
+      for (const result of results) {
+        if (result.status === 'fulfilled') uploaded.push(result.value)
+        else firstError ??= result.reason
+      }
+      if (uploaded.length > 0) {
+        setPhotos((prev) => [...prev, ...uploaded])
+        messageApi.success(`已上传 ${uploaded.length} 张照片，随质检结果提交关联`)
+      }
+      if (uploaded.length < results.length) {
+        messageApi.error(
+          `${results.length - uploaded.length} 个文件上传失败：${resolveErrorMessage(firstError)}`,
+        )
+      }
+    } finally {
+      setPhotoUploading(false)
+    }
+  }
+
+  /** 从待提交引用移除（不删除文件中心记录：避免 datax:file:delete 依赖与误删已留存文件） */
+  const removePhoto = (item: AttachmentItem) => {
+    setPhotos((prev) => prev.filter((file) => String(file.id) !== String(item.id)))
+  }
+
+  /** 照片预览：认证流经后端下发地址取文件流转 objectUrl（SfAttachment 关闭时统一释放） */
+  const previewPhoto = async (item: AttachmentItem): Promise<string | void> => {
+    const file = photoFileMap.get(String(item.id))
+    if (!file) return undefined
+    try {
+      return await fetchFileObjectUrl(resolveFileDownloadPath(file))
+    } catch (error) {
+      messageApi.error(`照片预览加载失败：${resolveErrorMessage(error)}`)
+      return undefined
+    }
+  }
 
   /**
    * 提交质检结果（POST /api/quality/{id}/execute）：
@@ -386,7 +430,12 @@ export default function PadQualityPage() {
     }
     executeMutation.mutate({
       id: selected.id,
-      payload: { lines, result, remark: remark.trim() || undefined },
+      payload: {
+        lines,
+        result,
+        image_refs: photos.length > 0 ? photos.map((file) => String(file.id)) : undefined,
+        remark: remark.trim() || undefined,
+      },
     })
   }
 
@@ -394,6 +443,7 @@ export default function PadQualityPage() {
     setSelected(order)
     setRemark('')
     setResultChoice(undefined)
+    setPhotos([])
   }
 
   const handleFilter = (value: QualityOrderStatus | 'all') => {
@@ -401,6 +451,7 @@ export default function PadQualityPage() {
     setSelected(null)
     setLineStates({})
     setLoadedForId(null)
+    setPhotos([])
     list.resetToFirstPage()
   }
 
@@ -612,13 +663,37 @@ export default function PadQualityPage() {
         />
       </section>
 
-      <section className="sf-pad-card" aria-label="不合格拍照">
-        <h3 className="sf-pad-card-title">不合格拍照</h3>
-        <DisabledAction
-          label="拍照留证（不合格）"
-          icon={<CameraOutlined />}
-          reason="质检拍照上传依赖 /api/files 文件端点与 Scan 端拍照集成（frontend.md §20.6，image_refs 随文件中心阶段承载），接线前为占位"
-        />
+      <section className="sf-pad-card" aria-label="拍照留证">
+        <h3 className="sf-pad-card-title">拍照留证</h3>
+        {!selected ? (
+          <SfEmpty description="选择质检单后可拍照留证，照片随质检结果一并提交" />
+        ) : completed ? (
+          <p className="sf-pad-muted-note">
+            {detailOrder?.image_refs && detailOrder.image_refs.length > 0
+              ? `已关联 ${detailOrder.image_refs.length} 张照片（文件中心按业务单号 ${detailOrder.qc_no} 检索）`
+              : '该质检单无现场照片'}
+          </p>
+        ) : (
+          <>
+            <SfAttachment
+              items={photoItems}
+              title={`待提交照片（${photoItems.length}）`}
+              uploading={photoUploading}
+              uploadAccept="image/*"
+              uploadMultiple
+              uploadLabel="拍照 / 选择图片"
+              onUpload={(files) => void handlePhotoUpload(files)}
+              onDelete={removePhoto}
+              onPreview={previewPhoto}
+              emptyText="暂无照片：拍摄不合格现场照片，提交质检结果时随 image_refs 关联"
+            />
+            <p className="sf-pad-muted-note">
+              照片经 POST /api/files 上传（module=QUALITY · business_no={selected.qc_no}），
+              提交质检结果时随 image_refs 落质检单；「删除」仅从本次提交引用剔除，
+              文件保留在文件中心
+            </p>
+          </>
+        )}
       </section>
     </>
   )

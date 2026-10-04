@@ -105,13 +105,19 @@ export const STATUS_META: Record<string, StatusMeta> = {
   // cancelled；此处为明细行态；原 pending_execute 为前端虚构值域已移除）
   counting: { label: '盘点中', semantic: 'processing' },
   counted: { label: '已盘', semantic: 'success' },
-
-  // 异常生命周期（business-flow.md §11.2：发现→创建→分派→处理中→待复核→已解决→已关闭；
-  // processing/closed 复用通用键，与 api/exception.ts EXCEPTION_STATUS_TAG 对齐）
-  discovered: { label: '发现', semantic: 'warning' },
-  created: { label: '已创建', semantic: 'pending' },
-  assigned: { label: '已分派', semantic: 'processing' },
+  // pending_recheck：盘点 PENDING_REVIEW 的「待复核」文案键（注册表通用 pending_review
+  // 文案为「待审核」，盘点域以本键区分；CountDetailPage/CountTaskListPage/CountCards
+  // 的状态映射消费）——原挂在异常生命周期组下的旧七态虚构键已按六态口径移正。
   pending_recheck: { label: '待复核', semantic: 'pending' },
+
+  // 异常生命周期六态（chk_exceptions_status：OPEN/ASSIGNED/PROCESSING/PENDING_REVIEW/
+  // RESOLVED/CLOSED——internal/returns/models.go:39-44；业务口径 business-flow.md §11.2
+  // 发现→创建归并为 OPEN 起始态。注册表按小写键收录，大写原始值经页面
+  // EXCEPTION_STATUS_TAG（api/exception.ts）label/semantic 覆盖路径接管；
+  // processing/closed 复用上方通用键。原 discovered/created 为旧七态虚构键、
+  // 后端值域无此二态，已移除）
+  open: { label: '待处理', semantic: 'warning' },
+  assigned: { label: '已分派', semantic: 'processing' },
   resolved: { label: '已解决', semantic: 'success' },
 
   // 质检结果

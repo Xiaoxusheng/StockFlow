@@ -205,7 +205,8 @@ export type PrintTemplateStatus = 'ENABLED' | 'DISABLED'
 
 export interface PrintTemplateQuery extends PageQuery {
   keyword?: string
-  objectType?: string
+  /** 线格式 snake_case（后端 handler.go:175 c.Query("object_type")；camelCase 会被静默忽略） */
+  object_type?: string
   status?: string
 }
 
@@ -289,10 +290,14 @@ export function isPrintTaskFinished(status?: string | null): boolean {
   return status === 'SUCCESS' || status === 'FAILED'
 }
 
-/** 任务列表筛选 */
+/** 任务列表筛选（handler.go:319-333：keyword 按 print_no ILIKE、object_type/status、id 精确） */
 export interface PrintTaskQuery extends PageQuery {
-  objectType?: string
+  keyword?: string
+  /** 线格式 snake_case（后端 handler.go:321 c.Query("object_type")） */
+  object_type?: string
   status?: string
+  /** 任务行 ID 精确筛选（handler.go:325-333；非正整数字符串按参数错误） */
+  id?: string
 }
 
 /** 任务内容行（RowView，service.go:160-166：主码内容 + 字段绑定取值 + 单据明细行） */
@@ -348,8 +353,10 @@ export interface PrintTaskCreatePayload {
 // = print_tasks 已确认子集，HistoryItem，service.go:238-250） ----------
 
 export interface PrintHistoryQuery extends PageQuery {
-  objectType?: string
+  /** 线格式 snake_case（后端 handler.go:427 c.Query("object_type")） */
+  object_type?: string
   result?: string
+  /** 仅按打印单号模糊匹配（repository.go:197 print_no ILIKE——打印人/模板名不参与检索） */
   keyword?: string
 }
 

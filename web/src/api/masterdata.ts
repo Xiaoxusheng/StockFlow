@@ -280,13 +280,23 @@ export interface CustomerSavePayload {
 
 // ---------- API（列表 + CRUD /{id} + 启停 /status，internal/masterdata/masterdata.go:46-89） ----------
 
+/**
+ * 更新入参剔除 code：后端各 UpdateInput 均无 code 字段（service_category.go:134-138、
+ * service_product.go:120-136、service_partner.go:98-105、service_sku.go:163-176——编码创建后
+ * 不可改），Go json 解码忽略未知字段虽无行为影响，按契约更新分支不发送该字段（创建仍需 code）。
+ */
+function stripCode<P extends { code: string }>(payload: P): Omit<P, 'code'> {
+  const { code: _code, ...rest } = payload
+  return rest
+}
+
 export const masterdataApi = {
   products: {
     list: (query: ProductQuery) =>
       http.get<PageResult<ProductItem>>('/api/products', { params: query }),
     create: (payload: ProductSavePayload) => http.post<unknown>('/api/products', payload),
     update: (id: MasterdataId, payload: ProductSavePayload) =>
-      http.put<unknown>(`/api/products/${id}`, payload),
+      http.put<unknown>(`/api/products/${id}`, stripCode(payload)),
     /** PUT /api/products/:id/status（masterdata.go:50）；停用级联停用其启用中的 SKU */
     setStatus: (id: MasterdataId, payload: StatusPayload) =>
       http.put<{ status: EnabledStatus; cascade_disabled_skus?: number }>(
@@ -299,7 +309,7 @@ export const masterdataApi = {
     list: (query: SkuQuery) => http.get<PageResult<SkuItem>>('/api/skus', { params: query }),
     create: (payload: SkuSavePayload) => http.post<unknown>('/api/skus', payload),
     update: (id: MasterdataId, payload: SkuSavePayload) =>
-      http.put<unknown>(`/api/skus/${id}`, payload),
+      http.put<unknown>(`/api/skus/${id}`, stripCode(payload)),
     /** PUT /api/skus/:id/status（masterdata.go:58）：{enabled} 布尔开关 */
     setStatus: (id: MasterdataId, payload: SkuStatusPayload) =>
       http.put<{ is_enabled: boolean }>(`/api/skus/${id}/status`, payload),
@@ -310,7 +320,7 @@ export const masterdataApi = {
       http.get<PageResult<CategoryItem>>('/api/product-categories', { params: query }),
     create: (payload: CategorySavePayload) => http.post<unknown>('/api/product-categories', payload),
     update: (id: MasterdataId, payload: CategorySavePayload) =>
-      http.put<unknown>(`/api/product-categories/${id}`, payload),
+      http.put<unknown>(`/api/product-categories/${id}`, stripCode(payload)),
     /** PUT /api/product-categories/:id/status（masterdata.go:66）；无 DELETE 路由（停用即终点） */
     setStatus: (id: MasterdataId, payload: StatusPayload) =>
       http.put<{ status: EnabledStatus }>(`/api/product-categories/${id}/status`, payload),
@@ -319,7 +329,7 @@ export const masterdataApi = {
     list: (query: UnitQuery) => http.get<PageResult<UnitItem>>('/api/units', { params: query }),
     create: (payload: UnitSavePayload) => http.post<unknown>('/api/units', payload),
     update: (id: MasterdataId, payload: UnitSavePayload) =>
-      http.put<unknown>(`/api/units/${id}`, payload),
+      http.put<unknown>(`/api/units/${id}`, stripCode(payload)),
     /** PUT /api/units/:id/status（masterdata.go:73）；无 DELETE 路由（停用即终点） */
     setStatus: (id: MasterdataId, payload: StatusPayload) =>
       http.put<{ status: EnabledStatus }>(`/api/units/${id}/status`, payload),
@@ -329,7 +339,7 @@ export const masterdataApi = {
       http.get<PageResult<SupplierItem>>('/api/suppliers', { params: query }),
     create: (payload: SupplierSavePayload) => http.post<unknown>('/api/suppliers', payload),
     update: (id: MasterdataId, payload: SupplierSavePayload) =>
-      http.put<unknown>(`/api/suppliers/${id}`, payload),
+      http.put<unknown>(`/api/suppliers/${id}`, stripCode(payload)),
     /** PUT /api/suppliers/:id/status（masterdata.go:80） */
     setStatus: (id: MasterdataId, payload: StatusPayload) =>
       http.put<{ status: EnabledStatus }>(`/api/suppliers/${id}/status`, payload),
@@ -340,7 +350,7 @@ export const masterdataApi = {
       http.get<PageResult<CustomerItem>>('/api/customers', { params: query }),
     create: (payload: CustomerSavePayload) => http.post<unknown>('/api/customers', payload),
     update: (id: MasterdataId, payload: CustomerSavePayload) =>
-      http.put<unknown>(`/api/customers/${id}`, payload),
+      http.put<unknown>(`/api/customers/${id}`, stripCode(payload)),
     /** PUT /api/customers/:id/status（masterdata.go:88） */
     setStatus: (id: MasterdataId, payload: StatusPayload) =>
       http.put<{ status: EnabledStatus }>(`/api/customers/${id}/status`, payload),

@@ -10,7 +10,7 @@ import {
   UnorderedListOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
 import type { AutoCompleteProps, MenuProps } from 'antd'
@@ -22,7 +22,7 @@ import { useUiStore } from '@/stores/ui'
 import { canAccess } from '@/types/permission'
 import { authApi, PASSWORD_RULE, type ChangePasswordPayload } from '@/api/auth'
 import { notificationApi } from '@/api/notifications'
-import { resolveErrorMessage } from '@/api/client'
+import { matchFieldErrors, resolveErrorMessage } from '@/api/client'
 import { NotificationDrawer } from './NotificationDrawer'
 
 const { Header, Sider, Content } = Layout
@@ -51,6 +51,38 @@ export function PcLayout() {
   const clearSession = useAuthStore((s) => s.clearSession)
   /** 首登强制改密门禁（client.ts 403 AUTH_PASSWORD_CHANGE_REQUIRED 特判置位）：无条件弹出改密 Modal */
   const mustChangePassword = useAuthStore((s) => s.mustChangePassword)
+  /** 会话自愈：首登强制改密分支落的会话不含 is_super/权限集（LoginPage 精简 setSession 形态），
+   * 持久化后经刷新复用会让 canAccess fail-closed 把全部带码子菜单滤空（菜单"点不动"）。
+   * 挂载时检测残缺会话并回拉 /api/auth/me 补全（条件翻转后自动停止，无循环）。 */
+  const token = useAuthStore((s) => s.token)
+  const isSuper = useAuthStore((s) => s.isSuper)
+  const permissions = useAuthStore((s) => s.permissions)
+  const setSession = useAuthStore((s) => s.setSession)
+  const sessionIncomplete =
+    !!token && !mustChangePassword && (!isSuper || !permissions || permissions.length === 0)
+  useEffect(() => {
+    if (!sessionIncomplete) return
+    let cancelled = false
+    authApi
+      .me()
+      .then((me) => {
+        if (cancelled) return
+        const current = useAuthStore.getState()
+        if (!current.token) return
+        setSession({
+          token: current.token,
+          refreshToken: current.refreshToken,
+          user: me.user,
+          permissions: me.permissions,
+          isSuper: me.is_super,
+          mustChangePassword: me.must_change_password,
+        })
+      })
+      .catch(() => undefined) // 401 由 client.ts 统一处理跳登录
+    return () => {
+      cancelled = true
+    }
+  }, [sessionIncomplete, setSession])
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [keyword, setKeyword] = useState('')
@@ -59,8 +91,9 @@ export function PcLayout() {
   const [broken, setBroken] = useState(false)
   const collapsed = siderCollapsed || broken
 
-  /** 通知未读数（GET /api/notifications/unread-count，api/notifications.ts 前端先行契约）：
-   * 后端通知域未交付时请求失败，Badge 无 count 自动隐藏（错误隐藏方案，不阻塞布局） */
+  /** 通知未读数（GET /api/notifications/unread-count；后端通知域 M3 已交付，
+   * internal/sysops/routes.go 个人收件箱路由组）：请求失败时 Badge 无 count 自动隐藏
+   * （错误隐藏方案，不阻塞布局） */
   const unreadCount = useQuery({
     queryKey: ['notifications', 'unread-count'],
     queryFn: notificationApi.unreadCount,
@@ -318,7 +351,7 @@ interface ChangePasswordFormValues extends ChangePasswordPayload {
  * 修改密码弹窗（PUT /api/auth/password）：
  * - 普通模式（用户菜单入口）：可取消，成功后要求重新登录（其余会话已被后端强制下线）；
  * - 强制模式（首登门禁 mustChangePassword）：不可关闭，成功后刷新 /api/auth/me
- *   补全权限快照并继续当前会话（后端已复位标志，service_auth.go:486-491）。
+ *   补全权限快照并继续当前会话（后端已复位标志，service_auth.go ChangePassword）。
  */
 function ChangePasswordModal({
   open,
@@ -375,7 +408,21 @@ function ChangePasswordModal({
         navigate('/login', { replace: true })
       }
     } catch (err) {
-      setError(resolveErrorMessage(err))
+      // bind 校验失败（details.fields）：字段级错误落到对应 Form.Item（client.ts
+      // matchFieldErrors 归一匹配 Go 字段名小写键），替代固定文案「请求体格式错误」
+      const fieldErrors = matchFieldErrors(err, ['old_password', 'new_password'])
+      if (fieldErrors) {
+        // 键来自上一行字面量白名单，均为 ChangePasswordFormValues 合法字段
+        form.setFields(
+          Object.entries(fieldErrors).map(([name, errors]) => ({
+            name: name as keyof ChangePasswordFormValues,
+            errors: [errors],
+          })),
+        )
+        setError(null)
+      } else {
+        setError(resolveErrorMessage(err))
+      }
     } finally {
       setSubmitting(false)
     }
@@ -420,7 +467,7 @@ function ChangePasswordModal({
           label="新密码"
           rules={[{ required: true, message: '请输入新密码' }, PASSWORD_RULE]}
         >
-          <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母与数字" autoComplete="new-password" />
+          <Input.Password prefix={<LockOutlined />} placeholder="至少 8 位，含字母与数字（上限 72 字节）" autoComplete="new-password" />
         </Form.Item>
         <Form.Item
           name="confirm_password"

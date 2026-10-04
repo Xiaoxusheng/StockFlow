@@ -44,6 +44,9 @@ export interface PutawayTask {
   claimed_at: string | null
   completed_at: string | null
   remark: string
+  /** 归因操作者（models.go:265-266，database.ID → JSON 字符串；系统操作为 "0"） */
+  created_by: string
+  updated_by: string
   created_at: string
   updated_at: string
 }

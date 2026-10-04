@@ -37,25 +37,25 @@ const STATUS_OPTIONS: Array<{ label: string; value: TaskStatus }> = [
 ]
 
 const COLUMNS: ColumnsType<TaskItem> = [
-  { title: '任务号', dataIndex: 'taskNo', width: 150, fixed: 'left' },
+  { title: '任务号', dataIndex: 'task_no', width: 150, fixed: 'left' },
   {
     title: '任务类型',
-    dataIndex: 'taskType',
+    dataIndex: 'task_type',
     width: 110,
     render: (v: string) => TYPE_LABEL[v] ?? v,
   },
-  { title: '关联单号', dataIndex: 'sourceNo', width: 150, render: (v?: string) => v ?? '-' },
-  { title: '仓库', dataIndex: 'warehouseName', width: 100, render: (v?: string) => v ?? '-' },
+  { title: '关联单号', dataIndex: 'source_no', width: 150, render: (v?: string) => v ?? '-' },
+  { title: '仓库', dataIndex: 'warehouse_name', width: 100, render: (v?: string) => v ?? '-' },
   {
     title: '计划数量',
-    dataIndex: 'totalQty',
+    dataIndex: 'total_qty',
     width: 100,
     align: 'right',
     render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '已完成',
-    dataIndex: 'completedQty',
+    dataIndex: 'completed_qty',
     width: 110,
     align: 'right',
     render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
@@ -66,16 +66,16 @@ const COLUMNS: ColumnsType<TaskItem> = [
     width: 100,
     render: (v: string) => <SfStatusTag status={v} />,
   },
-  { title: '负责人', dataIndex: 'assigneeName', width: 100, render: (v?: string) => v ?? '-' },
+  { title: '负责人', dataIndex: 'assignee_name', width: 100, render: (v?: string) => v ?? '-' },
   {
     title: '创建时间',
-    dataIndex: 'createdAt',
+    dataIndex: 'created_at',
     width: 170,
     render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
   {
     title: '完成时间',
-    dataIndex: 'completedAt',
+    dataIndex: 'completed_at',
     width: 170,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
@@ -102,9 +102,9 @@ export default function MyTasksPage() {
         <SfSearchForm
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '任务号 / 关联单号' },
-            { name: 'taskType', label: '任务类型', control: 'select', options: TYPE_OPTIONS },
+            { name: 'task_type', label: '任务类型', control: 'select', options: TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
-            { name: 'warehouseCode', label: '仓库', control: 'input', placeholder: '仓库编码' },
+            { name: 'warehouse_code', label: '仓库', control: 'input', placeholder: '仓库编码' },
           ]}
           onSearch={handleSearch}
         />

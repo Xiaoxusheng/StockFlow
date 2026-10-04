@@ -110,14 +110,17 @@ function DepartmentFormModal({ editing, parent, treeOptions, submitting, onCance
           label="部门编码"
           rules={[
             { required: true, message: '请输入部门编码' },
-            { pattern: /^[a-zA-Z0-9_-]{2,32}$/, message: '2–32 位字母、数字、下划线或中划线' },
+            // 对齐后端 deptCodeRe（internal/auth/service_rbac.go:24）：大写字母开头，
+            // 2-64 位大写字母/数字/下划线/连字符——小写或数字开头后端必 400
+            { pattern: /^[A-Z][A-Z0-9_-]{1,63}$/, message: '2–64 位大写字母、数字、下划线或中划线，以大写字母开头' },
           ]}
-          extra="编码全局唯一，创建后不可修改"
+          extra="编码全局唯一（大写字母开头，如 WH-NORTH），创建后不可修改"
         >
           <Input disabled={isEdit} placeholder="如 WH-NORTH" autoComplete="off" />
         </Form.Item>
         <Form.Item name="name" label="部门名称" rules={[{ required: true, message: '请输入部门名称' }]}>
-          <Input placeholder="如 华北仓运营部" allowClear maxLength={32} />
+          {/* 后端 maxNameLen=64（service_rbac.go:27） */}
+          <Input placeholder="如 华北仓运营部" allowClear maxLength={64} />
         </Form.Item>
       </Form>
     </Modal>

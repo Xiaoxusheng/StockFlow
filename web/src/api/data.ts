@@ -39,7 +39,9 @@ export const IMPORT_TYPE_OPTIONS: Array<{ label: string; value: ImportType }> = 
   { label: '初始化库存导入', value: 'INITIAL_INVENTORY' },
 ]
 
-/** 初始化库存导入为高危操作（excel.md §6.1：必须走二次确认；registry.go:152-154 同一判定） */
+/** 初始化库存导入为高危操作（excel.md §6.1：必须走二次确认；registry.go:152-154 同一判定）。
+ * 模板清单已下发 high_risk（TemplateItem，service_import.go:43），优先消费后端值；
+ * 本判定仅用于无清单上下文时的兜底（如 uploadResult.import_type）。 */
 export function isHighRiskImport(importType?: string | null): boolean {
   return importType === 'INITIAL_INVENTORY'
 }
@@ -81,7 +83,9 @@ export function isTaskFinished(status?: string | null): boolean {
   return status === 'SUCCESS' || status === 'PARTIAL_SUCCESS' || status === 'FAILED'
 }
 
-/** 任务类型（000011 CHECK：IMPORT / EXPORT） */
+/** 任务类型（API 出参 ListTaskItem.task_type：IMPORT/EXPORT，service_import.go:806）。
+ * 000011 为导入/导出分表设计（import_tasks / export_tasks，状态各自挂 CHECK），
+ * 库内无 task_type 列——全迁移 grep task_type 零命中（2026-10-04 复核）。 */
 export type DataTaskType = 'IMPORT' | 'EXPORT'
 
 export function resolveTaskTypeLabel(taskType?: string | null): string {
@@ -138,30 +142,12 @@ export function resolveModuleLabel(module?: string | null): string {
 
 // ---------- 导入（excel.md §1；internal/datax/contract.go + service_import.go） ----------
 
-/** 单元格类型（contract.go:26-31；驱动导入解析与导出数字格式，禁止全字符串导出） */
-export type ImportCellType = 'TEXT' | 'NUMBER' | 'MONEY' | 'DATE'
-
-/** 列定义（Column，contract.go:64-74；模板列头 + 上传表头逐列比对依据） */
-export interface ImportTemplateColumn {
-  key: string
-  title: string
-  type: ImportCellType
-  /** 列宽（字符） */
-  width?: number
-  /** 必填（excel.md §1.3） */
-  required?: boolean
-  /** 文件内去重（excel.md §1.3） */
-  unique_in_file?: boolean
-  /** 模板示例值 */
-  example?: string
-  /** 填表说明 */
-  note?: string
-}
-
 /**
- * 导入模板（TemplateSpec，contract.go:78-87）。模板下载 = 后端按列定义用 excelize
- * 现场生成（GET /api/imports/templates/{type} 流式下发），无静态文件、无 downloadUrl
- * 字段——下载统一走 downloadImportTemplate。
+ * 导入模板清单项（TemplateItem，service_import.go:36-44 同构）。模板的列定义/示例行/
+ * 校验说明仅存在于后端 TemplateSpec（contract.go:78-87），不随清单下发——清单接口
+ * 实测（2026-10-04 GET /api/imports/templates）仅返回以下六字段；模板下载由后端按
+ * 列定义现场生成 xlsx 流式下发（GET /api/imports/templates/{type}），统一走
+ * downloadImportTemplate 认证下载。
  */
 export interface ImportTemplate {
   import_type: ImportType
@@ -170,16 +156,15 @@ export interface ImportTemplate {
   /** 模板下载文件名（如「商品导入模板.xlsx」） */
   file_name: string
   description: string
-  /** 数据页名 */
-  sheet: string
-  columns: ImportTemplateColumn[]
-  /** 示例行（与 columns 等长对齐的原始文本） */
-  sample_rows: string[][]
-  /** 校验说明（excel.md §1.2 模板必须携带校验说明） */
-  notes: string[]
+  /** 模板下载地址（后端下发 = /api/imports/templates/{import_type}） */
+  download_url: string
+  /** 高危导入（INITIAL_INVENTORY，excel.md §6.1：确认导入需二次确认；后端判定，前端不重推） */
+  high_risk: boolean
 }
 
-/** 上传解析结果（ImportUploadResult，service_import.go:93-100 字段全量） */
+/** 上传解析结果（ImportUploadResult，service_import.go:93-100 字段全量）。
+ * id 为 database.ID——JSON 序列化为字符串（model.go:17-27 MarshalJSON 防 2^53 精度丢失；
+ * 2026-10-04 真库实测 "id":"1"），与 string 声明一致。 */
 export interface ImportUploadResult {
   id: string
   /** 导入单号（IMP- 前缀） */
@@ -202,6 +187,7 @@ export interface ImportValidationError {
 /** 校验结果（ImportValidateResult，service_import.go:338-347 字段全量；
  * 校验幂等可重复执行，error_rows>0 时生成错误 Excel 并回填下载地址） */
 export interface ImportValidateResult {
+  /** database.ID：JSON 序列化为字符串（model.go:17-27，同 ImportUploadResult.id） */
   id: string
   status: DataTaskStatus
   total_rows: number
@@ -221,14 +207,20 @@ export interface ImportPreviewColumn {
 
 /** 解析后的结构化数据预览（ImportPreviewResult，service_import.go:580-585；前 100 行） */
 export interface ImportPreviewResult {
+  /** database.ID：JSON 序列化为字符串（model.go:17-27，同 ImportUploadResult.id） */
   id: string
   total_rows: number
   columns: ImportPreviewColumn[]
   rows: Array<Record<string, unknown>>
 }
 
-/** 导入结果（ImportConfirmResult，service_import.go:678-686；逐行失败进 errors） */
+/** 导入结果（ImportConfirmResult，service_import.go:678-686；逐行失败进 errors）。
+ * asynq 异步部署下 Confirm 返回 EXECUTING（状态守卫 VALIDATED→EXECUTING 后入队即回读，
+ * service_import.go:713/:783），inline 部署回终态——结果页须以 EXECUTING 为「执行中」分支。
+ * errors 仅回填前 100 条失败明细（service.go:50 previewRows=100 + service_import.go:800-806），
+ * 全量明细经下载错误 Excel（downloadImportErrorFile）获取。 */
 export interface ImportConfirmResult {
+  /** database.ID：JSON 序列化为字符串（model.go:17-27，同 ImportUploadResult.id） */
   id: string
   status: DataTaskStatus
   total_rows: number
@@ -247,7 +239,8 @@ export interface DataTaskQuery extends PageQuery {
   module?: string
 }
 
-/** 任务记录（ListTaskItem 字段全量；文件地址/有效期终态后下发） */
+/** 任务记录（ListTaskItem 字段全量；文件地址/有效期终态后下发）。
+ * id 为 database.ID：JSON 序列化为字符串（model.go:17-27，同 ImportUploadResult.id） */
 export interface DataTask {
   id: string
   /** 任务单号（导入 IMP- / 导出 EXP-） */
@@ -275,6 +268,12 @@ export interface DataTask {
 }
 
 // ---------- 导出（excel.md §2/§3；ExportCreateInput，service_export.go:24-32） ----------
+
+/** SELECTED 范围选中 ID 上限（后端 maxSelectedIDs，service_export.go:36；超限提交即 400） */
+export const MAX_EXPORT_SELECTED_IDS = 1000
+
+/** CURRENT_PAGE 范围单页导出行数上限（后端 maxCurrentPageRows，service_export.go:39；超限提交即 400） */
+export const MAX_EXPORT_CURRENT_PAGE_ROWS = 100
 
 /** 创建导出任务入参（scope 五值；TIME_RANGE 必填 time_from/time_to） */
 export interface ExportCreatePayload {
@@ -358,9 +357,10 @@ export async function downloadFile(url: string, fileName: string): Promise<void>
   URL.revokeObjectURL(objectUrl)
 }
 
-/** 导入模板下载（GET /api/imports/templates/{type}，后端现场生成 xlsx 流式下发） */
-export function downloadImportTemplate(template: Pick<ImportTemplate, 'import_type' | 'file_name'>): Promise<void> {
-  return downloadFile(`/api/imports/templates/${template.import_type}`, template.file_name)
+/** 导入模板下载（GET /api/imports/templates/{type}，后端现场生成 xlsx 流式下发；
+ * 优先消费清单下发的 download_url，缺省按契约端点回退） */
+export function downloadImportTemplate(template: Pick<ImportTemplate, 'import_type' | 'file_name' | 'download_url'>): Promise<void> {
+  return downloadFile(template.download_url ?? `/api/imports/templates/${template.import_type}`, template.file_name)
 }
 
 /** 导入错误 Excel 下载（GET /api/imports/{id}/error-file，handler.go:110；error_rows>0 时可用，

@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react'
 import { Button, Card, Typography } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import {
+  INBOUND_CREATE_PERMISSION,
   inboundApi,
   type InboundOrder,
   type InboundOrderQuery,
@@ -12,6 +14,8 @@ import {
 } from '@/api/inbound'
 import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -63,6 +67,8 @@ const SOURCE_TYPE_OPTIONS = (Object.entries(SOURCE_TYPE_LABEL) as Array<[Inbound
 export default function InboundPage() {
   const [params, setParams] = useState<InboundOrderQuery>({})
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canCreate = canAccess(user, INBOUND_CREATE_PERMISSION)
 
   // 仓库 options（GET /api/warehouses）：仓库筛选下拉 + warehouse_id→名称本地映射；
   // 拉取失败降级为 ID 展示 / 空下拉，不阻塞列表（api/options.ts 约定）
@@ -152,6 +158,17 @@ export default function InboundPage() {
       <SfPageHeader
         title="入库管理"
         subtitle="收货 → 质检 → 上架（支持部分收货）"
+        extra={
+          canCreate ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => navigate('/inbound/new')}
+            >
+              新建入库单
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm

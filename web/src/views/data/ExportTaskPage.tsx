@@ -28,6 +28,8 @@ import {
   EXPORT_MODULE_OPTIONS,
   EXPORT_SCOPE_OPTIONS,
   isTaskInFlight,
+  MAX_EXPORT_CURRENT_PAGE_ROWS,
+  MAX_EXPORT_SELECTED_IDS,
   resolveModuleLabel,
   resolveScopeLabel,
   type DataTask,
@@ -79,15 +81,20 @@ interface ExportFormValues {
   timeRange?: [Dayjs, Dayjs] | null
 }
 
+/** 选中记录 ID 文本 → ID 数组（与表单预检共用同一拆分口径） */
+function splitIdsText(text?: string): string[] {
+  return (text ?? '')
+    .split(/[\n,，;；]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 /** 表单值 → 导出创建契约（ExportCreateInput，service_export.go:24-32：
  * scope=SELECTED→ids、CURRENT_PAGE→page/page_size、BY_FILTER→filters、TIME_RANGE→time_from/time_to） */
 function toExportPayload(values: ExportFormValues, presetFilters: Record<string, string>): ExportCreatePayload {
   const payload: ExportCreatePayload = { module: values.module, scope: values.scope }
   if (values.scope === 'SELECTED') {
-    payload.ids = (values.idsText ?? '')
-      .split(/[\n,，;；]+/)
-      .map((item) => item.trim())
-      .filter(Boolean)
+    payload.ids = splitIdsText(values.idsText)
   }
   if (values.scope === 'CURRENT_PAGE') {
     payload.page = values.page
@@ -343,8 +350,20 @@ export default function ExportTaskPage() {
             <Form.Item
               name="idsText"
               label="选中记录 ID"
-              rules={[{ required: true, message: '请输入至少一条记录 ID' }]}
-              extra="每行一个，或用英文逗号分隔"
+              rules={[
+                { required: true, message: '请输入至少一条记录 ID' },
+                {
+                  // 前端预检：拆分后 ≤1000 条（后端 maxSelectedIDs，service_export.go:36），
+                  // 超限提交必 400，提前内联拦截
+                  validator: (_, value?: string) =>
+                    splitIdsText(value).length > MAX_EXPORT_SELECTED_IDS
+                      ? Promise.reject(
+                          new Error(`选中记录最多 ${MAX_EXPORT_SELECTED_IDS} 条，请缩小范围（后端限制）`),
+                        )
+                      : Promise.resolve(),
+                },
+              ]}
+              extra={`每行一个，或用英文逗号分隔；最多 ${MAX_EXPORT_SELECTED_IDS} 条`}
             >
               <Input.TextArea rows={3} placeholder="如：1001,1002,1003" />
             </Form.Item>
@@ -357,8 +376,14 @@ export default function ExportTaskPage() {
                 </Form.Item>
               </Col>
               <Col span={12}>
-                <Form.Item name="pageSize" label="每页条数" rules={[{ required: true, message: '请输入每页条数' }]}>
-                  <InputNumber min={1} precision={0} style={{ width: '100%' }} />
+                <Form.Item
+                  name="pageSize"
+                  label="每页条数"
+                  rules={[{ required: true, message: '请输入每页条数' }]}
+                  extra={`单次当前页导出上限 ${MAX_EXPORT_CURRENT_PAGE_ROWS} 行（后端限制）`}
+                >
+                  {/* 上限对齐后端 maxCurrentPageRows（service_export.go:39），防超限提交 400 */}
+                  <InputNumber min={1} max={MAX_EXPORT_CURRENT_PAGE_ROWS} precision={0} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
             </Row>

@@ -253,6 +253,35 @@ export interface PurchaseReturnQuery extends PageQuery {
   warehouse_id?: SalesId
 }
 
+// ---------- 采购退货创建（POST /api/purchase-returns，internal/returns/handler.go:434-447 已注册） ----------
+//
+// 入参 PurchaseReturnCreateInput（internal/returns/service_purchase.go:44-50）：后端强校验
+// 采购单存在且已收货、退货仓一致、逐行退量 ≤ 已收货量 − 已退量（service_purchase.go:56-64
+// CreatePurchaseReturn + service_sales.go:254-283 validateReturnInput 共用）；
+// qty_return 为 numeric(18,4) 文本、reason 必填。整单一次出库（frozen DDL 无逐行已出量列，
+// service_purchase.go:20-23），部分退货在创建期以 qty_return < 已收量表达。
+
+/** 采购退货行入参（PurchaseReturnLineInput，service_purchase.go:39-45 字段全量） */
+export interface PurchaseReturnLineInput {
+  line_no: number
+  sku_id: number
+  /** numeric(18,4) 文本（stock.ParseQty 解析，service_sales.go:276），传正数字符串如 "3" */
+  qty_return: string
+  /** 必填（business-flow §9.1） */
+  reason: string
+  remark?: string
+}
+
+/** 创建采购退货入参（PurchaseReturnCreateInput，service_purchase.go:44-50 字段全量） */
+export interface PurchaseReturnCreatePayload {
+  /** 来源采购单号（精确） */
+  po_no: string
+  supplier_id: number
+  warehouse_id: number
+  remark?: string
+  lines: PurchaseReturnLineInput[]
+}
+
 // ---------- 权限码（internal/auth/permissions.go:135-167 三段式冻结） ----------
 
 export const PURCHASE_CREATE_PERMISSION = 'purchase:purchase:create'
@@ -262,6 +291,8 @@ export const PURCHASE_APPROVE_PERMISSION = 'purchase:purchase:approve'
 export const PURCHASE_CANCEL_PERMISSION = 'purchase:purchase:cancel'
 export const PURCHASE_CLOSE_PERMISSION = 'purchase:purchase:close'
 export const RECEIPT_EXECUTE_PERMISSION = 'purchase:receipt:execute'
+/** 采购退货创建（internal/auth/permissions.go:263 三段式冻结） */
+export const PURCHASE_RETURN_CREATE_PERMISSION = 'returns:purchasereturn:create'
 
 export const purchaseApi = {
   list: (query: PurchaseQuery) =>
@@ -292,5 +323,8 @@ export const purchaseApi = {
   returns: {
     list: (query: PurchaseReturnQuery) =>
       http.get<PageResult<PurchaseReturnOrder>>('/api/purchase-returns', { params: query }),
+    /** 创建采购退货（POST /api/purchase-returns，returns:purchasereturn:create；返回 ReturnOrderView） */
+    create: (payload: PurchaseReturnCreatePayload) =>
+      http.post<PurchaseReturnOrder>('/api/purchase-returns', payload),
   },
 }

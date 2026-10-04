@@ -113,7 +113,9 @@ interface TemplateFormValues {
 }
 
 /** 表单值 → TemplateSaveInput（snake_case；fields 仅键数组，后端按预设注册表回填文案——
- * internal/printing/service_template.go:18-28，禁止前端自造文案） */
+ * internal/printing/service_template.go:18-28，禁止前端自造文案）。
+ * qrcode_enabled 两类模板均提交：标签类=附加二维码、单据类=单据二维码（printing.md §4.2，
+ * 后端对任意快照按 qrcode_enabled 预生成二维码——service_task.go:397-402） */
 function toTemplatePayload(values: TemplateFormValues): PrintTemplateSavePayload {
   const labelType = isLabelObjectType(values.objectType)
   return {
@@ -121,7 +123,7 @@ function toTemplatePayload(values: TemplateFormValues): PrintTemplateSavePayload
     object_type: values.objectType,
     paper: values.paper,
     barcode_symbology: labelType ? (values.barcodeSymbology ?? 'CODE128') : undefined,
-    qrcode_enabled: labelType ? (values.qrcodeEnabled ?? false) : undefined,
+    qrcode_enabled: values.qrcodeEnabled ?? false,
     fields: values.fieldKeys ?? [],
     header_text: values.headerText?.trim() || undefined,
     remark: values.remark,
@@ -380,13 +382,18 @@ function TemplateTab() {
             </>
           )}
           {!labelType && (
-            <Form.Item
-              name="headerText"
-              label="页眉文本"
-              extra="单据页眉（公司名/单据名），留空时以模板名称渲染"
-            >
-              <Input placeholder="如：库流智能仓储管理系统·出库单" maxLength={64} />
-            </Form.Item>
+            <>
+              <Form.Item name="qrcodeEnabled" label="单据二维码" valuePropName="checked" initialValue={false}>
+                <Switch />
+              </Form.Item>
+              <Form.Item
+                name="headerText"
+                label="页眉文本"
+                extra="单据页眉（公司名/单据名），留空时以模板名称渲染"
+              >
+                <Input placeholder="如：库流智能仓储管理系统·出库单" maxLength={64} />
+              </Form.Item>
+            </>
           )}
           <Form.Item
             name="fieldKeys"
@@ -613,7 +620,9 @@ function TaskTab() {
       <Card size="small">
         <SfSearchForm
           fields={[
-            // 业务类型筛选键走 snake_case 线格式（后端 handler.go:268 c.Query("object_type")）
+            // keyword 按任务单号模糊检索（后端 handler.go:320 print_no ILIKE）
+            { name: 'keyword', label: '关键词', control: 'input', placeholder: '任务单号' },
+            // 业务类型筛选键走 snake_case 线格式（后端 handler.go:321 c.Query("object_type")）
             { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: TASK_STATUS_OPTIONS },
           ]}
@@ -780,7 +789,9 @@ function HistoryTab() {
     <Card size="small">
       <SfSearchForm
         fields={[
-          { name: 'keyword', label: '关键词', control: 'input', placeholder: '打印人 / 模板名称' },
+          // 后端 keyword 仅按 print_no ILIKE 检索（internal/printing/repository.go:197）——
+          // 占位如实标注「打印单号」，不夸大为打印人/模板名称检索
+          { name: 'keyword', label: '关键词', control: 'input', placeholder: '打印单号' },
           // 业务类型筛选键走 snake_case 线格式（后端 handler.go:344 c.Query("object_type")）
           { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
           { name: 'result', label: '打印结果', control: 'select', options: RESULT_OPTIONS },

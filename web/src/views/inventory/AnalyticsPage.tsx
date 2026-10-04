@@ -56,11 +56,11 @@ export default function AnalyticsPage() {
           ) : (
             <Flex gap={0} wrap="wrap">
               {[
-                { label: '库存金额', value: formatMoney(data?.totalStockValue) },
-                { label: '库存总量', value: formatNumber(data?.totalQty) },
-                { label: 'SKU 数', value: formatNumber(data?.totalSkuCount) },
-                { label: '周转率', value: `${formatNumber(data?.turnoverRate, 2)} 次` },
-                { label: '周转天数', value: `${formatNumber(data?.turnoverDays, 1)} 天` },
+                { label: '库存金额', value: formatMoney(data?.total_stock_value) },
+                { label: '库存总量', value: formatNumber(data?.total_qty) },
+                { label: 'SKU 数', value: formatNumber(data?.total_sku_count) },
+                { label: '周转率', value: `${formatNumber(data?.turnover_rate, 2)} 次` },
+                { label: '周转天数', value: `${formatNumber(data?.turnover_days, 1)} 天` },
               ].map((item, index, arr) => (
                 <Statistic
                   key={item.label}
@@ -92,7 +92,7 @@ export default function AnalyticsPage() {
                     <Column
                       data={(data?.abc ?? []).map((item) => ({
                         grade: `${item.grade} 类`,
-                        金额占比: item.valuePercent,
+                        金额占比: item.value_percent,
                       }))}
                       xField="grade"
                       yField="金额占比"
@@ -113,9 +113,9 @@ export default function AnalyticsPage() {
                         >
                           <Text strong>{item.grade} 类</Text>
                           <Flex gap={16}>
-                            <Text type="secondary">SKU {formatNumber(item.skuCount)}</Text>
-                            <Text type="secondary">金额 {formatMoney(item.valueAmount)}</Text>
-                            <Text className="sf-num">占比 {formatPercent(item.valuePercent)}</Text>
+                            <Text type="secondary">SKU {formatNumber(item.sku_count)}</Text>
+                            <Text type="secondary">金额 {formatMoney(item.value_amount)}</Text>
+                            <Text className="sf-num">占比 {formatPercent(item.value_percent)}</Text>
                           </Flex>
                         </Flex>
                       ))}
@@ -146,11 +146,11 @@ export default function AnalyticsPage() {
                 <SfEmpty description="所选时间范围内暂无库存趋势数据" />
               ) : (
                 <Suspense fallback={<Skeleton active paragraph={{ rows: 5 }} />}>
-                  <Line
-                    data={(data?.trend ?? []).flatMap((point) => [
-                      { date: point.date, type: '库存数量', 值: point.totalQty },
-                      { date: point.date, type: '库存金额', 值: point.stockValue },
-                    ])}
+                    <Line
+                      data={(data?.trend ?? []).flatMap((point) => [
+                        { date: point.date, type: '库存数量', 值: point.total_qty },
+                        { date: point.date, type: '库存金额', 值: point.stock_value },
+                      ])}
                     xField="date"
                     yField="值"
                     colorField="type"
