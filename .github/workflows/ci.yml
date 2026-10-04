@@ -1,0 +1,78 @@
+# StockFlow CI（阶段 20：CI 关卡）
+# 三个并行 job 与本地门禁（仓库根 `make ci`，deployment.md §7.1 检查单第 1 项）同源：
+#   lint   —— Makefile fmt-check 的 gofmt 检查（gofmt -l cmd internal，有输出即失败）
+#             + go vet ./... + go vet -tags integration ./...（集成测试面编译在位）
+#   test   —— go test -count=1 ./... 与 go test -race -count=1 ./...
+#             （单测按 testing.md 约定不依赖 PostgreSQL/Redis/网络，故无需 services；
+#             -race 为本机缺失关卡——Windows 无 gcc/CGO_ENABLED=0，ubuntu-latest 自带 gcc 可跑）
+#   guards —— Makefile 契约守卫命令（guard-status 为人工复核清单只报告不失败，
+#             其余六项命中即失败；与清偿轮 F3 接线的 grep 等价形态一致，单一来源在 Makefile）
+# 触发：push 与 pull_request；Go 版本读 go.mod（setup-go go-version-file）；
+# 缓存 go mod download（setup-go cache: true，按 go.sum 键控 GOMODCACHE）。
+
+name: CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint（gofmt + vet）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go（版本读 go.mod + 模块缓存）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: gofmt 检查（有输出即失败，同 Makefile fmt-check）
+        run: |
+          files="$(gofmt -l cmd internal)"
+          if [ -n "$files" ]; then
+            echo "gofmt 未格式化文件："
+            echo "$files"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go vet（integration 标签）
+        run: go vet -tags integration ./...
+
+  test:
+    name: test（单测 + race）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Go（版本读 go.mod + 模块缓存）
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go test（单元测试）
+        run: go test -count=1 ./...
+
+      - name: go test -race（竞态检测）
+        run: go test -race -count=1 ./...
+
+  guards:
+    name: guards（Makefile 契约守卫）
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # 守卫命令单一来源在 Makefile（与清偿轮 F3 接线一致），workflow 不复刻一份防漂移；
+      # 守卫为纯 grep/awk/sed 管道，无需 Go 工具链。
+      - name: Makefile 契约守卫（guard-status 为人工复核清单，其余命中即失败）
+        run: make guard-status guard-docnum guard-inventory guard-asynq guard-readonly guard-datax guard-devices
