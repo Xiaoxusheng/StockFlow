@@ -72,8 +72,7 @@ CREATE TABLE device_configs (
     updated_at timestamptz NOT NULL DEFAULT now(),
     created_by bigint     NOT NULL DEFAULT 0,
     updated_by bigint     NOT NULL DEFAULT 0,
-    CONSTRAINT chk_device_configs_version CHECK (version >= 1),
-    CONSTRAINT chk_device_logs_level CHECK (level IN ('INFO', 'WARN', 'ERROR'))
+    CONSTRAINT chk_device_configs_version CHECK (version >= 1)
 );
 
 COMMENT ON TABLE device_configs IS '设备配置（devices §7.3 下发项：扫码模式/声音/震动/自动聚焦/连续扫码/扫码超时/默认仓库/任务刷新间隔/自动锁屏；device_id UNIQUE 一机一配置，version 单调递增 +1，心跳响应携带）';
@@ -130,7 +129,8 @@ CREATE TABLE device_logs (
     message     text        NOT NULL DEFAULT '',
     context     jsonb,
     occurred_at timestamptz NOT NULL,
-    created_at  timestamptz NOT NULL DEFAULT now()
+    created_at  timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT chk_device_logs_level CHECK (level IN ('INFO', 'WARN', 'ERROR'))
 );
 
 COMMENT ON TABLE device_logs IS '设备运行日志（设备端批量上报 ≤100 条/次——plan §8.2；append-only，应用层仅 INSERT，grants 分层）';
