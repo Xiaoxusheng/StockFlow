@@ -13,7 +13,7 @@
 | DoD 项 | M1 交付 | 验证方式 |
 |---|---|---|
 | 数据库 | 5 组迁移 + 索引 + 恒等式 CHECK | migrate up/down 双向验证（database.md §9） |
-| 后端 | 4 个业务域 Service/Repository 完整链路（architecture.md §1） | 单元 + testcontainers 集成测试 |
+| 后端 | 4 个业务域 Service/Repository 完整链路（architecture.md §1） | 单元 + 集成测试（机制注记：实际落地为 `//go:build integration` + SF_TEST_PG_*/SF_TEST_REDIS_ADDR 门控外部实例，testcontainers 为备选未落地——testing.md §3） |
 | API | 各域接口 + swaggo OpenAPI + 后端完整校验（api.md §3/§4） | swag init + 接口测试 |
 | 前端 | M1 范围 = 库存示范页（实时库存/库存流水）对接真实 API；**阶段 5–7 页面（用户/角色/权限、基础资料、仓库管理、F10 库位地图页）由前端任务流 F6/F7/F10 补齐——这是已确认的里程碑偏差，见 §13.5，纳入 M1 验收遗留项** | 页面走真实接口、无假数据（requirements.md §10） |
 | 权限 | 全部 M1 接口挂 RequirePermission + 数据权限过滤（permission.md §2/§4） | 越权测试（testing.md §8） |
@@ -462,7 +462,7 @@ rg -n "\b(INSERT INTO|UPDATE|DELETE FROM) (inventory|inventory_locks|inventory_l
 ### 8.7 M1 库存 HTTP 面与测试策略
 
 - HTTP 只读：GET /api/inventory（五维筛选 + 分页）、GET /api/inventory-ledgers（SKU/仓库/时间/单号筛选 + 分页）。锁定/释放/扣减等写操作在 M1 以 Service 层为边界（被 M2 单据域消费），不暴露 HTTP——阶段 8 范围即"库存模型、流水、锁定、并发控制"引擎；触发它们的业务 API 在阶段 9–13。
-- 专项测试（testing.md §2/§4 M1 子集，testcontainers-go 起 PG+Redis）：
+- 专项测试（testing.md §2/§4 M1 子集，testcontainers-go 起 PG+Redis——机制注记：实际落地为 SF_TEST_PG_*/SF_TEST_REDIS_ADDR 门控外部实例、未设置即 Skip，testcontainers 为备选未落地——testing.md §3）：
   1. 并发扣减/预占：N goroutine 并发对同一库存行预占/核销，断言无负库存、无超卖（inventory-rules §9.1 场景：总量 15、两路各 10，恰一路成功）。
   2. 恒等式：每个变更操作后断言六列恒等式（DB CHECK 之外测试仍显式验证）。
   3. 流水一一对应：每次变更恰一条流水；断言口径按 §8.4——状态迁移型（LOCK/RELEASE/MOVE/INSPECT_*）断言 status_from/to 与受影响列前后值，total 变化型（INBOUND/OUTBOUND/ADJUST）断言 total 前后差 = qty_change。

@@ -1,6 +1,8 @@
 # StockFlow 部署与运维规范
 
-> 版本：v1.1 ｜ 关联文档：[database](database.md)、[architecture](architecture.md)、[permission](permission.md)
+> 版本：v1.2 ｜ 关联文档：[database](database.md)、[architecture](architecture.md)、[permission](permission.md)
+>
+> v1.2（2026-10-03 Docker Compose 单机部署，changelog 同日条目）：新增 §10 Docker Compose 部署（单机，目标目录 /home/stockflow）——后端多阶段 Dockerfile、postgres + redis + migrate + app 编排（可选 web profile）、一次性 migrate 容器与 §7 发布纪律对齐。
 >
 > v1.1（2026-10-03 安全修复轮）：新增 §1.1 环境变量清单、§2.1 grants 执行纪律、§7.1 发布检查单、§9 反向代理与网络安全基线；§3/§6 与实现对齐。既有章节编号保持不变（多文档/代码注释按节号引用）。
 

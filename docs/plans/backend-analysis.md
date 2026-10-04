@@ -50,7 +50,7 @@ D:\StockFlow
 | 认证 | golang-jwt/v5 + x/crypto(bcrypt) | internal/auth |
 | 迁移 | golang-migrate | db/migrations |
 | API 文档 | swaggo/swag | 各域 handler 注释 → server/apidocs |
-| 测试 | testify + testcontainers-go | 各包 _test.go |
+| 测试 | testify + testcontainers-go（机制注记：集成测试实际为 `//go:build integration` + SF_TEST_* 门控外部实例，testcontainers 未落地——testing.md §3） | 各包 _test.go |
 
 M1 不引入：asynq、robfig/cron、excelize、boombuler/barcode、sonic、ants（用途分别属于阶段 14–19，见 M1 方案 §9）。
 

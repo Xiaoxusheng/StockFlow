@@ -49,12 +49,20 @@ API 按业务领域划分：
 /api/inventory-ledgers   库存流水
 /api/batches             批次
 /api/serials             序列号
+/api/inventory/locks          锁定记录列表（M2，backend-m2-plan §8.3 条 5）
+/api/inventory/adjustments    调整单列表/审批/执行（M2）
+/api/inventory/moves          仓内移库（M2，POST 提交）
+/api/inventory/trace          库存追溯（M2：流水+台账+单据链聚合）
 
 —— 调拨/盘点/质量/异常 ——
 /api/transfers     调拨
 /api/counts        盘点
 /api/quality       质检
 /api/exceptions    异常中心
+
+—— 退货 ——
+/api/returns            销售退货（创建/审批/收货/质检/完成）
+/api/purchase-returns   采购退货（创建/审批/出库/完成）
 
 —— 报表 ——
 /api/reports       报表
@@ -132,6 +140,13 @@ ID 类型
 
 接口文档随代码同步更新，不允许文档与实现脱节。
 
+> **生成机制（2026-10-04 T6 收口，清偿项 F8）**：各域 handler 的 doc 注释携带最小集注解
+> （`@Summary/@Tags/@Accept/@Produce/@Param/@Success/@Failure/@Router`，统一信封引用
+> `internal/response.Envelope` 文档形态定义），经 `make swag`（go run 固定版本 CLI）汇总
+> 生成 `apidocs/`（docs.go + swagger.json/yaml）。路由清单以 gin 实际注册为准（临时装配
+> 引擎 `r.Routes()` 交叉核对，不编造不存在的路由）；api.md 本文件仍是接口契约的人工真
+> 相来源，swagger 输出为机器可读的派生物。
+
 ---
 
 ## 4. 数据校验
@@ -185,6 +200,32 @@ MIME 类型（白名单，与扩展名交叉校验）
 - 收货、入库、出库、库存调整、调拨、盘点、发货等确认类接口必须支持幂等（architecture.md §3）。
 - 任务领取类接口必须原子抢占，失败返回明确冲突信息（architecture.md §5）。
 - 扫码场景的幂等：`/api/scanner/resolve` 只做对象识别；业务执行必须走各领域业务 API，扫码重复事件去重规则见 scanner.md §6.6。
+- **幂等键构成规则**（M2 冻结，backend-m2-plan §7；实现落 `inventory_ledgers.idempotency_key` 唯一索引兜底 + `Idempotency-Key` 请求头优先）：
+
+```text
+构成通式：{动作前缀}:{单据号}:{行号/任务号}:{定位维度…}[:子动作]
+定位维度按动作涉及的操作对象取（bin/sku/batch 顺序固定），缺省维度省略；
+HTTP 显式幂等键（Idempotency-Key 头）优先于服务端确定性构成。
+
+putaway:{inbound_no}:{putaway_no}:{bin}:{sku}:{batch}        上架入库（收货单本身以
+                                                             receipts.idempotency_key
+                                                             唯一索引兜底，头优先）
+putaway:{return_no}:{line}:{zone}:{shelf}:{bin}:{sku}:{batch}:{qty}   退货收货入库
+lock:{so_no}:{line}:{seq} / relock:{so_no}:{line}:{seq}      销售分配预占 / 重新分配
+release:{outbound_no}:{lock_id}                              预占释放（取消/关闭/重分配）
+shortpick:{outbound_no}:{pick_no}:{lock_id}                  短拣差额释放
+ship:{outbound_no}:{line}:{bin}:{sku}:{batch}                发货正式扣减
+trout:{transfer_no}:{line}:…:{qty} / trin:{transfer_no}:…    调拨出库 / 入库（两段）
+cfreeze:{count_no}:{inventory_row_id}                        盘点范围冻结
+adjust:{count_no}:{diff_line}                                盘点差异调整
+prt:{return_no}:{line}:{zone}:{shelf}:{bin}:{sku}:{batch}:lock / :deduct[:sn:{serial}]
+                                                             采购退货预占/扣减（序列号逐件追加）
+inspect:{qc_no}:{line_no}:{pass|defect}:{bin}:{sku}:{batch}  质检结果应用
+efreeze:{exception_no}:{bin}:{sku}:{batch}                   异常冻结
+release:{exception_no}:{lock_id}                             异常解冻
+```
+
+- 请求显式幂等键（`Idempotency-Key` 头）优先；未提供时按上表构成在服务端确定性生成——同一单据同一动作重试必然命中重放（返回既有结果，不再扣减），部分行重放视为矛盾请求整体回滚。
 
 ---
 

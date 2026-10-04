@@ -60,6 +60,9 @@ quality_orders, quality_items, defective_inventory
 —— 异常 ——
 exceptions
 
+—— 共享单据平台 ——
+doc_number_counters, document_approvals
+
 —— 平台支撑 ——
 notifications, attachments
 print_templates, print_tasks, export_tasks, import_tasks
@@ -74,6 +77,10 @@ pallets（托盘）, pallet_items（托盘-箱/SKU 绑定）
 —— 设备管理（多终端，见 devices.md §6–7） ——
 device_logs（设备日志）, device_configs（配置下发）, app_versions（App 版本/升级）
 ```
+
+> **注（M2 落地口径，backend-m2-plan §13 / 迁移 000006–000010）**：
+> - `defective_inventory` **不建表**——不良品量以 inventory 行的 defective_qty 状态列承载（六状态同表，恒等式见 inventory-rules §2），质检处理结果经 inventory 流水追溯；
+> - `doc_number_counters`（单号计数表：PK(prefix, period)，docnum 引擎发放）与 `document_approvals`（审批记录 append-only，仅 INSERT 权限）随 000006 共享单据表交付，已补录实体清单（见上"共享单据平台"组）。
 
 ---
 
@@ -139,7 +146,9 @@ deleted_at
 ## 6. 索引与性能约束
 
 1. 所有列表查询条件字段（单号、状态、时间、仓库、SKU、创建人）建立索引。
+   - **000015 补录（2026-10-04 清偿项 F15）**：M1–M3 各单据主表（purchase_orders/inbound_orders/quality_orders/sales_orders/outbound_orders/transfer_orders/count_orders/inventory_adjustments）与 inventory_ledgers 的 `created_by` 筛选面缺失，已由迁移 000015 以 `(created_by, created_at)` 复合索引补齐（M3 新表 000011/000012 既有同形索引）。
 2. 库存表、库存流水表是最高频读写的表，索引设计优先评审。
+   - **000015 收紧（2026-10-04 清偿项 F12）**：inventory_ledgers.zone_id/shelf_id 由可空收紧为 NOT NULL（写入侧 insertLedger 恒填，与 inventory 主表 000005 对齐；PostgreSQL SET NOT NULL 全表扫描遇 NULL 即失败回滚，生产首启前执行安全）。
 3. 流水表只增不改，按时间分区或归档策略在设计中预留。
 4. 禁止无条件 `SELECT *`，禁止在循环中查询数据库（见 architecture.md §7）。
 

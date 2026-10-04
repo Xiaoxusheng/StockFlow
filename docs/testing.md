@@ -43,6 +43,17 @@
 
 每条链路验证：单据状态流转正确、库存变化与流水一致、审计链完整。
 
+**运行机制（2026-10-04 披露，清偿项 F16）**：本仓库集成测试不使用 testcontainers-go——
+文件带 `//go:build integration` 构建标签，默认 `go test ./...` 不编译（单元测试零外部依赖
+约束）；运行需先准备外部 PostgreSQL 15 + Redis 7 实例并设置环境变量
+`SF_TEST_PG_HOST / SF_TEST_PG_PORT / SF_TEST_PG_USER / SF_TEST_PG_PASSWORD /
+SF_TEST_PG_NAME / SF_TEST_REDIS_ADDR`（任一未设置即 `t.Skip` 跳过），再执行
+`go test -tags integration ./...`。机制与 backend-m2-plan §1/§8.2、backend-m3-plan §1/§14
+的「testcontainers」措辞偏差已在其对应行加注披露（实际 = 环境变量门控外部实例，
+testcontainers 为备选方案未落地，go.mod 无该依赖）。§8「越权访问他人仓库数据 → 数据
+权限过滤生效」专项已由 internal/auth/integration_datascope_test.go 集成链路覆盖
+（2026-10-04 清偿轮 F7）。
+
 ---
 
 ## 4. 核心库存专项测试（必须专门覆盖）

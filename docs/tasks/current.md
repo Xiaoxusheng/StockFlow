@@ -4,6 +4,10 @@
 
 ## 当前任务
 
+**后端主线（M1–M3）全量交付完毕，当前处于清偿/收尾阶段（2026-10-04）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余阶段 16（现场验收）与 20–22。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
+
+### 历史任务：前端基础平台（2026-10-02，已交付）
+
 **前端基础平台**（docs/plans/2026-10-02-frontend-foundation.md，F1–F5 + 库存中心示范）
 
 | Task | 内容 | 状态 |
@@ -123,12 +127,27 @@
 
 集成收口复核（组F 后二次独立验证）：路由比对脚本重跑 ALL PASS（68 lazy 目标文件存在、IMPLEMENTED_PATHS=59、children 静态 63 条无重复、13 条新路径逐条在位、/devices/new 先于 /devices/:id）；`npx tsc --noEmit -p tsconfig.app.json` EXIT=0（组A 报告的 DeviceDetailPage/LogPage 3 个 tsc 错误已由并行组修复归零）；`npx eslint` 本批 27 文件 EXIT=0；死按钮复查（145 Button 块）真实死按钮=0（2 处初报均误报：PrintingCenterPage:559 为非 SUCCESS 态 disabled 占位、SfConfirm.tsx 内部透传 onConfirm）；api 调用比对（115 语句/470 符号/119 调用点）=0 不匹配；menu.tsx 与路由逐条一致零改动。修正记录：跨文件同名导出复查=1（toStatusKey，api/masterdata.ts:20 与 api/warehouse.ts:21，第三批已记录既有项、无双导入、保留），组F 报告「同名导出=0」系扫描口径未含既有 api 域。前端先行契约与遗留清单见 changelog 同日集成收口条目。
 
+## 2026-10-03 后端：M3 平台基座（backend-m3-plan MT0 基座段，平台基座工程师）
+
+| 交付物 | 内容 | 状态 |
+|---|---|---|
+| 迁移 000011–000014 | datax（import_tasks/import_task_rows/export_tasks/files）/printing（print_templates/print_tasks/print_task_rows）/devices（devices/device_configs/scan_logs/device_logs/app_versions）/sysops（scheduled_jobs/scheduled_job_runs/system_configs/notifications/backup_records）17 表成对 up/down；无跨域外键、状态 CHECK 与方案 §5 同源、uk_notifications_dedup/uk_backup_records_inflight 部分唯一幂等索引、IMP/EXP/PT 单号唯一 | ✅ 结构自查全绿（本机无 PG，migrate up/down 实测留待具备 PG 环境） |
+| grants 追加 | app_grants.sql：scan_logs/device_logs 入审计分层（仅 SELECT+INSERT）+ 可选清理维护角色段（\if :{?maint_user}，持审计四表 SELECT+DELETE，log_cleanup 外置部署侧依据） | ✅ |
+| internal/asynqx | Queue 接口 + asynqQueue/inlineQueue 双实现（redis.enabled=false 同步降级）+ 任务类型冻结注册表（datax:import:commit / datax:export:run / printing:task:render）+ Server/Inspector 生命周期封装 + TaskID 经自定义头透传 | ✅ 单测全绿（asynq 真队列属 //go:build integration 面） |
+| internal/sysops cron 基座 | robfig/cron 装配、冻结五任务注册表（handler 空实现位，MT5/各域经 RegisterJobHandler 注册）、进程内 single-flight + pg advisory lock 双闸防重入、执行日志落 scheduled_job_runs + last_run_* 回填、SetEnabled 热更新 | ✅ 单测全绿（内存替身注入，不依赖 PG） |
+| internal/storage | files 表 GORM 模型 + 扩展名/嗅探 MIME 白名单交叉校验 + 服务端重命名（uuid.ext）/yyyyMM 路径生成 + 路径穿越防御 + 大小上限 LimitReader 复核 + 临时文件原子落盘；storage.root 可配置 | ✅ 单测全绿 |
+| docnum M3 前缀 | frozenRules 追加 IMP/EXP/PT（ResetDay 6 位流水，有意避开 PRT），引擎零改动，注册表测试扩至 20 前缀 | ✅ |
+| config §3.2 | storage/queue/datax/sysops 九键三处同步（结构体 + defaults + config.example.yaml）+ Validate 快速失败 | ✅ |
+| cmd/server 生命周期 | asynq Server（Redis 模式）/cron Scheduler main 启动 + 优雅停机顺序：HTTP → cron → 队列 → 连接 | ✅ 编译通过（运行时联调待 PG/Redis 环境） |
+
+门禁：`go build ./...`、`go vet ./...`、`go test ./...` 全绿（全包）；`gofmt -l` 空；asynq 库 import 仅 internal/asynqx（guard-asynq 口径）。新依赖：hibiken/asynq v0.26.0、robfig/cron/v3 v3.0.1（直接）；xuri/excelize/v2 v2.11.0、boombuler/barcode v1.1.0（已入 go.mod，MT1/MT2 接入前为 indirect，`go mod tidy` 会移除——接入时重取即可）。`go test -race` 本机不可用（CGO_ENABLED=0 且无 gcc），列入具备工具链环境的复验项。MT0 余量（非本工位 ask）：permissions.go M3 段、router 装配、seed 收编、Makefile 守卫（guard-readonly 白名单模式等）、health /ready 存储检查、§16 契约类文档回写。
+
 ## 下一步（按 frontend.md §29 顺序）
 
 1. **F6 库存中心全量页面**：✅ 批次库存、序列号、库存转移、库存追溯（第二批）+ ✅ 库存分析、SKU 库存详情（2026-10-02 第三批，三个新端点为前端先行契约待后端 M1/M2 冻结回对）；库存盘点按既有裁决由盘点中心 /counts 承载
 2. **F7 单据详情**：✅ 入库单/出库单/采购订单三详情页已交付（2026-10-02 第三批，SfDetailHeader/SfTimeline 新组件；详情端点为前端先行契约）；行级状态列、打印/导出真实动作待后端单据域契约冻结后补
 3. **F8 任务中心**：✅ 我的工作台、我的任务已交付（2026-10-02 第二批，前端先行契约待后端任务域对齐）；「我的待办」「我的审批」入口待审批/待办菜单（如 /approvals）落地后补 path
-4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → ✅ **基础资料（T3）/ 仓库（T4）/ 库存核心（T5），2026-10-02 交付（三域 62 条路由 + 九个库存变更原语，详见 changelog 当日三条交付记录）**；T6 补 router 跨域 Checker 注入与 swag 汇总（实现时需核对前端先行契约，两批清单均见 changelog 2026-10-02 集成记录；注意 /api/inventory 静态段须先于 {skuCode} 参数段注册）
+4. **后端阶段 3–8**（仓库根 Go module）：✅ 迁移（T1）→ ✅ **认证权限（T2，2026-10-02 交付：/api/auth 全套 + /users、/roles、/permissions、/departments 管理 API，JWT+Redis 会话双轨、登录保护、RBAC/数据权限助手、敏感操作审计，详见 changelog 当日条目）** → ✅ **基础资料（T3）/ 仓库（T4）/ 库存核心（T5），2026-10-02 交付（三域 62 条路由 + 九个库存变更原语，详见 changelog 当日三条交付记录）** → ✅ **T6 已销项（2026-10-04 复核：WithWarehouseChecker 已装配于 internal/router/router.go:100；swag 汇总与 Makefile `swag` 目标由同日清偿轮 F8 完成，269 条路由注解与 gin 运行时路由表逐一核对一致，见 changelog 同日条目）**
 5. ✅ F9 盘点、F11 Excel 导入导出与文件中心（2026-10-02 第三批 + 2026-10-03 本轮文件中心交付）、✅ F12 打印、F13 设备（PC 端，2026-10-03 本轮交付并注册路由）、✅ **F14 Pad（2026-10-03 本轮交付并注册路由：/pad 独立段 + 十页；打印/文件/设备/系统/Pad 运行域端点为前端先行契约待后端交付回对）**；剩 F15–F16 Scan（库位地图已交付）
 
 ## 关键上下文
@@ -136,6 +155,21 @@
 - **后端 auth 域已可用**（需 PG15+Redis7、迁移后启动；运行前按 docs/deployment.md §1.1 环境变量清单注入——SF_AUTH_JWT_SECRET、SF_ADMIN_INITIAL_PASSWORD（空库首启）、SF_SERVER_MODE=release（2026-10-03 安全修复轮起默认 release，本地开发显式设 debug；release 缺 JWT 密钥启动失败））。登录响应：`{access_token, token_type:"Bearer", expires_in, refresh_token, must_change_password, user}`；/api/auth/me 返回 `permissions` 权限点集（编码见 internal/auth/permissions.go）。
 - **前端 auth.ts 对齐清单**（后端契约已定，前端适配）——✅ **已完成（2026-10-02 并行轮认证域组交付，集成轮补记）**：`token→access_token`、`refreshToken→refresh_token`、`oldPassword/newPassword→old_password/new_password`、会话字段 `id→session_id、userAgent→user_agent、createdAt→login_at`、GET /api/auth/sessions 为分页信封（items 取数组）；另含 MeResult 会话组装、must_change_password 强改闭环（403 AUTH_PASSWORD_CHANGE_REQUIRED 特判 + 不可关闭强改 Modal）、PASSWORD_RULE 与后端 password.go 对齐导出、canAccess fail-closed（空权限不放行）与菜单码归一映射（types/permission.ts RESOURCE_ALIASES）。~~遗留：api/user.ts（用户管理域 camelCase 自有类型）对齐后端 UserView JSON tag~~ ✅ **已完成（2026-10-03 契约对齐轮组3 交付，集成轮销项）**：UserView 全量 snake_case + department_id/role_ids 请求体 number 形态，见 changelog 同日条目；localStorage `sf.auth` 旧格式会话被拒绝，联调发布需重登一次。
 - ~~**待办（scope B）**：000001 迁移缺 uk_roles_code/uk_permissions_code/uk_departments_code 唯一索引~~ ✅ 已修复（2026-10-02 复核：up 补齐三表 code 唯一索引 + permissions/departments parent_id 反查索引，down 原引用即对齐；权限点同轮补录 inventory:batch/serial 至 106 个，见 changelog 复核修复条目）。
-- **待办（scope A/T6）**：router 注入 `auth.WithWarehouseChecker(warehouse.NewChecker(db))`（plan §4.3 规则①真实装配 fail-fast）与 swag 汇总、Makefile swag 目标。
-- 后端 T3/T4/T5 三域已交付（2026-10-02）；M2 业务单据域（入库/出库/盘点等）未交付：相关作业页面为统一错误态（预期行为）；DEV 旁路 `VITE_AUTH_BYPASS=1` 仅开发构建。
+- ~~**待办（scope A/T6）**：router 注入 `auth.WithWarehouseChecker(warehouse.NewChecker(db))`（plan §4.3 规则①真实装配 fail-fast）与 swag 汇总、Makefile swag 目标~~ ✅ **T6 已全部销项**：WithWarehouseChecker 已装配（internal/router/router.go:100）；swag 汇总与 Makefile `swag` 目标于 2026-10-04 清偿轮 F8 完成（269 条路由最小集注解，`make swag` 生成 apidocs/，操作数与 gin 运行时路由表逐一核对一致）。
+- 后端 T3/T4/T5 三域已交付（2026-10-02）；✅ **M2 业务单据域已交付（2026-10-03：采购/销售/库存作业/退货追溯四域全链路 + docnum 编号引擎 + 迁移 000006–000010 + router 装配/seed 收编；独立评审修复轮同日完成——采购退货序列号逐件核销、取消/收货并发互斥、退货退量咨询锁防超、purchase 详情数据权限 fail-closed、make ci 守卫扩展，详见 changelog 2026-10-03 M2 交付与修复轮条目）**；前端作业页的「M2 冻结后接线」disabled 占位与前端先行契约（/api/inventory/summary、/api/inventory/analytics、任务域 /api/tasks 等）待前端对齐轮消化；DEV 旁路 `VITE_AUTH_BYPASS=1` 仅开发构建。
 - 权限点模型已定义（types/permission.ts）→ auth 域交付后 /api/auth/me 的 permissions 即为菜单/按钮过滤真实数据源。
+
+## 2026-10-04 后端：M3 平台能力全量交付（backend-m3-plan MT1–MT7 + 集成装配 + 评审修复两轮）
+
+| 交付项 | 内容 | 状态 |
+|---|---|---|
+| MT1 Excel 数据中心 | internal/datax 21 文件：九类导入向导状态机、16 模块流式导出、文件中心（可见性规则）、12 个域接入文件 | ✅ |
+| MT2 打印中心 | internal/printing：模板/任务/七码制条码/渲染数据包 + 5 个 printing_content.go 装配接入（Orchestrator 裁决只读白名单） | ✅ |
+| MT3 设备与扫码 | internal/devices 15 文件：激活码防重放/设备令牌可撤销/心跳/配置下发/resolve 六级解析+去重窗口 + 7 个 devices_resolve.go | ✅ |
+| MT4 报表与运维 | internal/reports + internal/sysops：七端点报表/只读智能建议/日志查询//api/system/预警扫描任务/备份登记 | ✅ |
+| 集成装配 | router 五域注册、41 权限点收编单一来源、种子 63 MENU+229 动作点（探针对齐）、Makefile 四守卫、main.go asynq/cron 生命周期 | ✅ |
+| 迁移 | 000011–000014 四组成对迁移 17 平台表（72 表封闭断言通过） | ✅ |
+| 评审修复 | 第一轮 8 项全修复 + 第二轮 4 项（启动清扫 RecoverStaleTasks/设备日志 jsonb 校验/任务元数据 FileScope 收口等）已落盘验证 | ✅ |
+| 门禁 | go build/vet/vet -tags integration 全过；go test -count=1 24 包全 ok；gofmt 干净；六项守卫零命中 | ✅ |
+
+未覆盖（诚实清单）：迁移 000011–000014 与 asynq 真队列/cron 未在真实 PG+Redis 执行（//go:build integration 就位待服务器环境）；go test -race 本机无 gcc 未跑；设备真机联调属阶段 16 现场；工作流第二轮复查的修复清单第 5 项以后若存在未完成条目无从确证（运行死于模型创建失败，可见 1–4 项已验证）。后端主线阶段 3–19 全部交付完毕；余阶段 16 现场验收与 20–22。
