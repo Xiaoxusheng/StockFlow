@@ -173,3 +173,9 @@
 | 门禁 | go build/vet/vet -tags integration 全过；go test -count=1 24 包全 ok；gofmt 干净；六项守卫零命中 | ✅ |
 
 未覆盖（诚实清单）：迁移 000011–000014 与 asynq 真队列/cron 未在真实 PG+Redis 执行（//go:build integration 就位待服务器环境）；go test -race 本机无 gcc 未跑；设备真机联调属阶段 16 现场；工作流第二轮复查的修复清单第 5 项以后若存在未完成条目无从确证（运行死于模型创建失败，可见 1–4 项已验证）。后端主线阶段 3–19 全部交付完毕；余阶段 16 现场验收与 20–22。
+
+## 2026-10-04 构建：阶段 20 CI 关卡（GitHub Actions，CI 工程师）
+
+- `.github/workflows/ci.yml` 落盘：push 与 pull_request 触发，ubuntu-latest 三个并行 job——**lint**（gofmt -l cmd internal 有输出即失败（Makefile fmt-check 同款）+ go vet ./... + go vet -tags integration ./...）、**test**（go test -count=1 ./... 与 go test -race -count=1 ./...，补齐上表"本机无 gcc 未跑 race"的遗留复验项）、**guards**（make 七守卫目标，命令单一来源在 Makefile、与清偿轮 F3 接线一致，workflow 不复刻防漂移）；Go 版本读 go.mod（setup-go go-version-file），模块缓存 setup-go cache: true。详见 changelog 同日条目。
+- 本机已验：actionlint v1.7.12 过、js-yaml 结构断言全过、gofmt -l cmd internal 空、vet±integration 全过、go test -count=1 ./... 24 包全 ok、六项失败型守卫零命中（guard-status 按设计仅报告，7 行既有人工复核清单）。go test -race 本机不可跑（无 gcc、CGO_ENABLED=0），由 ubuntu-latest 自带 gcc 承载——**待 push 后首次 Actions 运行验证**。
+- 阶段 20 CI 关卡本项交付完毕；阶段 20–22 余量（生产编排完善、性能优化）待后续。
