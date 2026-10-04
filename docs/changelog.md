@@ -14,6 +14,18 @@
 
 ## 文档记录
 
+## [2026-10-04] 后端：收尾轮汇总——遗留债务清偿 + 000015/000016 迁移 + CI 流水线 + swag 汇总 + 服务器部署升级与真库回归
+
+- **遗留债务清偿（核对员债务清单 F3–F21）**：guard-inventory 守卫接线（含 _test.go fixture 豁免复核修正）、仓库根 Windows 保留名杂散文件 `nul` 删除、数据权限集成测试落盘（`//go:build integration`，需 `SF_TEST_PG_*` 本机未执行——诚实标注）、GET /api/users department_id 非法值 fail-fast、seed 残留行幂等修复、迁移 000015 交付、release JWT 密钥表驱动测试、BindErrorDetails 收敛 52 个 ShouldBindJSON 绑定路径、panic 日志 zap.String 化 + 2KB 截断；同日独立复核修正轮 5 项（F3 守卫误伤 / F20 补收敛 14 处 / 000015 down 缺口 / F16 措辞补注 / 状态文件更正）。逐项细节见同日「清偿轮」「清偿轮复核修正」两条目，不在此重复。
+- **000015 迁移（终态，撰写时逐文件核实）**：inventory_ledgers.zone_id/shelf_id 收紧 NOT NULL（SET NOT NULL 全表扫描断言，遇 NULL 整体回滚）+ 主单据表 created_by 复合索引；部署回归实测发现 `idx_inventory_ledgers_creator_created` 非法（该表无 created_by 列，操作者列为 operator_id）并移除（0a1ba66）后，终态为 8 张主单据表索引——up 8 条 CREATE INDEX / down 8 条 DROP INDEX 成对（本会话 grep 核实 000015 up/down 各 8 条）；此前清偿轮条目中「九张表/九索引」为移除前口径，以本条目终态为准。
+- **000016 迁移**：purchase 域 9 张表（purchase_orders/items、inbound_orders/items、receipts/receipt_items、putaway_tasks、quality_orders/items）补 `deleted_at timestamptz`——真库回归暴露模型内嵌 `database.BaseModel`（gorm.DeletedAt）而 000007 漏建列（42703），部署后采购下单/收货/质检全链路写入必然失败；纯加列不动数据（6751ec8）。
+- **CI 流水线（阶段 20）**：新增 `.github/workflows/ci.yml`——push/pull_request 触发，ubuntu-latest 三并行 job：lint（gofmt -l cmd internal + go vet ± integration tags）、test（go test 与 go test -race——补齐本机无 gcc 缺失的 race 关卡）、guards（make 七守卫，命令单一来源 Makefile）；Go 版本读 go.mod（cc147b6）。本机验证：actionlint v1.7.12 / js-yaml 结构断言 / vet / go test 24 包 / 六项失败型守卫全过（详见同日「阶段 20 CI 关卡」条目）。
+- **swag 汇总（清偿项 F8，T6 收口）**：全部 handler doc 注释补最小集注解，Makefile `swag` 目标（go run 固定 swag v1.16.6，--parseDependency --parseDepth 3），apidocs/docs.go + swagger.json/yaml 落盘；操作数 269 与 gin 运行时路由表逐一核对一致（本会话核实 apidocs/swagger.json summary 计数 = 269，Makefile swag 目标在位）。
+- **服务器部署升级与真库回归**：部署物三项修复——Dockerfile 预建 `/app/data`（app 属主）、docker-compose 新增 filesdata 命名卷持久化文件中心、SF_DEVICES_JWT_SECRET 接入 .env.example/compose/deployment.md（8d0816a/9479e1d，本会话核实 docker-compose.yml:97/:104/:134、.env.example:20）；服务器真库回归首次暴露四处缺陷并全部修复：000013 chk_device_logs_level 错置（移回 device_logs 建表，83b327d，本会话核实其已位于 up.sql:133 的 device_logs 表内）、000015 非法索引（0a1ba66）、MigrateUp 先 Close 后 Up（internal/database/migrate.go 修正为先 Up 后 Close——Close 会关闭 pg_advisory_lock 专用锁连接，515fb3c）、000016 缺 deleted_at（6751ec8）；000016 迁移 down 1 / up 双向真库验证通过（沿同日「部署回归实测修复」条目）。
+- **撰写时点复验（本条目作者实测，非转述）**：`go build ./...`、`go vet ./...`、`go vet -tags integration ./...`、`go test -count=1 ./...` 全绿（22 个含测试包全 ok，apidocs/cmd/stock 无测试文件）；其余验证结论沿同日各条目记录，本条目不重复声称。
+- **未完成项（如实）**：① go test -race 与 CI Actions 首跑验证待 push——本机无 gcc/CGO_ENABLED=0 无法跑 race，且 main 领先 origin/main 9 个提交（本会话 git 核实），本轮交付全部未推送、Actions 从未运行；② 集成测试环境契约缺口挂账——cache/auth 集成测试不读 Redis 密码（与生产 requirepass 基线不兼容）、auth 集成测试以相对路径 "db/migrations" 传 MigrateUp（任何环境无法解析）、TestConcurrentDeductNoNegativeStock 断言自相矛盾、单据域固定夹具无用例间隔离——测试隔离改造待立项；③ 真库验证覆盖：up 全链随服务器部署执行成功，down 方向仅 000016 down 1 级实测过，000013/000015 down 未逐一真库实测；④ **阶段 16（PDA/扫码枪深度接入与多终端，StockFlow Scan 真机验收场景 9）与阶段 21（性能优化：索引/缓存/慢查询治理）为待环境项**；⑤ 阶段 22 生产部署的环境配置/发布流程已随本轮部署升级推进，里程碑 M4 的 7 个验收场景走通（验收演示）无执行记录。
+- 影响范围：本轮（清偿/复核/部署回归/CI）合计涉及 db/migrations 000013/000015/000016、internal/database/migrate.go、internal/auth、internal/response、internal/middleware、internal/database/seed.go、Makefile、apidocs/、.github/workflows/ci.yml、部署物（Dockerfile/docker-compose.yml/.env.example）与 docs 多篇；各业务域逻辑零改动。
+
 ## [2026-10-04] 修复：部署回归实测修复——000013 CHECK 错置、000015 非法索引、文件中心容器存储权限
 
 - **db/migrations/000013**：`chk_device_logs_level CHECK (level IN ('INFO','WARN','ERROR'))` 误置于 `device_configs` 表（该表无 `level` 列，任何 PostgreSQL 上迁移必然失败——生产首启实测复现 `pq: column "level" does not exist`）；按 internal/devices/models.go 值域注释移回 `device_logs` 建表语句。

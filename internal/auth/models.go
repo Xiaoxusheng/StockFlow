@@ -55,9 +55,10 @@ type User struct {
 // TableName 显式指定表名。
 func (User) TableName() string { return "users" }
 
-// Role 角色（16 内置角色 is_system 禁删；无删除接口，database.md §5.1 清单不含 roles）。
+// Role 角色（16 内置角色 is_system 禁删；无删除接口，database.md §5.1 清单不含 roles
+// ——roles 表无 deleted_at 列，嵌入 BaseCols（无软删语义），否则 GORM 42703）。
 type Role struct {
-	database.BaseModel
+	database.BaseCols
 	Code     string `json:"code"`
 	Name     string `json:"name"`
 	IsSystem bool   `json:"is_system"`
@@ -67,9 +68,10 @@ type Role struct {
 // TableName 显式指定表名。
 func (Role) TableName() string { return "roles" }
 
-// Permission 权限点（MENU/BUTTON/API 三级；parent_id 自引用构成树）。
+// Permission 权限点（MENU/BUTTON/API 三级；parent_id 自引用构成树；permissions 表
+// 无 deleted_at 列，嵌入 BaseCols——同 Role 注）。
 type Permission struct {
-	database.BaseModel
+	database.BaseCols
 	Code     string       `json:"code"`
 	Name     string       `json:"name"`
 	Type     string       `json:"type"`
@@ -81,9 +83,10 @@ type Permission struct {
 // TableName 显式指定表名。
 func (Permission) TableName() string { return "permissions" }
 
-// Department 部门（permission.md §4 部门维度数据权限实体；parent_id 自引用）。
+// Department 部门（permission.md §4 部门维度数据权限实体；parent_id 自引用；
+// departments 表无 deleted_at 列，嵌入 BaseCols——同 Role 注）。
 type Department struct {
-	database.BaseModel
+	database.BaseCols
 	ParentID *database.ID `json:"parent_id"`
 	Code     string       `json:"code"`
 	Name     string       `json:"name"`

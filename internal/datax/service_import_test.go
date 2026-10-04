@@ -603,7 +603,7 @@ func TestInlineConfirmExecutesSync(t *testing.T) {
 	if res.Status != TaskStatusSuccess || res.SuccessRows != 1 {
 		t.Fatalf("inline 模式确认应同步返回终态: %+v", res)
 	}
-	if res.FinishedAt == nil {
+	if res.FinishedAt.IsZero() {
 		t.Fatalf("inline 终态应携带 finished_at")
 	}
 	_ = zap.NewNop

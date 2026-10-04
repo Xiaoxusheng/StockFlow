@@ -89,6 +89,7 @@ type Repository interface {
 	UpdateExceptionAssignee(tx *gorm.DB, id, assigneeID int64, assigneeName string, by int64) error
 	SetExceptionFreezeLock(tx *gorm.DB, id int64, lockID *int64) error
 	AppendHandleRecord(tx *gorm.DB, id int64, rec HandleRecord) error
+	UpdateExceptionImageRefs(tx *gorm.DB, id int64, refs []string) error
 
 	// —— 操作日志（追溯数据源之一：inventory-rules §10；operation_logs 为平台审计表，
 	// 只读查询）——
@@ -375,6 +376,22 @@ func (r *gormRepository) AppendHandleRecord(tx *gorm.DB, id int64, rec HandleRec
 		Updates(map[string]any{
 			"handle_records": marshalJSONB(records),
 			"updated_at":     gorm.Expr("now()"),
+		}).Error
+}
+
+func (r *gormRepository) UpdateExceptionImageRefs(tx *gorm.DB, id int64, refs []string) error {
+	// 行锁内读改写 jsonb（与 AppendHandleRecord 同款并发口径——挂接与处理记录并发安全）。
+	var e Exception
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).First(&e).Error
+	if err != nil {
+		return err
+	}
+	return tx.Model(&Exception{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"image_refs": marshalJSONB(refs),
+			"updated_at": gorm.Expr("now()"),
 		}).Error
 }
 

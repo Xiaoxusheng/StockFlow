@@ -123,17 +123,29 @@ func (s *InventoryExportSource) Summary() []datax.SummaryRow {
 	}
 }
 
-// applyFilters 筛选（白名单键 + 数据权限）。
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 StockListPage SfExportButton
+// scopeParams 对齐（warehouse_id/zone_id/shelf_id/bin_id/sku_id/batch_id）——此前
+// zone_id/shelf_id/batch_id 按"未知键忽略"静默丢弃，列表所见与导出所得不一致
+// （2026-10-04 补齐）。
 func (s *InventoryExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
 	q = applyWarehouseScope(q, f, "warehouse_id")
 	if wh := f.Filters["warehouse_id"]; wh != "" {
 		q = q.Where("warehouse_id = ?", wh)
+	}
+	if zone := f.Filters["zone_id"]; zone != "" {
+		q = q.Where("zone_id = ?", zone)
+	}
+	if shelf := f.Filters["shelf_id"]; shelf != "" {
+		q = q.Where("shelf_id = ?", shelf)
 	}
 	if sku := f.Filters["sku_id"]; sku != "" {
 		q = q.Where("sku_id = ?", sku)
 	}
 	if bin := f.Filters["bin_id"]; bin != "" {
 		q = q.Where("bin_id = ?", bin)
+	}
+	if batch := f.Filters["batch_id"]; batch != "" {
+		q = q.Where("batch_id = ?", batch)
 	}
 	return applyCommon(q, f, "updated_at")
 }

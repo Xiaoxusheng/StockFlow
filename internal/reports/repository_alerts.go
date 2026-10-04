@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // GET /api/inventory/alerts 五类预警查询（与前端 StockAlertItem 契约 level 值域对齐：
@@ -73,7 +74,7 @@ FROM (
 JOIN (
     SELECT b.id, b.batch_no, b.sku_id,
            CASE WHEN b.expiry_date <= CURRENT_DATE THEN 0
-                ELSE EXTRACT(DAY FROM (b.expiry_date - CURRENT_DATE))::int END AS threshold,
+                ELSE (b.expiry_date - CURRENT_DATE)::int END AS threshold,
            CASE WHEN b.expiry_date <= CURRENT_DATE THEN 'expired'
                 ELSE 'near_expiry' END AS level
     FROM batches b
@@ -111,7 +112,11 @@ JOIN products p ON p.id = s.product_id
 JOIN warehouses w ON w.id = st.warehouse_id
 WHERE COALESCE(lm.last_moved_at, st.first_stock_at) <= ?` + kw
 		branch.args = append(append([]any{}, scArgs...), lmArgs...)
-		branch.args = append(branch.args, minStagnantDays, interval(minStagnantDays))
+		// slow_moving 截止时间为 timestamptz 比较（`<= ?` 无显式 cast——参数必须携带
+		// 时间类型；此前传 "N days" 文本被 PG 按 timestamptz 解析失败 22007，真库回归
+		// 2026-10-04 修复。与 /api/reports/stagnant-stock 的 cutoff time.Time 同口径）。
+		cutoff := time.Now().AddDate(0, 0, -minStagnantDays)
+		branch.args = append(branch.args, minStagnantDays, cutoff)
 		branch.args = append(branch.args, kwArgs...)
 	}
 	return branch

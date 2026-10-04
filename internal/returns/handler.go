@@ -140,6 +140,7 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	ex.POST("", auth.RequirePermission(PermExceptionCreate), h.createException)
 	ex.GET("/:id", auth.RequirePermission(PermExceptionRead), h.getException)
 	ex.POST("/:id/assign", auth.RequirePermission(PermExceptionAssign), h.assignException)
+	ex.POST("/:id/images", auth.RequirePermission(PermExceptionExecute), h.attachExceptionImages)
 	ex.POST("/:id/start", auth.RequirePermission(PermExceptionExecute), h.startException)
 	ex.POST("/:id/review", auth.RequirePermission(PermExceptionExecute), h.reviewException)
 	ex.POST("/:id/resolve", auth.RequirePermission(PermExceptionExecute), h.resolveException)
@@ -566,6 +567,33 @@ func (h *handler) getException(c *gin.Context) {
 		return
 	}
 	view, err := h.svc.GetException(c.Request.Context(), id)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, view)
+}
+
+// @Summary POST /api/exceptions/:id/images（挂接图片取证；file_ids 为文件中心上传产物）
+// @Tags 退货与异常
+// @Accept json
+// @Produce json
+// @Param body body ExceptionImageInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/exceptions/{id}/images [post]
+func (h *handler) attachExceptionImages(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	var in ExceptionImageInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	view, err := h.svc.AttachExceptionImages(c.Request.Context(), actorOf(c), id, in)
 	if err != nil {
 		response.Err(c, err)
 		return

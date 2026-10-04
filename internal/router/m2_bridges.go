@@ -42,6 +42,7 @@ import (
 	"github.com/stockflow/server/internal/sales"
 	"github.com/stockflow/server/internal/stock"
 	"github.com/stockflow/server/internal/stockops"
+	"github.com/stockflow/server/internal/warehouse"
 )
 
 // m2QtyScale stock.Qty 冻结标度（numeric(18,4)，1 单位 Qty = 0.0001；stock/qty.go 同值）。
@@ -403,6 +404,35 @@ func (t traceReaders) SerialByNo(ctx context.Context, serialNo string) (returns.
 	}, true, nil
 }
 
+// ---- 推荐库位桥接（warehouse.BinRecommenderService → purchase.BinRecommender）----
+//
+// business-flow §5.3 基础规则（同 SKU 集中 + 剩余容量 + 库位启用）的实现数据面在
+// warehouse 域：库位静态属性直读本域 bins 表，库存动态占用经 BinOccupancyReader/
+// SKUBinReader 窄接口由 inventory 提供；域类型 warehouse.BinSuggestion 逐字段桥接为
+// purchase.BinSuggestion（判据 2 域包禁 import）。2026-10-04 补齐装配——此前
+// BinRecommender 未注入，GET /api/putaway/recommend 运行期 fail-closed。
+
+// warehouseBinRecommenderBridge 实现 purchase.BinRecommender。
+type warehouseBinRecommenderBridge struct {
+	r *warehouse.BinRecommenderService
+}
+
+// Recommend 实现 purchase.BinRecommender（逐字段搬运，评分/理由语义由 warehouse 侧定义）。
+func (b warehouseBinRecommenderBridge) Recommend(ctx context.Context, warehouseID, skuID int64, qty float64) ([]purchase.BinSuggestion, error) {
+	sugs, err := b.r.Recommend(ctx, warehouseID, skuID, qty)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]purchase.BinSuggestion, 0, len(sugs))
+	for _, s := range sugs {
+		out = append(out, purchase.BinSuggestion{
+			BinID: s.BinID, ZoneID: s.ZoneID, ShelfID: s.ShelfID,
+			Score: s.Score, Reason: s.Reason,
+		})
+	}
+	return out, nil
+}
+
 // ---- 编译期契约自检：桥接实现必须与消费方冻结接口逐字匹配 ----
 
 var (
@@ -419,4 +449,6 @@ var (
 	_ returns.PurchaseOrderReader = purchaseReturnOrderReader{}
 	_ returns.LedgerReader        = traceReaders{}
 	_ returns.StockStateReader    = traceReaders{}
+	_ purchase.BinRecommender     = warehouseBinRecommenderBridge{}
+	_ warehouse.SKUBinReader      = inventory.NewBinOccupancy(nil)
 )

@@ -13,8 +13,8 @@ import (
 //	/api/purchases   采购订单（列表/详情/创建/修改/submit/approve/cancel/close）
 //	/api/inbounds    入库单（列表/详情/创建/修改/cancel/close）
 //	/api/receipts    收货（列表/详情/按单号/收货确认 execute）
-//	/api/quality     质检单（列表/详情/创建/start/execute）
-//	/api/putaway     上架任务（列表/详情/推荐库位/claim/execute）
+//	/api/quality     质检单（列表/追溯/不合格品/创建/start/execute）
+//	/api/putaway     上架任务（列表/详情/推荐库位/claim/pause/resume/execute）
 //
 // 全部挂 auth.RequirePermission（权限点常量本包导出，plan §9.2，供集成工程师收编
 // internal/auth/permissions.go）；列表强制分页（api.md §2.1）；统一经 internal/response
@@ -62,6 +62,10 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 
 	// —— 质检 ——
 	rg.GET("/quality", auth.RequirePermission(PermQualityList), func(c *gin.Context) { handleQCList(c, svc) })
+	// 质量记录链（business-flow §4 检验→处置两级；web/src/api/quality.ts 先行契约立项，
+	// 2026-10-04 补端点）：列表型读取挂 list 权限点。
+	rg.GET("/quality/trace", auth.RequirePermission(PermQualityList), func(c *gin.Context) { handleQCTrace(c, svc) })
+	rg.GET("/quality/nonconforming", auth.RequirePermission(PermQualityList), func(c *gin.Context) { handleQCNonconforming(c, svc) })
 	rg.POST("/quality", auth.RequirePermission(PermQualityCreate), func(c *gin.Context) { handleQCCreate(c, svc) })
 	rg.GET("/quality/:id", auth.RequirePermission(PermQualityRead), func(c *gin.Context) { handleQCDetail(c, svc) })
 	rg.POST("/quality/:id/start", auth.RequirePermission(PermQualityExecute), func(c *gin.Context) { handleQCStart(c, svc) })
@@ -72,5 +76,9 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.GET("/putaway/recommend", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskRecommend(c, svc) })
 	rg.GET("/putaway/:id", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskDetail(c, svc) })
 	rg.POST("/putaway/:id/claim", auth.RequirePermission(PermPutawayClaim), func(c *gin.Context) { handleTaskClaim(c, svc) })
+	// 暂停/恢复（迁移 000017 作业过程态）：挂 execute 权限点——plan §9.1 动作词域
+	// "execute 作业执行（…上架…）"的构成部分，不发明清单外动作词（判据 9）。
+	rg.POST("/putaway/:id/pause", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskPause(c, svc) })
+	rg.POST("/putaway/:id/resume", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskResume(c, svc) })
 	rg.POST("/putaway/:id/execute", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskExecute(c, svc) })
 }

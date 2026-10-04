@@ -30,10 +30,12 @@ func wantRoutes() []string {
 		"GET /receipts/no/:no", "GET /receipts/:id",
 		// —— 质检 ——
 		"GET /quality", "POST /quality",
+		"GET /quality/trace", "GET /quality/nonconforming",
 		"GET /quality/:id", "POST /quality/:id/start", "POST /quality/:id/execute",
 		// —— 上架任务 ——
 		"GET /putaway", "GET /putaway/recommend", "GET /putaway/:id",
-		"POST /putaway/:id/claim", "POST /putaway/:id/execute",
+		"POST /putaway/:id/claim", "POST /putaway/:id/pause", "POST /putaway/:id/resume",
+		"POST /putaway/:id/execute",
 	}
 	sort.Strings(routes)
 	return routes

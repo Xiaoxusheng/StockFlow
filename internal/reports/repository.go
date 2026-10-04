@@ -20,11 +20,15 @@ type Scope struct {
 	WarehouseIDs  []int64
 }
 
-// cond 返回仓库范围过滤片段与参数（all=不过滤；空集=fail-closed 不可见任何行；
+// cond 返回仓库范围过滤片段与参数（all=恒真片段；空集=fail-closed 不可见任何行；
 // permission.md §4 数据权限由 Service 层自 gin 上下文注入，禁止接受前端范围参数）。
+// all 分支返回 "1 = 1" 而非空串：调用方以 `WHERE %s` 或 `... AND %s` 两种形态拼接
+// （真库回归 2026-10-04：空串在 ALL 范围下产生 "WHERE "/"AND " 悬空尾巴，PG 42601
+// syntax error，/api/reports/* 与 /api/inventory/summary|alerts 对超管/ALL 范围全量
+// 500），恒真片段对两种拼接形态均合法。
 func (s Scope) cond(column string) (string, []any) {
 	if s.AllWarehouses {
-		return "", nil
+		return "1 = 1", nil
 	}
 	if len(s.WarehouseIDs) == 0 {
 		return "1 = 0", nil
@@ -90,7 +94,7 @@ JOIN skus s ON s.id = i.sku_id
 JOIN products p ON p.id = s.product_id
 JOIN warehouses w ON w.id = i.warehouse_id
 LEFT JOIN batches b ON b.id = i.batch_id AND i.batch_id > 0
-WHERE %s %s
+WHERE (%s) AND (%s)
 GROUP BY i.warehouse_id, w.code, w.name, i.sku_id, s.code, p.name`
 
 func (r *repository) inventorySummary(ctx context.Context, sc Scope, warehouseID, skUID int64, page, pageSize int) ([]InventorySummaryRow, int64, error) {

@@ -37,9 +37,12 @@ const (
 	QCStatusInspecting = "INSPECTING"
 	QCStatusCompleted  = "COMPLETED"
 
-	// 上架任务（business-flow §5.1：待上架→上架中→已完成；取消随入库单联动，plan §6.3）
+	// 上架任务（business-flow §5.1：待上架→上架中→已完成；取消随入库单联动，plan §6.3；
+	// PAUSED 暂停/恢复为作业过程态——迁移 000017，PadPutawayPage 暂停占位接线前置，
+	// 仅领取人可暂停/恢复，PAUSED 视为活动态参与入库单推进/关闭守卫）
 	TaskStatusPending    = "PENDING"
 	TaskStatusInProgress = "IN_PROGRESS"
+	TaskStatusPaused     = "PAUSED"
 	TaskStatusCompleted  = "COMPLETED"
 	TaskStatusCancelled  = "CANCELLED"
 )
@@ -97,10 +100,12 @@ var qcTransitions = map[string][]string{
 	QCStatusCompleted:  {},
 }
 
-// putawayTransitions 上架任务状态机迁移表（business-flow §5.1、plan §6.3）。
+// putawayTransitions 上架任务状态机迁移表（business-flow §5.1、plan §6.3；
+// PAUSED 暂停/恢复为作业过程态——迁移 000017）。
 var putawayTransitions = map[string][]string{
 	TaskStatusPending:    {TaskStatusInProgress, TaskStatusCancelled},
-	TaskStatusInProgress: {TaskStatusCompleted},
+	TaskStatusInProgress: {TaskStatusCompleted, TaskStatusPaused},
+	TaskStatusPaused:     {TaskStatusInProgress},
 	TaskStatusCompleted:  {},
 	TaskStatusCancelled:  {},
 }

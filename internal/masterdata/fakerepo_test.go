@@ -80,8 +80,8 @@ func (f *fakeRepo) seedCategory(code, status string, parentID int64) int64 {
 	defer f.mu.Unlock()
 	id := f.nextID()
 	c := &ProductCategory{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		Code:      code, Name: "分类" + code, Status: status,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		Code:     code, Name: "分类" + code, Status: status,
 	}
 	if parentID > 0 {
 		pid := database.ID(parentID)
@@ -97,8 +97,8 @@ func (f *fakeRepo) seedUnit(code, status string) int64 {
 	defer f.mu.Unlock()
 	id := f.nextID()
 	f.units[id] = &Unit{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		Code:      code, Name: "单位" + code, Status: status,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		Code:     code, Name: "单位" + code, Status: status,
 	}
 	f.unitByCode[code] = id
 	return id
@@ -142,8 +142,8 @@ func (f *fakeRepo) seedBarcode(skuID int64, code string, primary bool) int64 {
 	f.barcodeSeq++
 	id := f.barcodeSeq
 	f.barcodeIDs[id] = &Barcode{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		SKUID:     database.ID(skuID), Barcode: code, CodeType: CodeTypeDefault, IsPrimary: primary,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		SKUID:    database.ID(skuID), Barcode: code, CodeType: CodeTypeDefault, IsPrimary: primary,
 	}
 	f.barcodes[code] = id
 	return id

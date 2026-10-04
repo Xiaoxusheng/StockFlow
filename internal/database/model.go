@@ -145,6 +145,36 @@ func (b *BaseModel) BeforeUpdate(tx *gorm.DB) error {
 	return nil
 }
 
+// BaseCols 无软删实体的通用字段（database.md §3 但书 + §5.1：非软删对象清单实体
+// 不携带 deleted_at——真库回归 2026-10-04：Role/Permission/Department/ProductCategory/
+// Unit/Barcode 等表无该列而模型经 BaseModel 携带软删语义，GORM 在 SELECT 拼出
+// "deleted_at 不存在" 42703，非超管用户权限回源/基础资料部分读全量 500）。
+// 字段与钩子语义与 BaseModel 一致，仅无 DeletedAt（先例 internal/warehouse/models.go baseCols）。
+type BaseCols struct {
+	ID        ID       `gorm:"primaryKey;autoIncrement" json:"id"`
+	CreatedAt JSONTime `json:"created_at"`
+	UpdatedAt JSONTime `json:"updated_at"`
+	CreatedBy ID       `json:"created_by"` // 业务侧显式赋值；系统操作为 0
+	UpdatedBy ID       `json:"updated_by"`
+}
+
+// BeforeCreate 兜底填充创建/更新时间（同 BaseModel）。
+func (b *BaseCols) BeforeCreate(tx *gorm.DB) error {
+	if b.CreatedAt.IsZero() {
+		b.CreatedAt = Now()
+	}
+	if b.UpdatedAt.IsZero() {
+		b.UpdatedAt = b.CreatedAt
+	}
+	return nil
+}
+
+// BeforeUpdate 兜底刷新更新时间（同 BaseModel）。
+func (b *BaseCols) BeforeUpdate(tx *gorm.DB) error {
+	b.UpdatedAt = Now()
+	return nil
+}
+
 // Tx 事务助手：fn 内所有操作共用同一事务，返回错误整体回滚（architecture.md §4）。
 // 跨域/多表写（如“业务单据 + 库存变更 + 操作日志”）必须在同一 Tx 内完成。
 func Tx(ctx context.Context, db *gorm.DB, fn func(tx *gorm.DB) error) error {

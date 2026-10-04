@@ -16,6 +16,10 @@ import (
 // 供应商/客户不分仓），不做仓库级行过滤；仓库/部门/本人范围在 M1 只落模型与快照。
 type Service struct {
 	repo Repository
+	// supplierRefs/customerRefs 往来单位删除引用校验（refreaders.go 窄接口；router 注入，
+	// nil 时删除引用校验跳过——fail-open 口径见 refreaders.go 文件注）。
+	supplierRefs SupplierRefReader
+	customerRefs CustomerRefReader
 }
 
 // NewService 构建业务层。

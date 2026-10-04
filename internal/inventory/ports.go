@@ -59,3 +59,31 @@ func (o *BinOccupancy) SumByBin(ctx context.Context, warehouseID int64) ([]BinOc
 		ORDER BY bin_id`, warehouseID).Scan(&rows).Error
 	return rows, err
 }
+
+// QtyByBinForSKU 指定仓库内该 SKU 的库位分布（bin_id → 六状态总量；无库存行返回空表）。
+// 消费方：warehouse 推荐库位的"同 SKU 集中存放"因子（business-flow §5.3 基础规则，
+// router 经窄接口桥接注入——plan §4.3，warehouse 不可直读本域表）。
+func (o *BinOccupancy) QtyByBinForSKU(ctx context.Context, warehouseID, skuID int64) (map[int64]float64, error) {
+	if o.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	var rows []struct {
+		BinID    int64   `gorm:"column:bin_id"`
+		TotalQty float64 `gorm:"column:total_qty"`
+	}
+	err := o.db.WithContext(ctx).Raw(`
+		SELECT bin_id,
+		       COALESCE(SUM(total_qty), 0) AS total_qty
+		FROM inventory
+		WHERE warehouse_id = ? AND sku_id = ?
+		GROUP BY bin_id
+		ORDER BY bin_id`, warehouseID, skuID).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]float64, len(rows))
+	for _, r := range rows {
+		out[r.BinID] = r.TotalQty
+	}
+	return out, nil
+}

@@ -90,8 +90,8 @@ func (f *fakeRepo) seedRole(code string, status string, isSystem bool) int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.roles[id] = &Role{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		Code:      code, Name: code, Status: status, IsSystem: isSystem,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		Code:     code, Name: code, Status: status, IsSystem: isSystem,
 	}
 	f.roleByCode[code] = id
 	return id
@@ -102,8 +102,8 @@ func (f *fakeRepo) seedPerm(code string, status string) int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.perms[id] = &Permission{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		Code:      code, Name: code, Type: PermTypeAPI, Status: status,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		Code:     code, Name: code, Type: PermTypeAPI, Status: status,
 	}
 	f.permByCode[code] = id
 	return id
@@ -114,8 +114,8 @@ func (f *fakeRepo) seedDept(code string, status string, parentID int64) int64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	d := &Department{
-		BaseModel: database.BaseModel{ID: database.ID(id)},
-		Code:      code, Name: code, Status: status,
+		BaseCols: database.BaseCols{ID: database.ID(id)},
+		Code:     code, Name: code, Status: status,
 	}
 	if parentID > 0 {
 		pid := database.ID(parentID)
@@ -282,6 +282,16 @@ func (f *fakeRepo) ListRoleIDsByUser(_ context.Context, uid int64) ([]int64, err
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := append([]int64(nil), f.userRoles[uid]...)
+	return out, nil
+}
+
+func (f *fakeRepo) ListRoleIDsByUsers(_ context.Context, uids []int64) (map[int64][]int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make(map[int64][]int64, len(uids))
+	for _, uid := range uids {
+		out[uid] = append([]int64(nil), f.userRoles[uid]...)
+	}
 	return out, nil
 }
 

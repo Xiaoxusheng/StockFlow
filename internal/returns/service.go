@@ -25,6 +25,7 @@ type Service struct {
 	ledgers        LedgerReader
 	stockState     StockStateReader
 	skuFlagReader  SKUFlagReader
+	imageFiles     ImageFileChecker
 }
 
 // NewService 构建业务层（装配校验在 RegisterRoutes 启动期 fail-fast）。
@@ -42,6 +43,7 @@ func NewService(repo Repository, opts ...Option) *Service {
 		ledgers:        o.ledgers,
 		stockState:     o.stockState,
 		skuFlagReader:  o.skuFlags,
+		imageFiles:     o.imageFiles,
 	}
 }
 

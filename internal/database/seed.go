@@ -268,7 +268,18 @@ type permissionSeed struct {
 // M3 冻结清单 14 菜单 + 41 动作点——backend-m1-plan §5.4.1 + backend-m2-plan §9.2/§9.3
 // + backend-m3-plan §11，收编记录见 §11.4 注）。
 // 纯函数，供种子写入与单元测试共用（seed_test.go 以字面冻结清单交叉核对）。
+//
+// 动作点父级仅指向「确有菜单叶子的资源」：printing:task/scanner:resolve/system:backup
+// 按冻结设计无独立菜单叶子（seed_test.go：printing:task 无独立菜单叶子，菜单叶 =
+// printing:template，§11.2 落位；m3MenuParents 注：scanner:resolve 是能力点非页面、
+// 备份页挂系统管理组），其动作点落为顶级权限点（parent_id NULL，000001 迁移允许）。
+// 若无条件挂 r.Code，空库首启 seedPermissions 必然误判「父级未就绪」中断引导
+// （2026-10-04 本地全新库自举实测复现：printing:task:list 父级缺失）。
 func buildPermissionSeeds() []permissionSeed {
+	menuCodes := make(map[string]bool, len(menuSeeds))
+	for _, m := range menuSeeds {
+		menuCodes[m.Code] = true
+	}
 	seeds := make([]permissionSeed, 0, len(menuSeeds)+len(permResources)*6)
 	for _, m := range menuSeeds {
 		seeds = append(seeds, permissionSeed{Code: m.Code, Name: m.Name, Type: "MENU", Parent: m.Parent, Sort: m.Sort})
@@ -279,11 +290,15 @@ func buildPermissionSeeds() []permissionSeed {
 			if a == "list" || a == "read" {
 				typ = "API" // 查询动作 = 接口级
 			}
+			parent := ""
+			if menuCodes[r.Code] {
+				parent = r.Code // 动作点挂在资源菜单节点下（该资源确有叶子时）
+			}
 			seeds = append(seeds, permissionSeed{
 				Code:   r.Code + ":" + a,
 				Name:   r.Name + permActionNames[a],
 				Type:   typ,
-				Parent: r.Code,
+				Parent: parent,
 				Sort:   i + 1,
 			})
 		}

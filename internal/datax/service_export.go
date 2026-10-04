@@ -195,16 +195,15 @@ func (s *Service) exportTaskItem(ctx context.Context, t *ExportTask, scope *File
 		Module: t.Module, ModuleName: ExportModuleLabel(t.Module), Scope: t.Scope,
 		Status: t.Status, Progress: t.Progress,
 		TotalRows: t.TotalRows, CreatorID: t.CreatedBy,
-		StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
-		CreatedAt:    t.CreatedAt.Time,
-		CreatedAtStr: t.CreatedAt.Format(dateLayout),
+		StartedAt: jsonTimePtr(t.StartedAt), FinishedAt: jsonTimePtr(t.FinishedAt),
+		CreatedAt:    t.CreatedAt,
 		ErrorMessage: t.ErrorMessage,
 	}
 	if t.FileID > 0 && isTerminalExport(t.Status) {
 		if f, ferr := s.loadFileRow(ctx, t.FileID); ferr == nil && s.fileVisible(ctx, f, scope) {
 			item.FileURL = "/api/exports/" + strconv.FormatInt(t.ID.Int64(), 10) + "/file"
 			item.FileName = f.FileName
-			item.FileExpiredAt = f.ExpiresAt
+			item.FileExpiredAt = jsonTimePtr(f.ExpiresAt)
 		}
 	}
 	return item
@@ -230,15 +229,15 @@ func (s *Service) GetTask(ctx context.Context, kind string, id int64, scope *Fil
 			Progress:    deriveProgress(int64(t.SuccessRows+t.FailedRows), int64(t.TotalRows)),
 			TotalRows:   int64(t.TotalRows),
 			SuccessRows: int64(t.SuccessRows), FailedRows: int64(t.FailedRows),
-			CreatorID: t.CreatedBy, StartedAt: t.StartedAt, FinishedAt: t.FinishedAt,
-			CreatedAt: t.CreatedAt.Time, CreatedAtStr: t.CreatedAt.Format(dateLayout),
+			CreatorID: t.CreatedBy, StartedAt: jsonTimePtr(t.StartedAt), FinishedAt: jsonTimePtr(t.FinishedAt),
+			CreatedAt:    t.CreatedAt,
 			ErrorMessage: t.ErrorMessage,
 		}
 		if t.ErrorFileID > 0 {
 			if ef, ferr := s.loadFileRow(ctx, t.ErrorFileID); ferr == nil && s.fileVisible(ctx, ef, scope) {
 				item.FileURL = "/api/imports/" + strconv.FormatInt(id, 10) + "/error-file"
 				item.FileName = ef.FileName
-				item.FileExpiredAt = ef.ExpiresAt
+				item.FileExpiredAt = jsonTimePtr(ef.ExpiresAt)
 			}
 		}
 		return &item, nil

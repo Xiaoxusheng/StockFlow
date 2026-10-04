@@ -241,12 +241,16 @@ func notifyJobFailure(ctx context.Context, db *gorm.DB, jobCode, name, message s
 // inboxItem 收件箱行（前端 NotificationItem 契约，snake_case JSON tag；
 // 前端先行 camelCase（web/src/api/notifications.ts）由前端对齐轮回对——plan §12.4）。
 type inboxItem struct {
-	ID        int64     `json:"id"`
-	Type      string    `json:"type"`
-	Title     string    `json:"title"`
-	Content   string    `json:"content"`
-	Read      bool      `json:"read"`
-	CreatedAt time.Time `json:"created_at"`
+	// ID 用 database.ID（JSON 字符串形态，backend-m1-plan §1 全局约定：业务 ID 一律
+	// 字符串防 JS 2^53 精度丢失；裸 int64 会序列化为 JSON number，违反全仓约定）。
+	// CreatedAt 用 database.JSONTime（api.md §2 YYYY-MM-DD HH:mm:ss；裸 time.Time
+	// 会序列化为 RFC3339）。
+	ID        database.ID       `json:"id"`
+	Type      string            `json:"type"`
+	Title     string            `json:"title"`
+	Content   string            `json:"content"`
+	Read      bool              `json:"read"`
+	CreatedAt database.JSONTime `json:"created_at"`
 }
 
 type inboxFilter struct {

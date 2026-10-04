@@ -691,7 +691,9 @@ type ImportConfirmResult struct {
 	SuccessRows int                     `json:"success_rows"`
 	FailedRows  int                     `json:"failed_rows"`
 	Errors      []ImportValidationError `json:"errors,omitempty"`
-	FinishedAt  *time.Time              `json:"finished_at,omitempty"`
+	// FinishedAt 统一 database.JSONTime（api.md §2；裸 *time.Time 序列化 RFC3339——
+	// 2026-10-04 统一）。nil（未完成）→ 零值序列化 null。
+	FinishedAt database.JSONTime `json:"finished_at,omitempty"`
 }
 
 // Confirm 确认导入（plan §6.2）：
@@ -786,7 +788,7 @@ func (s *Service) Confirm(ctx context.Context, actor Actor, id int64, in Confirm
 		FailedRows:  final.FailedRows,
 	}
 	if final.FinishedAt != nil {
-		res.FinishedAt = final.FinishedAt
+		res.FinishedAt = database.JSONTime{Time: *final.FinishedAt}
 	}
 	if final.FailedRows > 0 {
 		if rows, lerr := s.repo.ListImportRows(ctx, id, []string{RowStatusFailed}, previewRows); lerr == nil {
@@ -799,28 +801,29 @@ func (s *Service) Confirm(ctx context.Context, actor Actor, id int64, in Confirm
 }
 
 // ListTaskItem 任务列表项（excel §4 数据中心任务记录模型；前端 data.ts DataTaskItem
-// 对齐，snake_case 出参——plan §12.4 条 1/2：后端为冻结契约）。
+// 对齐，snake_case 出参——plan §12.4 条 1/2：后端为冻结契约）。时间字段统一
+// database.JSONTime（api.md §2 YYYY-MM-DD HH:mm:ss；裸 *time.Time 序列化 RFC3339、
+// CreatedAtStr 为格式化串——两种形态混用违反统一时间格式，2026-10-04 统一）。
 type ListTaskItem struct {
-	ID            database.ID `json:"id"`
-	TaskNo        string      `json:"task_no"`
-	TaskType      string      `json:"task_type"` // IMPORT / EXPORT
-	Module        string      `json:"module"`
-	ModuleName    string      `json:"module_name"`
-	Scope         string      `json:"scope,omitempty"`
-	Status        string      `json:"status"`
-	Progress      int         `json:"progress,omitempty"`
-	TotalRows     int64       `json:"total_rows,omitempty"`
-	SuccessRows   int64       `json:"success_rows,omitempty"`
-	FailedRows    int64       `json:"failed_rows,omitempty"`
-	CreatorID     int64       `json:"creator_id,omitempty"`
-	FileName      string      `json:"file_name,omitempty"`
-	FileURL       string      `json:"file_url,omitempty"`
-	FileExpiredAt *time.Time  `json:"file_expired_at,omitempty"`
-	StartedAt     *time.Time  `json:"started_at,omitempty"`
-	FinishedAt    *time.Time  `json:"finished_at,omitempty"`
-	CreatedAt     time.Time   `json:"-"`
-	CreatedAtStr  string      `json:"created_at"`
-	ErrorMessage  string      `json:"error_message,omitempty"`
+	ID            database.ID       `json:"id"`
+	TaskNo        string            `json:"task_no"`
+	TaskType      string            `json:"task_type"` // IMPORT / EXPORT
+	Module        string            `json:"module"`
+	ModuleName    string            `json:"module_name"`
+	Scope         string            `json:"scope,omitempty"`
+	Status        string            `json:"status"`
+	Progress      int               `json:"progress,omitempty"`
+	TotalRows     int64             `json:"total_rows,omitempty"`
+	SuccessRows   int64             `json:"success_rows,omitempty"`
+	FailedRows    int64             `json:"failed_rows,omitempty"`
+	CreatorID     int64             `json:"creator_id,omitempty"`
+	FileName      string            `json:"file_name,omitempty"`
+	FileURL       string            `json:"file_url,omitempty"`
+	FileExpiredAt database.JSONTime `json:"file_expired_at,omitempty"`
+	StartedAt     database.JSONTime `json:"started_at,omitempty"`
+	FinishedAt    database.JSONTime `json:"finished_at,omitempty"`
+	CreatedAt     database.JSONTime `json:"created_at"`
+	ErrorMessage  string            `json:"error_message,omitempty"`
 }
 
 // ListImports 导入任务列表（excel §4 数据中心；筛选 status/module=import_type）。
@@ -842,9 +845,8 @@ func (s *Service) ListImports(ctx context.Context, f TaskListFilter, scope *File
 			SuccessRows: int64(t.SuccessRows),
 			FailedRows:  int64(t.FailedRows),
 			CreatorID:   t.CreatedBy,
-			StartedAt:   t.StartedAt, FinishedAt: t.FinishedAt,
-			CreatedAt:    t.CreatedAt.Time,
-			CreatedAtStr: t.CreatedAt.Format(dateLayout),
+			StartedAt:   jsonTimePtr(t.StartedAt), FinishedAt: jsonTimePtr(t.FinishedAt),
+			CreatedAt:    t.CreatedAt,
 			ErrorMessage: t.ErrorMessage,
 		}
 		// 错误明细联动字段按 FileScope 收口（跨仓不可见任务的错误明细链接不下发，
@@ -853,7 +855,7 @@ func (s *Service) ListImports(ctx context.Context, f TaskListFilter, scope *File
 			if ef, ferr := s.loadFileRow(ctx, t.ErrorFileID); ferr == nil && s.fileVisible(ctx, ef, scope) {
 				item.FileURL = "/api/imports/" + strconv.FormatInt(t.ID.Int64(), 10) + "/error-file"
 				item.FileName = ef.FileName
-				item.FileExpiredAt = ef.ExpiresAt
+				item.FileExpiredAt = jsonTimePtr(ef.ExpiresAt)
 			}
 		}
 		items = append(items, item)

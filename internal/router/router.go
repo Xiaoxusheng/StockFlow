@@ -98,7 +98,11 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 	protected := api.Group("")
 	protected.Use(auth.AuthRequired())
 	auth.RegisterProtectedRoutes(protected, db, rdb, auth.WithWarehouseChecker(warehouse.NewChecker(db)))
-	masterdata.RegisterRoutes(protected, db, rdb)
+	// masterdata：往来单位删除引用校验读取器（refreaders.go 窄接口；business-flow
+	// §1.4/§1.5"已产生业务记录不可删"——purchase/sales 各自只读自己的单据表）。
+	masterdata.RegisterRoutes(protected, db, rdb,
+		masterdata.WithSupplierRefReader(purchase.NewSupplierRefReader(db)),
+		masterdata.WithCustomerRefReader(sales.NewCustomerRefReader(db)))
 	warehouse.RegisterRoutes(protected, db, rdb,
 		warehouse.WithBinOccupancy(binOccupancyBridge(inventory.NewBinOccupancy(db))))
 	inventory.RegisterRoutes(protected, db, rdb,
@@ -119,8 +123,9 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 	purchaseSvc := purchase.NewService(purchase.NewRepository(db))
 
 	// 采购入库域：/api/purchases、/api/inbounds、/api/receipts、/api/quality、/api/putaway。
-	// BinRecommender（推荐库位）不注入——plan §3.1 冻结清单未收录该接口，域内缺省
-	// fail-closed（上架必须显式指定目标库位）。
+	// BinRecommender（推荐库位）2026-10-04 起装配（business-flow §5.3 基础规则，
+	// warehouse 实现 + inventory 占用分布桥接，见 m2_bridges.go）——此前缺省 fail-closed，
+	// GET /api/putaway/recommend 恒返回 ErrBinRequired。
 	purchase.RegisterRoutes(protected, db, rdb,
 		purchase.WithStock(purchaseStockGateway{svc: newInvService()}),
 		purchase.WithSupplierChecker(masterdata.NewSupplierChecker(db)),
@@ -128,6 +133,11 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 		purchase.WithSKUAttrReader(purchaseSKUFlagsBridge{r: masterdata.NewSKUFlagReader(db)}),
 		purchase.WithBinChecker(warehouse.NewBinChecker(db)),
 		purchase.WithExceptionCreator(returnsSvc),
+		purchase.WithBinRecommender(warehouseBinRecommenderBridge{r: warehouse.NewBinRecommender(
+			db,
+			binOccupancyBridge(inventory.NewBinOccupancy(db)),
+			inventory.NewBinOccupancy(db), // *BinOccupancy 结构化满足 warehouse.SKUBinReader
+		)}),
 	)
 
 	// 销售出库域：/api/sales、/api/outbounds、/api/allocations、/api/picks、/api/checks、
@@ -151,6 +161,8 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 
 	// 退货域：/api/returns、/api/purchase-returns、/api/exceptions 与
 	// GET /api/inventory/trace（plan §8.3 条 5：returns 实现、inventory 前缀挂载）。
+	// 异常图片挂接校验（business-flow §11.2，2026-10-04 立项）：datax 文件域提供
+	// ImageFileChecker 只读实现（storage.File 属文件域数据面）。
 	returns.RegisterRoutes(protected, db, rdb,
 		returns.WithStock(returnsStockGateway{svc: newInvService()}),
 		returns.WithSKUFlags(returnsSKUFlagsBridge{r: masterdata.NewSKUFlagReader(db)}),
@@ -159,6 +171,7 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 		returns.WithQCCreator(qcCreatorBridge{qc: purchase.NewQCCreator(purchaseSvc)}),
 		returns.WithLedgers(traceReaders{svc: newInvService()}),
 		returns.WithStockState(traceReaders{svc: newInvService()}),
+		returns.WithImageFileChecker(datax.NewImageFileChecker(db)),
 	)
 
 	// ---- M3 五域装配（backend-m3-plan §12.1，桥接实现见 m3_bridges.go）----

@@ -148,7 +148,7 @@ func TestPOStateMachineTransitionMatrix(t *testing.T) {
 			return err
 		}, POStatusPendingApproval},
 		{"草稿取消", POStatusDraft, func(id int64) error {
-			_, err := e.svc.CancelPO(ctx, actor, id)
+			_, err := e.svc.CancelPO(ctx, actor, id, CancelInput{Reason: "测试取消"})
 			return err
 		}, POStatusCancelled},
 		{"待审核通过", POStatusPendingApproval, func(id int64) error {
@@ -160,11 +160,11 @@ func TestPOStateMachineTransitionMatrix(t *testing.T) {
 			return err
 		}, POStatusDraft},
 		{"待审核取消", POStatusPendingApproval, func(id int64) error {
-			_, err := e.svc.CancelPO(ctx, actor, id)
+			_, err := e.svc.CancelPO(ctx, actor, id, CancelInput{Reason: "测试取消"})
 			return err
 		}, POStatusCancelled},
 		{"已审核取消（无收货）", POStatusApproved, func(id int64) error {
-			_, err := e.svc.CancelPO(ctx, actor, id)
+			_, err := e.svc.CancelPO(ctx, actor, id, CancelInput{Reason: "测试取消"})
 			return err
 		}, POStatusCancelled},
 		{"部分到货差额关闭", POStatusPartialReceived, func(id int64) error {
@@ -205,11 +205,11 @@ func TestPOStateMachineTransitionMatrix(t *testing.T) {
 			return err
 		}},
 		{"部分到货不能取消", POStatusPartialReceived, func(id int64) error {
-			_, err := e.svc.CancelPO(ctx, actor, id)
+			_, err := e.svc.CancelPO(ctx, actor, id, CancelInput{Reason: "测试取消"})
 			return err
 		}},
 		{"已完成不能取消", POStatusCompleted, func(id int64) error {
-			_, err := e.svc.CancelPO(ctx, actor, id)
+			_, err := e.svc.CancelPO(ctx, actor, id, CancelInput{Reason: "测试取消"})
 			return err
 		}},
 		{"已完成不能关闭", POStatusCompleted, func(id int64) error {
@@ -240,7 +240,7 @@ func TestPOCancelWithReceiptsRejected(t *testing.T) {
 		Lines:     []ReceiptLineInput{{SKUID: 100, QtyGood: qty(t, "4")}},
 	}, "op-cancel-rc")
 	require.NoError(t, err)
-	_, err = e.svc.CancelPO(ctx, actor, po.ID.Int64())
+	_, err = e.svc.CancelPO(ctx, actor, po.ID.Int64(), CancelInput{Reason: "测试取消"})
 	require.Error(t, err, "有收货的订单禁止取消（§13.3 反向冲正）")
 	got := codeOf(t, err)
 	require.True(t, got == ErrPOStatusNotAllowed.Code || got == ErrPOHasReceipts.Code, "实际: %s", got)

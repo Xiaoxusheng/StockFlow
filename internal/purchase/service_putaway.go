@@ -343,13 +343,14 @@ func (s *Service) ExecutePutawayTask(ctx context.Context, actor Actor, id int64,
 }
 
 // progressInboundAfterTask 全部上架任务完成后推进入库单（plan §6.2：
-// AWAITING_PUTAWAY→COMPLETED 由"全部上架任务完成"触发）。
+// AWAITING_PUTAWAY→COMPLETED 由"全部上架任务完成"触发；PAUSED 属未完成活动态，
+// 一并阻断推进——迁移 000017）。
 func (s *Service) progressInboundAfterTask(ctx context.Context, tx *gorm.DB, actor Actor, inbound *InboundOrder) error {
 	counts, err := s.repo.CountTasksByInbound(ctx, inbound.InboundNo)
 	if err != nil {
 		return err
 	}
-	if counts[TaskStatusPending] > 0 || counts[TaskStatusInProgress] > 0 {
+	if counts[TaskStatusPending] > 0 || counts[TaskStatusInProgress] > 0 || counts[TaskStatusPaused] > 0 {
 		return nil
 	}
 	if inbound.Status != InboundStatusAwaitingPutaway {
@@ -365,6 +366,85 @@ func (s *Service) progressInboundAfterTask(ctx context.Context, tx *gorm.DB, act
 	e := actor.auditEntry("inbound_order", inbound.ID.Int64(), "status")
 	e.Before, e.After = map[string]any{"status": InboundStatusAwaitingPutaway}, map[string]any{"status": InboundStatusCompleted}
 	return middlewareAudit(tx, e)
+}
+
+// PausePutawayTask 暂停任务（IN_PROGRESS→PAUSED；仅领取人/超管，迁移 000017）：
+// 领取人归属不变（claimed_by 保留），恢复后仍由原领取人继续执行（ExecutePutawayTask
+// 的领取人校验口径一致）；数据层 WHERE status='IN_PROGRESS' 为第二道守卫，0 行 =
+// 并发状态变化冲突。
+func (s *Service) PausePutawayTask(ctx context.Context, actor Actor, id int64) (*PutawayTask, error) {
+	t, err := s.repo.FindTaskByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
+	if t.Status != TaskStatusInProgress {
+		return nil, response.NewError(ErrPutawayStatusNotAllowed, map[string]any{
+			"status": t.Status, "reason": "仅上架中任务可暂停",
+		})
+	}
+	if t.ClaimedBy != actor.UserID && !actor.IsSuper {
+		return nil, response.NewError(ErrPutawayNotClaimant, map[string]any{
+			"claimed_by": t.ClaimedBy, "operator_id": actor.UserID,
+		})
+	}
+	err = s.tx(ctx, func(tx *gorm.DB) error {
+		n, err := s.repo.UpdatePutawayTaskStatus(ctx, tx, id, TaskStatusInProgress, TaskStatusPaused, actor.UserID)
+		if err := guardRows(n, err); err != nil {
+			if errors.Is(err, errGuardMiss) {
+				return response.NewError(ErrStatusConflict, map[string]any{"reason": "状态并发变化，请刷新重试"})
+			}
+			return err
+		}
+		e := actor.auditEntry("putaway_task", id, "pause")
+		e.Before = map[string]any{"status": TaskStatusInProgress}
+		e.After = map[string]any{"status": TaskStatusPaused, "claimed_by": t.ClaimedBy}
+		return middlewareAudit(tx, e)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.FindTaskByID(ctx, id)
+}
+
+// ResumePutawayTask 恢复任务（PAUSED→IN_PROGRESS；仅原领取人/超管，迁移 000017）。
+func (s *Service) ResumePutawayTask(ctx context.Context, actor Actor, id int64) (*PutawayTask, error) {
+	t, err := s.repo.FindTaskByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if t == nil {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
+	if t.Status != TaskStatusPaused {
+		return nil, response.NewError(ErrPutawayStatusNotAllowed, map[string]any{
+			"status": t.Status, "reason": "仅已暂停任务可恢复",
+		})
+	}
+	if t.ClaimedBy != actor.UserID && !actor.IsSuper {
+		return nil, response.NewError(ErrPutawayNotClaimant, map[string]any{
+			"claimed_by": t.ClaimedBy, "operator_id": actor.UserID,
+		})
+	}
+	err = s.tx(ctx, func(tx *gorm.DB) error {
+		n, err := s.repo.UpdatePutawayTaskStatus(ctx, tx, id, TaskStatusPaused, TaskStatusInProgress, actor.UserID)
+		if err := guardRows(n, err); err != nil {
+			if errors.Is(err, errGuardMiss) {
+				return response.NewError(ErrStatusConflict, map[string]any{"reason": "状态并发变化，请刷新重试"})
+			}
+			return err
+		}
+		e := actor.auditEntry("putaway_task", id, "resume")
+		e.Before = map[string]any{"status": TaskStatusPaused}
+		e.After = map[string]any{"status": TaskStatusInProgress, "claimed_by": t.ClaimedBy}
+		return middlewareAudit(tx, e)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.FindTaskByID(ctx, id)
 }
 
 // RecommendBins 推荐库位查询（§5.3 基础规则经 BinRecommender；服务未注入 fail-closed）。

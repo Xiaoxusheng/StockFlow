@@ -8,9 +8,19 @@ import (
 
 	"gorm.io/gorm"
 
+	"github.com/stockflow/server/internal/database"
 	"github.com/stockflow/server/internal/response"
 	"github.com/stockflow/server/internal/storage"
 )
+
+// jsonTimePtr *time.Time → database.JSONTime（nil → 零值，JSON 序列化为 null；
+// 非零值格式化为 api.md §2 统一时间形态）。
+func jsonTimePtr(t *time.Time) database.JSONTime {
+	if t == nil {
+		return database.JSONTime{}
+	}
+	return database.JSONTime{Time: *t}
+}
 
 // 文件中心（excel §7、api.md §5；plan §6.4）：
 //   - 上传：multipart（module 必填、business_no 选填）→ storage.Save 全量安全校验
@@ -30,22 +40,22 @@ type FileUploadInput struct {
 }
 
 // FileItem 文件列表项（excel §7 记录字段 + 访问地址；前端 file.ts FileItem 契约回对为
-// snake_case——plan §12.4 条 2，后端为冻结契约）。
+// snake_case——plan §12.4 条 2，后端为冻结契约）。时间字段统一 database.JSONTime
+// （api.md §2 YYYY-MM-DD HH:mm:ss；裸 time.Time 会序列化为 RFC3339——2026-10-04 统一）。
 type FileItem struct {
-	ID           int64      `json:"id"`
-	FileName     string     `json:"file_name"`
-	FileType     string     `json:"file_type"` // 扩展名白名单值（.xlsx 等）
-	MimeType     string     `json:"mime_type"`
-	SizeBytes    int64      `json:"size_bytes"`
-	Module       string     `json:"module"`
-	ModuleName   string     `json:"module_name,omitempty"`
-	BusinessNo   string     `json:"business_no,omitempty"`
-	UploaderID   int64      `json:"uploader_id,omitempty"`
-	UploaderName string     `json:"uploader_name"`
-	DownloadURL  string     `json:"download_url"`
-	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
-	CreatedAt    time.Time  `json:"-"`
-	CreatedAtStr string     `json:"created_at"`
+	ID           int64             `json:"id"`
+	FileName     string            `json:"file_name"`
+	FileType     string            `json:"file_type"` // 扩展名白名单值（.xlsx 等）
+	MimeType     string            `json:"mime_type"`
+	SizeBytes    int64             `json:"size_bytes"`
+	Module       string            `json:"module"`
+	ModuleName   string            `json:"module_name,omitempty"`
+	BusinessNo   string            `json:"business_no,omitempty"`
+	UploaderID   int64             `json:"uploader_id,omitempty"`
+	UploaderName string            `json:"uploader_name"`
+	DownloadURL  string            `json:"download_url"`
+	ExpiresAt    database.JSONTime `json:"expires_at,omitempty"` // NULL=不过期 → 零值序列化 null
+	CreatedAt    database.JSONTime `json:"created_at"`
 }
 
 // FileModulePattern module/business_no 参数字符集（files 列 varchar(64) 防御 +
@@ -120,17 +130,16 @@ func (s *Service) UploadFile(ctx context.Context, actor Actor, in FileUploadInpu
 	return fileItemOf(file), nil
 }
 
-// fileItemOf 登记行 → 列表项。
+// fileItemOf 登记行 → 列表项（时间统一 JSONTime；ExpiresAt 指针 → 零值=null）。
 func fileItemOf(f *storage.File) *FileItem {
 	return &FileItem{
 		ID: f.ID, FileName: f.FileName, FileType: f.FileType,
 		MimeType: f.MimeType, SizeBytes: f.SizeBytes,
 		Module: f.Module, ModuleName: ModuleLabel(f.Module), BusinessNo: f.BusinessNo,
 		UploaderID: f.UploaderID, UploaderName: f.UploaderName,
-		DownloadURL:  "/api/files/" + strconv.FormatInt(f.ID, 10) + "/download",
-		ExpiresAt:    f.ExpiresAt,
-		CreatedAt:    f.CreatedAt,
-		CreatedAtStr: f.CreatedAt.Format(dateLayout),
+		DownloadURL: "/api/files/" + strconv.FormatInt(f.ID, 10) + "/download",
+		ExpiresAt:   jsonTimePtr(f.ExpiresAt),
+		CreatedAt:   database.JSONTime{Time: f.CreatedAt},
 	}
 }
 

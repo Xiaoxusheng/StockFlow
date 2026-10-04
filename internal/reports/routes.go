@@ -24,8 +24,15 @@ type ServiceOption = Option
 //	GET /api/reports/inventory-turnover          reports:report:read   库存周转
 //	GET /api/reports/stagnant-stock              reports:report:read   积压识别
 //	GET /api/reports/replenishment-suggestions   reports:report:read   智能补货建议
-//	GET /api/inventory/summary                   reports:report:read   Dashboard 库存总览
-//	GET /api/inventory/alerts                    reports:report:read   Dashboard 库存预警
+//	GET /api/inventory/summary                   inventory:inventory:list   Dashboard/库存页汇总条
+//	GET /api/inventory/alerts                    inventory:inventory:list   Dashboard/库存页预警条
+//
+// /api/inventory/summary|alerts 挂载口径（2026-10-04 裁决）：inventory 前缀端点的消费方
+// 是库存域页面与 Dashboard（web/src/api/inventory.ts stockSummary/alerts、Pad 库存页、
+// DashboardLists），页面入口权限为 inventory:inventory:list——沿用 reports:report:read
+// 会造成"仅持报表列表权限的角色汇总条恒 403"的域间错配，故挂 inventory 域列表读权限
+// （与 /api/inventory/trace 挂 returns:trace:list 的"数据域读权限承载 reports 实现"
+// 先例同口径）。
 //
 // fail-fast：db 为 nil 即 panic（杜绝带病启动，plan §3.1 规则①）。
 func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ...ServiceOption) {
@@ -43,7 +50,8 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.GET("/reports/stagnant-stock", RequirePerm(PermReportRead), h.stagnantStock)
 	rg.GET("/reports/replenishment-suggestions", RequirePerm(PermReportRead), h.replenishment)
 
-	// Dashboard 聚合（reports 实现、inventory 前缀挂载——plan §9.1，GET /api/inventory/trace 先例）。
-	rg.GET("/inventory/summary", RequirePerm(PermReportRead), h.dashboardSummary)
-	rg.GET("/inventory/alerts", RequirePerm(PermReportRead), h.dashboardAlerts)
+	// Dashboard/库存页聚合（reports 实现、inventory 前缀挂载——plan §9.1，GET
+	// /api/inventory/trace 先例；权限挂 inventory:inventory:list，口径见文件头注）。
+	rg.GET("/inventory/summary", RequirePerm(auth.PermInventoryList), h.dashboardSummary)
+	rg.GET("/inventory/alerts", RequirePerm(auth.PermInventoryList), h.dashboardAlerts)
 }

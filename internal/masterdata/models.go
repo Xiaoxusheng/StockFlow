@@ -28,7 +28,7 @@ const CodeTypeDefault = "CODE128"
 
 // ProductCategory 商品分类（树形，business-flow §1.1；组织级下拉数据源）。
 type ProductCategory struct {
-	database.BaseModel
+	database.BaseCols
 	ParentID *database.ID `json:"parent_id"`
 	Code     string       `json:"code"`
 	Name     string       `json:"name"`
@@ -41,7 +41,7 @@ func (ProductCategory) TableName() string { return "product_categories" }
 
 // Unit 计量单位（business-flow §1.1）。
 type Unit struct {
-	database.BaseModel
+	database.BaseCols
 	Code   string `json:"code"`
 	Name   string `json:"name"`
 	Status string `json:"status"`
@@ -102,7 +102,7 @@ func (SKU) TableName() string { return "skus" }
 // 无 deleted_at：条码是 SKU 的从属属性且全局唯一，SKU 软删后条码仍占用命名空间，
 // 保证扫码追溯（scan_logs/流水按条码定位）永不出现一码两 SKU。
 type Barcode struct {
-	database.BaseModel
+	database.BaseCols
 	SKUID     database.ID `gorm:"column:sku_id" json:"sku_id"`
 	Barcode   string      `json:"barcode"`
 	CodeType  string      `json:"code_type"`

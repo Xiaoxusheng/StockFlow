@@ -196,11 +196,9 @@ func (s *Service) UpdateUser(ctx context.Context, actor Actor, id int64, in User
 		if !validDataScope(*in.DataScope) {
 			return nil, response.NewError(response.CodeInvalidParam, map[string]any{"field": "data_scope", "reason": "非法范围"})
 		}
-		if *in.DataScope == DataScopeSpecifiedWh && in.WarehouseIDs != nil && len(in.WarehouseIDs) == 0 {
-			return nil, response.NewError(response.CodeInvalidParam, map[string]any{
-				"field": "warehouse_ids", "reason": "数据范围为指定仓库时必须绑定至少一个仓库",
-			})
-		}
+		// SPECIFIED_WAREHOUSE 的"至少绑定一仓"守卫按本次变更后的生效值判定（下方
+		// S1 块）：未传 warehouse_ids 仅改 data_scope 时按现有绑定集判定，与创建
+		// （CreateUser）口径对称——杜绝"指定仓库 + 空仓库集"静默落库。
 	}
 	if in.DepartmentID != nil && *in.DepartmentID > 0 {
 		dept, err := s.repo.FindDeptByID(ctx, *in.DepartmentID)
@@ -248,6 +246,14 @@ func (s *Service) UpdateUser(ctx context.Context, actor Actor, id int64, in User
 			if err != nil {
 				return nil, err
 			}
+		}
+		// SPECIFIED_WAREHOUSE 守卫（生效值口径，与 CreateUser 对齐）：指定仓库范围
+		// 必须绑定至少一个仓库——未传 warehouse_ids 仅改 data_scope 时按现有绑定集
+		// 判定，传入空集清空绑定同样拒绝。
+		if scope == DataScopeSpecifiedWh && len(whIDs) == 0 {
+			return nil, response.NewError(response.CodeInvalidParam, map[string]any{
+				"field": "warehouse_ids", "reason": "数据范围为指定仓库时必须绑定至少一个仓库",
+			})
 		}
 		if in.DataScope != nil {
 			if err := s.assertGrantableScope(actor, scope, deptID, whIDs); err != nil {
@@ -502,10 +508,23 @@ func (s *Service) GetUsers(ctx context.Context, actor Actor, f UserListFilter) (
 	if err != nil {
 		return nil, 0, err
 	}
+	// role_ids 批量装配（architecture.md §7 一页一查；changelog 遗留③销项——用户列表
+	// 「角色」列此前恒空：UserView.RoleIDs 仅详情装配，列表未填）。
+	uids := make([]int64, 0, len(users))
+	for _, u := range users {
+		uids = append(uids, u.ID.Int64())
+	}
+	rolesByUser, err := s.repo.ListRoleIDsByUsers(ctx, uids)
+	if err != nil {
+		return nil, 0, err
+	}
 	out := make([]*UserView, 0, len(users))
 	for _, u := range users {
 		v := viewUser(u)
 		v.LastLoginIP = "" // S9：列表不泄露他人登录 IP（详情对 auth:user:read 保留）
+		for _, rid := range rolesByUser[u.ID.Int64()] {
+			v.RoleIDs = append(v.RoleIDs, database.ID(rid))
+		}
 		out = append(out, v)
 	}
 	return out, total, nil

@@ -117,6 +117,11 @@ type ProductCreateInput struct {
 }
 
 // ProductUpdateInput 更新商品入参（编码/状态不可经本接口修改；指针三态：nil 不修改）。
+// 分类/单位 ID 三态语义（对齐 service_category.go CategoryUpdateInput.ParentID 的 0 哨兵
+// 先例，前端 allowClear 显式清空不再与缺省同义）：
+//   - nil（缺省）不修改；
+//   - 0 显式清空（置 NULL）；
+//   - >0 换绑（存在 + 启用校验）；负数非法。
 type ProductUpdateInput struct {
 	Name        *string  `json:"name"`
 	ShortName   *string  `json:"short_name"`
@@ -318,13 +323,23 @@ func (s *Service) UpdateProduct(ctx context.Context, actor Actor, id int64, in P
 			return nil, err
 		}
 	}
-	// 引用校验（换分类/单位：存在 + 启用）。
+	// 引用校验（换分类/单位：存在 + 启用；0=显式清空跳过引用校验，负数非法）。
 	refs := ProductCreateInput{}
-	if in.CategoryID != nil {
-		refs.CategoryID = in.CategoryID
-	}
-	if in.UnitID != nil {
-		refs.UnitID = in.UnitID
+	for field, v := range map[string]*int64{"category_id": in.CategoryID, "unit_id": in.UnitID} {
+		if v == nil {
+			continue
+		}
+		if *v < 0 {
+			return nil, invalidParam(field, "必须为正整数或 0（显式清空）")
+		}
+		if *v == 0 {
+			continue
+		}
+		if field == "category_id" {
+			refs.CategoryID = v
+		} else {
+			refs.UnitID = v
+		}
 	}
 	if err := s.validateProductRefs(ctx, refs); err != nil {
 		return nil, err
@@ -360,9 +375,15 @@ func (s *Service) UpdateProduct(ctx context.Context, actor Actor, id int64, in P
 		cols["short_name"] = p.ShortName
 	}
 	if in.CategoryID != nil {
-		cid := database.ID(*in.CategoryID)
-		p.CategoryID = &cid
-		cols["category_id"] = p.CategoryID
+		// 三态：0=显式清空（置 NULL）/ >0=换绑（nil 缺省不修改，见 ProductUpdateInput 注）。
+		if *in.CategoryID > 0 {
+			cid := database.ID(*in.CategoryID)
+			p.CategoryID = &cid
+			cols["category_id"] = p.CategoryID
+		} else {
+			p.CategoryID = nil
+			cols["category_id"] = nil
+		}
 	}
 	if in.Brand != nil {
 		p.Brand = *in.Brand
@@ -377,9 +398,15 @@ func (s *Service) UpdateProduct(ctx context.Context, actor Actor, id int64, in P
 		cols["spec"] = p.Spec
 	}
 	if in.UnitID != nil {
-		uid := database.ID(*in.UnitID)
-		p.UnitID = &uid
-		cols["unit_id"] = p.UnitID
+		// 三态：0=显式清空（置 NULL）/ >0=换绑（nil 缺省不修改，见 ProductUpdateInput 注）。
+		if *in.UnitID > 0 {
+			uid := database.ID(*in.UnitID)
+			p.UnitID = &uid
+			cols["unit_id"] = p.UnitID
+		} else {
+			p.UnitID = nil
+			cols["unit_id"] = nil
+		}
 	}
 	if in.Weight != nil {
 		p.Weight = *in.Weight

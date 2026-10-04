@@ -290,7 +290,7 @@ func handleSessionList(c *gin.Context) {
 // @Summary DELETE /api/auth/sessions/:id（auth:session:kick；强制审计）
 // @Tags 认证与用户
 // @Produce json
-// @Param id path int true "路径参数 id"
+// @Param id path string true "会话 SID（Redis 会话键 sid，字符串形态；非数字 ID）"
 // @Success 200 {object} response.Envelope "统一响应信封"
 // @Failure 400 {object} response.Envelope "请求参数错误"
 // @Router /api/auth/sessions/{id} [delete]

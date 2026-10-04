@@ -40,6 +40,8 @@ var (
 	// —— 供应商 / 客户 ——
 	ErrSupplierNotFound   = response.Register("MASTERDATA_SUPPLIER_NOT_FOUND", "供应商不存在", http.StatusNotFound)
 	ErrSupplierCodeExists = response.Register("MASTERDATA_SUPPLIER_CODE_EXISTS", "供应商编码已存在", http.StatusConflict)
+	ErrSupplierInUse      = response.Register("MASTERDATA_SUPPLIER_IN_USE", "供应商已产生采购业务记录，不能删除；请使用停用", http.StatusConflict)
 	ErrCustomerNotFound   = response.Register("MASTERDATA_CUSTOMER_NOT_FOUND", "客户不存在", http.StatusNotFound)
 	ErrCustomerCodeExists = response.Register("MASTERDATA_CUSTOMER_CODE_EXISTS", "客户编码已存在", http.StatusConflict)
+	ErrCustomerInUse      = response.Register("MASTERDATA_CUSTOMER_IN_USE", "客户已产生销售业务记录，不能删除；请使用停用", http.StatusConflict)
 )

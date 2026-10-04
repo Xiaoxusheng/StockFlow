@@ -233,6 +233,7 @@ func handlePOApprove(c *gin.Context, svc *Service) {
 // @Tags 采购入库
 // @Accept json
 // @Produce json
+// @Param body body CancelInput false "请求体（reason 可选，落取消审批记录与审计）"
 // @Param id path int true "路径参数 id"
 // @Success 200 {object} response.Envelope "统一响应信封"
 // @Failure 400 {object} response.Envelope "请求参数错误"
@@ -242,7 +243,9 @@ func handlePOCancel(c *gin.Context, svc *Service) {
 	if !ok {
 		return
 	}
-	v, err := svc.CancelPO(c.Request.Context(), actorOf(c), id)
+	var req CancelInput
+	_ = c.ShouldBindJSON(&req) // 取消原因可选（空体允许，对齐 sales 域 cancel 先例）
+	v, err := svc.CancelPO(c.Request.Context(), actorOf(c), id, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -377,6 +380,7 @@ func handleInboundUpdate(c *gin.Context, svc *Service) {
 // @Tags 采购入库
 // @Accept json
 // @Produce json
+// @Param body body CancelInput false "请求体（reason 可选，落审计快照）"
 // @Param id path int true "路径参数 id"
 // @Success 200 {object} response.Envelope "统一响应信封"
 // @Failure 400 {object} response.Envelope "请求参数错误"
@@ -386,7 +390,9 @@ func handleInboundCancel(c *gin.Context, svc *Service) {
 	if !ok {
 		return
 	}
-	v, err := svc.CancelInbound(c.Request.Context(), actorOf(c), id)
+	var req CancelInput
+	_ = c.ShouldBindJSON(&req) // 取消原因可选（空体允许，对齐 sales 域 cancel 先例）
+	v, err := svc.CancelInbound(c.Request.Context(), actorOf(c), id, req)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -502,6 +508,64 @@ func handleReceiptConfirm(c *gin.Context, svc *Service) {
 }
 
 // ---- 质检（purchase:quality:*）----
+
+// @Summary GET /api/quality/trace（质量追溯：检验→处置记录链，quality_items 行粒度）
+// @Tags 采购入库
+// @Produce json
+// @Param sku_code query string false "SKU 编码（等值）"
+// @Param batch_no query string false "批次号（等值）"
+// @Param biz_no query string false "来源单据号（等值）"
+// @Param serial_no query string false "不支持（质检链未记录序列号，传值返回 400）"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/quality/trace [get]
+func handleQCTrace(c *gin.Context, svc *Service) {
+	page, pageSize, ok := pageOf(c)
+	if !ok {
+		return
+	}
+	items, total, err := svc.QualityTrace(c.Request.Context(), QualityTraceFilter{
+		SKUCode:  strings.TrimSpace(c.Query("sku_code")),
+		BatchNo:  strings.TrimSpace(c.Query("batch_no")),
+		BizNo:    strings.TrimSpace(c.Query("biz_no")),
+		SerialNo: strings.TrimSpace(c.Query("serial_no")),
+		Scope:    scopeOf(c),
+		Page:     page, PageSize: pageSize,
+	})
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OKPage(c, items, page, pageSize, total)
+}
+
+// @Summary GET /api/quality/nonconforming（不合格品记录列表）
+// @Tags 采购入库
+// @Produce json
+// @Param keyword query string false "QC 单号/SKU 编码模糊"
+// @Param disposition query string false "处置六值英文键（return_supplier/scrap/rework/downgrade/to_defective_warehouse/special_release）"
+// @Param destination query string false "不支持（质检单未记录去向，传值返回 400）"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/quality/nonconforming [get]
+func handleQCNonconforming(c *gin.Context, svc *Service) {
+	page, pageSize, ok := pageOf(c)
+	if !ok {
+		return
+	}
+	items, total, err := svc.Nonconforming(c.Request.Context(), NonconformingFilter{
+		Keyword:     strings.TrimSpace(c.Query("keyword")),
+		Disposition: strings.TrimSpace(c.Query("disposition")),
+		Destination: strings.TrimSpace(c.Query("destination")),
+		Scope:       scopeOf(c),
+		Page:        page, PageSize: pageSize,
+	})
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OKPage(c, items, page, pageSize, total)
+}
 
 // @Summary GET /api/quality
 // @Tags 采购入库
@@ -733,6 +797,46 @@ func handleTaskClaim(c *gin.Context, svc *Service) {
 		return
 	}
 	v, err := svc.ClaimPutawayTask(c.Request.Context(), actorOf(c), id)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, v)
+}
+
+// @Summary POST /api/putaway/:id/pause（暂停任务，IN_PROGRESS→PAUSED；仅领取人/超管）
+// @Tags 采购入库
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/putaway/{id}/pause [post]
+func handleTaskPause(c *gin.Context, svc *Service) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	v, err := svc.PausePutawayTask(c.Request.Context(), actorOf(c), id)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, v)
+}
+
+// @Summary POST /api/putaway/:id/resume（恢复任务，PAUSED→IN_PROGRESS；仅原领取人/超管）
+// @Tags 采购入库
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/putaway/{id}/resume [post]
+func handleTaskResume(c *gin.Context, svc *Service) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	v, err := svc.ResumePutawayTask(c.Request.Context(), actorOf(c), id)
 	if err != nil {
 		response.Err(c, err)
 		return

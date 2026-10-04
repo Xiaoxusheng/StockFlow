@@ -54,6 +54,12 @@ type POCloseInput struct {
 	Reason string `json:"reason"`
 }
 
+// CancelInput 取消入参（原因可选：落取消审批记录 opinion 与审计快照——对齐 sales 域
+// CancelInput 先例，消除"取消原因被静默丢弃"；2026-10-04 补齐）。
+type CancelInput struct {
+	Reason string `json:"reason"`
+}
+
 // buildPOItems 校验并构造订单明细（行号从 1 连续编号、SKU 不重复、数量>0、单价≥0、
 // 金额服务端计算——api.md §4；同 SKU 多行合并为单行以支撑收货按 SKU 精确匹配）。
 func (s *Service) buildPOItems(ctx context.Context, in []POItemInput, by int64) ([]*PurchaseOrderItem, stock.Qty, error) {
@@ -331,7 +337,8 @@ func (s *Service) ApprovePO(ctx context.Context, actor Actor, id int64, in POApp
 // 事务外校验仅作快速失败；事务内持 po 行锁重读复查 qty_received（修复轮：与
 // ConfirmReceipt 并发时，重读在锁内看到对方已提交的收货即拒绝——收货侧则在
 // confirmReceiptTx 锁内校验状态，两方向均不产生"已取消单据继续进库存"）。
-func (s *Service) CancelPO(ctx context.Context, actor Actor, id int64) (*PurchaseOrder, error) {
+// 取消原因 in.Reason 可选：落取消审批记录 opinion 与审计快照（不再静默丢弃）。
+func (s *Service) CancelPO(ctx context.Context, actor Actor, id int64, in CancelInput) (*PurchaseOrder, error) {
 	po, err := s.repo.FindPOByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -380,12 +387,12 @@ func (s *Service) CancelPO(ctx context.Context, actor Actor, id int64) (*Purchas
 		if err := guardRows(n, err); err != nil {
 			return response.NewError(ErrStatusConflict, map[string]any{"reason": "状态并发变化，请刷新重试"})
 		}
-		if err := s.insertApproval(ctx, tx, "purchase_order", po.PONo, ApprovalActionCancel, "CANCELLED", "", actor); err != nil {
+		if err := s.insertApproval(ctx, tx, "purchase_order", po.PONo, ApprovalActionCancel, "CANCELLED", strings.TrimSpace(in.Reason), actor); err != nil {
 			return err
 		}
 		e := actor.auditEntry("purchase_order", id, "cancel")
 		e.Before = map[string]any{"status": po.Status}
-		e.After = map[string]any{"status": POStatusCancelled}
+		e.After = map[string]any{"status": POStatusCancelled, "reason": strings.TrimSpace(in.Reason)}
 		return middlewareAudit(tx, e)
 	})
 	if err != nil {

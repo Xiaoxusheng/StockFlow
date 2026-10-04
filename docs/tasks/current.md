@@ -4,7 +4,7 @@
 
 ## 当前任务
 
-**后端主线（M1–M3）全量交付完毕，当前处于清偿/收尾阶段（2026-10-04）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余阶段 16（现场验收）与 20–22。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
+**后端主线（M1–M3）全量交付完毕，后端收尾轮已完成（2026-10-04：遗留债务清偿 + 000015/000016 迁移修复 + 阶段 20 CI 关卡 + swag 汇总 + 服务器部署升级与真库回归）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余量均为**待环境项**：阶段 16 真机验收（PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收场景 9）与阶段 21 性能优化（索引/缓存/慢查询治理）待环境后启动；阶段 22 生产部署的环境配置/发布流程已随本轮推进（里程碑 M4 的 7 验收场景走通待现场）；CI 的 go test -race 关卡待 push 后首次 Actions 运行验证（main 领先 origin/main 9 提交未推送）。汇总见 docs/changelog.md 同日「后端收尾轮」条目与下文同日节。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
 
 ### 历史任务：前端基础平台（2026-10-02，已交付）
 
@@ -178,4 +178,21 @@
 
 - `.github/workflows/ci.yml` 落盘：push 与 pull_request 触发，ubuntu-latest 三个并行 job——**lint**（gofmt -l cmd internal 有输出即失败（Makefile fmt-check 同款）+ go vet ./... + go vet -tags integration ./...）、**test**（go test -count=1 ./... 与 go test -race -count=1 ./...，补齐上表"本机无 gcc 未跑 race"的遗留复验项）、**guards**（make 七守卫目标，命令单一来源在 Makefile、与清偿轮 F3 接线一致，workflow 不复刻防漂移）；Go 版本读 go.mod（setup-go go-version-file），模块缓存 setup-go cache: true。详见 changelog 同日条目。
 - 本机已验：actionlint v1.7.12 过、js-yaml 结构断言全过、gofmt -l cmd internal 空、vet±integration 全过、go test -count=1 ./... 24 包全 ok、六项失败型守卫零命中（guard-status 按设计仅报告，7 行既有人工复核清单）。go test -race 本机不可跑（无 gcc、CGO_ENABLED=0），由 ubuntu-latest 自带 gcc 承载——**待 push 后首次 Actions 运行验证**。
-- 阶段 20 CI 关卡本项交付完毕；阶段 20–22 余量（生产编排完善、性能优化）待后续。
+- 阶段 20 CI 关卡本项交付完毕；阶段 20–22 余量：**阶段 21 性能优化与阶段 16 真机验收为待环境项**（需性能压测/真机环境后启动），阶段 22 生产部署已随 2026-10-04 服务器部署升级与真库回归推进（验收演示待现场）——汇总见 docs/changelog.md 同日「后端收尾轮」条目与下文同日节。
+
+## 2026-10-04 后端：收尾轮汇总（清偿 + 迁移修复 + CI + swag + 服务器真库回归）
+
+| 事项 | 结果 | 状态 |
+|---|---|---|
+| 遗留债务清偿（F3–F21） | guard-inventory 守卫（含 _test 豁免修正）、department_id fail-fast、seed 残留幂等、BindErrorDetails 52 处收敛、panic 日志截断、release 密钥测试、数据权限集成测试落盘 + 复核修正轮 5 项 | ✅（F7 集成测试需 SF_TEST_PG_*，本机未执行——诚实标注） |
+| 000015 迁移 | ledger zone_id/shelf_id 收紧 NOT NULL + 主单据表 created_by 索引；真库回归移除非法索引后终态 8 索引 up/down 成对（撰写时 grep 核实） | ✅ |
+| 000016 迁移 | purchase 域 9 表补 deleted_at（真库回归暴露 42703）；down 1 / up 双向真库验证通过 | ✅ |
+| 部署物升级 | Dockerfile 预建 /app/data（app 属主）、compose filesdata 卷、SF_DEVICES_JWT_SECRET 三处接入 | ✅ |
+| 真库回归 | 服务器部署升级后回归首次暴露 000013/000015/MigrateUp/000016 四缺陷并全部修复 | ✅ |
+| CI 流水线（阶段 20） | .github/workflows/ci.yml 三 job 与 make ci 同源；本机 actionlint/结构断言/vet±integration/go test/守卫全过 | ✅ 交付；-race 关卡待 push 首跑验证 |
+| swag 汇总 | 269 操作注解 + Makefile swag 目标 + apidocs/（撰写时核实 swagger.json summary 计数 269） | ✅ |
+| 撰写时门禁复验 | go build / go vet / go vet -tags integration / go test -count=1 ./...（22 含测试包全 ok） | ✅ 本会话实测 |
+
+**待环境项（后续启动，非本轮可完成）**：**阶段 16 真机验收**——PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收（requirements.md 验收场景 9）；**阶段 21 性能优化**——索引、缓存、慢查询治理（architecture.md §7）。两者均需真机/压测环境到位后启动。挂账与未完成：CI Actions 首跑验证待 push（main 领先 origin/main 9 提交）；集成测试契约缺口与隔离改造待立项（SF_TEST_REDIS 密码、auth 相对路径迁移目录、并发扣减断言矛盾、单据域夹具隔离，见 changelog 同日条目）；阶段 22 生产部署的环境配置/发布流程已推进，7 验收场景走通（M4）待现场。
+
+细节与证据见 docs/changelog.md 同日「后端收尾轮」条目。

@@ -14,10 +14,13 @@ API 按业务领域划分：
 /api/users         用户
 /api/roles         角色
 /api/permissions   权限
+/api/departments   部门（CRUD + 启停，/api/departments/{id}/status；已注册并被部门页消费）
 
 —— 基础资料 ——
-/api/products      商品
-/api/skus          SKU
+/api/products             商品
+/api/skus                 SKU
+/api/product-categories   商品分类（CRUD + 启停；无删除，停用即生命周期终点）
+/api/units                计量单位（CRUD + 启停；无删除，停用即生命周期终点）
 
 —— 仓库空间 ——
 /api/warehouses    仓库
@@ -46,6 +49,11 @@ API 按业务领域划分：
 
 —— 库存 ——
 /api/inventory           实时库存
+/api/inventory/summary        库存汇总七计数（reports 实现、inventory 前缀挂载；
+                              权限挂 inventory:inventory:list——消费方为库存页汇总条
+                              与 Dashboard，2026-10-04 裁决，reports:report:read 易致
+                              仅持报表列表权限的角色恒 403）
+/api/inventory/alerts         库存预警（reports 实现、inventory 前缀挂载；权限口径同上）
 /api/inventory-ledgers   库存流水
 /api/batches             批次
 /api/serials             序列号
@@ -68,9 +76,13 @@ API 按业务领域划分：
 /api/reports       报表
 
 —— 数据中心 ——
-/api/imports       导入
-/api/exports       导出
-/api/prints        打印
+/api/imports            导入（含 /api/imports/templates/{type} 模板下载、
+                        /api/imports/{id}/error-file 错误明细）
+/api/exports            导出
+/api/files              文件中心（上传/下载/预览/列表/删除；异常图片等附件挂接的数据源）
+/api/data-tasks         数据任务详情/任务卡刷新（GET /api/data-tasks/{kind}/{id}，
+                        kind=IMPORT/EXPORT）
+/api/prints             打印
 
 —— 扫码 ——
 /api/scanner       扫码解析 /api/scanner/resolve、扫码设备管理、扫码日志
@@ -237,3 +249,70 @@ release:{exception_no}:{lock_id}                             异常解冻
 ```
 
 `/ready` 检查依赖：服务、数据库、缓存、文件系统。供负载均衡与部署探针使用（见 deployment.md §3）。
+
+---
+
+## 9. 契约变更与补齐记录
+
+### 2026-10-04 后端补齐轮（前端先行契约立项 + 一致性修复）
+
+新增端点（均已注册并挂权限点，swag 注解同步）：
+
+```text
+POST /api/putaway/{id}/pause     上架任务暂停（IN_PROGRESS→PAUSED，仅领取人/超管；
+                                 权限 purchase:putaway:execute——作业执行构成动作，
+                                 不发明 plan §9.1 清单外动作词；状态值域经迁移
+                                 000017 扩充 PAUSED，PAUSED 视为活动态参与入库单
+                                 推进/关闭守卫）
+POST /api/putaway/{id}/resume    上架任务恢复（PAUSED→IN_PROGRESS，权限同上）
+GET  /api/quality/trace          质量追溯（检验→处置记录链，quality_items 行粒度；
+                                 权限 purchase:quality:list；筛选 sku_code/batch_no/
+                                 biz_no 等值 + 分页。serial_no 传值显式 400——
+                                 质检链未记录序列号）
+GET  /api/quality/nonconforming  不合格品记录（已完成质检且行不良>0；筛选 keyword/
+                                 disposition 六值英文键。destination 传值显式 400——
+                                 质检单未记录处置去向）
+POST /api/exceptions/{id}/images 异常图片挂接（business-flow §11.2；两段式：先
+                                 POST /api/files 上传取得文件 ID，再提交
+                                 {file_ids:[...]}——服务端校验存在/未过期/image/*，
+                                 追加 image_refs（去重、累计 ≤20）+ 处理记录 + 审计
+                                 同事务；OPEN..PENDING_REVIEW 可挂接，RESOLVED/CLOSED
+                                 拒绝；权限 returns:exception:execute）
+```
+
+行为变更：
+
+```text
+POST /api/purchases/{id}/cancel、POST /api/inbounds/{id}/cancel
+     请求体新增可选 {reason}（空体兼容）——取消原因落取消审批记录 opinion 与审计
+     快照，不再静默丢弃（对齐 /api/sales/{id}/cancel 的 CancelInput 先例）。
+PUT  /api/products/{id}
+     category_id / unit_id 三态语义：缺省（null）不修改 / 0 显式清空 / >0 换绑
+     （对齐 /api/product-categories/{id} 的 parent_id 0 哨兵先例；前端 allowClear
+     显式清空不再失效）。
+DELETE /api/suppliers/{id}、DELETE /api/customers/{id}
+     补"已产生业务记录不可删"引用校验（business-flow §1.4/§1.5）：供应商存在任何
+     采购单、客户存在任何销售单（含已取消，软删单除外）即 409 拒绝，应使用停用。
+GET  /api/users
+     列表项补 role_ids（批量装配）——用户列表「角色」列不再恒空。
+PUT  /api/users/{id}
+     data_scope=SPECIFIED_WAREHOUSE 的"至少绑定一仓"守卫改为按变更后生效值判定
+     （与创建口径对称）：未传 warehouse_ids 仅改 data_scope 而现有绑定集为空、或
+     传入空集清空绑定，均 400 拒绝。
+```
+
+字段与形态统一：
+
+```text
+数据中心（/api/imports、/api/exports、/api/files、/api/data-tasks）响应时间字段
+     统一为 api.md §2 的 YYYY-MM-DD HH:mm:ss 文本（JSONTime）：file_expired_at /
+     started_at / finished_at / expires_at / created_at 此前 RFC3339 与格式化串
+     混用，已全部收敛；空值序列化为 null。
+/api/notifications 个人收件箱行 id 统一字符串形态（database.ID；此前裸 int64 为
+     JSON number，违反全仓"业务 ID 字符串"约定）。
+/api/inventory 导出模块（POST /api/exports，module=INVENTORY）筛选键补齐
+     zone_id / shelf_id / batch_id（与实时库存页导出按钮 scopeParams 一致，消除
+     "所见非所得"；此前按"未知键忽略"静默丢弃）。
+DELETE /api/auth/sessions/{id} 的 {id} 为会话 SID（字符串形态），swagger 注解已
+     由 int 修正为 string（仅文档修正，行为不变）。
+```

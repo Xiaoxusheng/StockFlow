@@ -177,7 +177,19 @@ type options struct {
 	ledgers        LedgerReader
 	stockState     StockStateReader
 	skuFlags       SKUFlagReader
+	imageFiles     ImageFileChecker
 }
+
+// ImageFileChecker 跨域消费接口：文件中心图片有效性校验（异常图片挂接
+// business-flow §11.2；实现由 datax 文件域提供——storage.File 属文件域数据面，
+// 本域不可直读，router 注入。未注入时挂接 fail-closed 拒绝）。
+type ImageFileChecker interface {
+	// IsImageFile 文件存在（未软删/未过期）且 MIME 为 image/*；未命中返回 false, nil。
+	IsImageFile(ctx context.Context, fileID int64) (bool, error)
+}
+
+// WithImageFileChecker 注入文件中心图片校验（router 装配：datax.NewImageFileChecker）。
+func WithImageFileChecker(r ImageFileChecker) Option { return func(o *options) { o.imageFiles = r } }
 
 // Option RegisterRoutes 的可选注入项。
 type Option func(*options)

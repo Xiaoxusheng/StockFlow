@@ -328,8 +328,9 @@ func (s *Service) UpdateSupplierStatus(ctx context.Context, actor Actor, id int6
 }
 
 // DeleteSupplier 软删除供应商。
-// business-flow §1.4"已产生业务记录不可删"的引用校验依赖 M2 采购单据表（本域
-// 禁止跨域直查，backend-m1-plan §4.2 判据 9）；M1 由审计链追溯，见文件头注释。
+// business-flow §1.4"已产生业务记录不可删，应使用停用"：删除前经 SupplierRefReader
+// 窄接口（purchase 域实现、router 注入）校验采购单引用——含已取消单（仍属历史业务
+// 证据）。未注入时跳过校验（fail-open 口径见 refreaders.go 文件注；router 恒注入）。
 func (s *Service) DeleteSupplier(ctx context.Context, actor Actor, id int64) error {
 	sup, err := s.repo.FindSupplierByID(ctx, id)
 	if err != nil {
@@ -337,6 +338,15 @@ func (s *Service) DeleteSupplier(ctx context.Context, actor Actor, id int64) err
 	}
 	if sup == nil {
 		return response.NewError(ErrSupplierNotFound, map[string]any{"id": id})
+	}
+	if s.supplierRefs != nil {
+		has, err := s.supplierRefs.HasBusinessRecord(ctx, id)
+		if err != nil {
+			return err
+		}
+		if has {
+			return response.NewError(ErrSupplierInUse, map[string]any{"id": id})
+		}
 	}
 	return database.Tx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		if err := s.repo.SoftDeleteSupplier(ctx, tx, id, actor.UserID); err != nil {
@@ -537,7 +547,9 @@ func (s *Service) UpdateCustomerStatus(ctx context.Context, actor Actor, id int6
 	return nil
 }
 
-// DeleteCustomer 软删除客户（销售单据引用校验随 M2，理由同 DeleteSupplier）。
+// DeleteCustomer 软删除客户（销售单据引用校验：business-flow §1.5 客户"历史订单"
+// 能力 + "已影响库存的单据不能直接删除"总则，与 DeleteSupplier 同口径补齐——
+// 后端裁决 2026-10-04；实现同经 CustomerRefReader 窄接口）。
 func (s *Service) DeleteCustomer(ctx context.Context, actor Actor, id int64) error {
 	cus, err := s.repo.FindCustomerByID(ctx, id)
 	if err != nil {
@@ -545,6 +557,15 @@ func (s *Service) DeleteCustomer(ctx context.Context, actor Actor, id int64) err
 	}
 	if cus == nil {
 		return response.NewError(ErrCustomerNotFound, map[string]any{"id": id})
+	}
+	if s.customerRefs != nil {
+		has, err := s.customerRefs.HasBusinessRecord(ctx, id)
+		if err != nil {
+			return err
+		}
+		if has {
+			return response.NewError(ErrCustomerInUse, map[string]any{"id": id})
+		}
 	}
 	return database.Tx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
 		if err := s.repo.SoftDeleteCustomer(ctx, tx, id, actor.UserID); err != nil {

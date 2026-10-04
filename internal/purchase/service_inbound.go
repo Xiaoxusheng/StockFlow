@@ -243,7 +243,8 @@ func (s *Service) UpdateInbound(ctx context.Context, actor Actor, id int64, in I
 }
 
 // CancelInbound 取消入库单（仅 DRAFT，无收货——plan §6.2）。
-func (s *Service) CancelInbound(ctx context.Context, actor Actor, id int64) (*InboundOrder, error) {
+// 取消原因 in.Reason 可选：落审计快照（对齐 CancelPO/sales CancelInput 口径）。
+func (s *Service) CancelInbound(ctx context.Context, actor Actor, id int64, in CancelInput) (*InboundOrder, error) {
 	o, err := s.repo.FindInboundByID(ctx, id)
 	if err != nil {
 		return nil, err
@@ -263,7 +264,7 @@ func (s *Service) CancelInbound(ctx context.Context, actor Actor, id int64) (*In
 		}
 		e := actor.auditEntry("inbound_order", id, "cancel")
 		e.Before = map[string]any{"status": o.Status}
-		e.After = map[string]any{"status": InboundStatusCancelled}
+		e.After = map[string]any{"status": InboundStatusCancelled, "reason": strings.TrimSpace(in.Reason)}
 		return middlewareAudit(tx, e)
 	})
 	if err != nil {
@@ -291,9 +292,10 @@ func (s *Service) CloseInbound(ctx context.Context, actor Actor, id int64, in In
 	if err != nil {
 		return nil, err
 	}
-	if counts[TaskStatusInProgress] > 0 {
+	// PAUSED 属未完成活动态，与 IN_PROGRESS 一并阻断差额关闭（迁移 000017）。
+	if counts[TaskStatusInProgress] > 0 || counts[TaskStatusPaused] > 0 {
 		return nil, response.NewError(ErrInboundHasActiveTasks, map[string]any{
-			"in_progress": counts[TaskStatusInProgress],
+			"in_progress": counts[TaskStatusInProgress], "paused": counts[TaskStatusPaused],
 		})
 	}
 	err = s.tx(ctx, func(tx *gorm.DB) error {

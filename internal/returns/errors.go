@@ -44,6 +44,11 @@ var (
 	ErrExceptionStatusConflict = response.Register("RETURNS_EXCEPTION_STATUS_CONFLICT", "异常单状态冲突", http.StatusConflict)
 	// ErrExceptionTypeInvalid 异常类型非法（business-flow §11.2 九类值域）。
 	ErrExceptionTypeInvalid = response.Register("RETURNS_EXCEPTION_TYPE_INVALID", "异常类型非法", http.StatusBadRequest)
+	// ErrExceptionImagesInvalid 异常图片挂接入参非法（file_ids 空/超限/非图片/已过期——
+	// business-flow §11.2 异常图片能力，2026-10-04 立项）。
+	ErrExceptionImagesInvalid = response.Register("RETURNS_EXCEPTION_IMAGES_INVALID", "异常图片挂接参数非法", http.StatusBadRequest)
+	// ErrExceptionImagesClosed 异常单已解决/关闭，生命周期终点不接受图片挂接。
+	ErrExceptionImagesClosed = response.Register("RETURNS_EXCEPTION_IMAGES_CLOSED", "异常单已解决或关闭，不能挂接图片", http.StatusConflict)
 	// ErrFreezeTargetRequired 请求异常冻结但定位信息不足（冻结需 仓库+库位+SKU 定位到库存行，
 	// inventory-rules §4.1 锁定必须可定位）。
 	ErrFreezeTargetRequired = response.Register("RETURNS_FREEZE_TARGET_REQUIRED", "异常冻结需要仓库/库位/SKU 定位信息", http.StatusBadRequest)

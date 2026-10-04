@@ -23,12 +23,15 @@ import (
 type Service struct {
 	repo Repository
 	opt  options
+	// qualityDB 质量追溯/不合格品只读查询句柄（service_quality_trace.go；经 repo.DB()
+	// 装配，不引入第二套数据源）。
+	qualityDB *gorm.DB
 }
 
 // NewService 构建业务层（router 装配入口：purchase.RegisterRoutes 内部经此构造，
 // 或集成工程师按需自行构造后注入 Option）。
 func NewService(repo Repository, opts ...Option) *Service {
-	s := &Service{repo: repo}
+	s := &Service{repo: repo, qualityDB: repo.DB()}
 	for _, opt := range opts {
 		opt(&s.opt)
 	}

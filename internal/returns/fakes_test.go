@@ -658,6 +658,17 @@ func (f *fakeRepo) AppendHandleRecord(tx *gorm.DB, id int64, rec HandleRecord) e
 	return nil
 }
 
+func (f *fakeRepo) UpdateExceptionImageRefs(tx *gorm.DB, id int64, refs []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.exceptions[id]
+	if !ok {
+		return errors.New("fakeRepo: exception not found")
+	}
+	e.ImageRefs = marshalJSONB(refs)
+	return nil
+}
+
 func (f *fakeRepo) ListOperationLogs(_ context.Context, requestIDs []string, limit int) ([]middleware.OperationLog, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

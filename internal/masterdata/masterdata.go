@@ -24,23 +24,33 @@ import (
 // 冻结签名，引入热点缓存（如扫码解析）时启用。
 
 // Option RegisterRoutes 的可选注入项：仅用于跨域消费接口注入（plan §4.3/§5.2），
-// 不得携带业务配置。本域 M1 无跨域消费需求（商品/SKU/分类/单位/条码/供应商/客户
-// 全部为本域表），保留 Option 供未来扩展。
+// 不得携带业务配置。2026-10-04 起承载往来单位删除引用校验读取器（refreaders.go）；
+// 商品/SKU/分类/单位/条码仍全部为本域表。
 type Option func(*options)
 
-type options struct{}
+type options struct {
+	supplierRefs SupplierRefReader
+	customerRefs CustomerRefReader
+}
 
 // RegisterRoutes 基础资料域路由。约定：
 //   - rg 已挂 auth.AuthRequired()；域内对每个路由挂 auth.RequirePermission(...)；
 //   - 列表接口强制分页（api.md §2.1），统一经 internal/response 输出；
 //   - db 为 nil 属装配错误，启动期 fail-fast（deployment.md §3 禁止带病启动）。
 func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ...Option) {
-	_, _, _ = rdb, opts, options{} // 见文件头：rdb 暂无消费点；Option 暂无注入项
+	_ = rdb // 见文件头：rdb 暂无消费点
 	if db == nil {
 		panic("masterdata 装配失败: db 为 nil（router 必须注入 GORM 句柄）")
 	}
 	repo := NewRepository(db)
 	svc := NewService(repo)
+	// 跨域消费注入（refreaders.go；未注入时删除引用校验跳过——fail-open 口径见该文件注）。
+	o := options{}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	svc.supplierRefs = o.supplierRefs
+	svc.customerRefs = o.customerRefs
 
 	// —— 商品 ——
 	rg.GET("/products", auth.RequirePermission(auth.PermProductList), func(c *gin.Context) { handleProductList(c, svc) })

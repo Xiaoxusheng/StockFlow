@@ -31,6 +31,7 @@ type Repository interface {
 
 	// —— 用户关联（roles/warehouses）——
 	ListRoleIDsByUser(ctx context.Context, uid int64) ([]int64, error)
+	ListRoleIDsByUsers(ctx context.Context, uids []int64) (map[int64][]int64, error) // 批量装配（GetUsers 列表 role_ids）
 	ListRoleByCodeForUser(ctx context.Context, uid int64, roleCode string) (bool, error)
 	DeleteUserRoles(ctx context.Context, tx *gorm.DB, uid int64) error
 	InsertUserRoles(ctx context.Context, tx *gorm.DB, uid int64, roleIDs []int64, createdBy int64) error
@@ -190,6 +191,30 @@ func (r *repo) ListRoleIDsByUser(ctx context.Context, uid int64) ([]int64, error
 		return nil, fmt.Errorf("查询用户 %d 角色失败: %w", uid, err)
 	}
 	return ids, nil
+}
+
+// ListRoleIDsByUsers 批量查询用户角色绑定（GetUsers 列表 role_ids 装配，architecture.md
+// §7 批量装配：一页一查，禁止逐行 N+1）。
+func (r *repo) ListRoleIDsByUsers(ctx context.Context, uids []int64) (map[int64][]int64, error) {
+	out := make(map[int64][]int64, len(uids))
+	if len(uids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		UserID int64 `gorm:"column:user_id"`
+		RoleID int64 `gorm:"column:role_id"`
+	}
+	err := withCtx(ctx, r.db).Model(&UserRole{}).
+		Where("user_id IN ?", uids).
+		Order("user_id ASC, role_id ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("批量查询用户角色失败: %w", err)
+	}
+	for _, row := range rows {
+		out[row.UserID] = append(out[row.UserID], row.RoleID)
+	}
+	return out, nil
 }
 
 func (r *repo) ListRoleByCodeForUser(ctx context.Context, uid int64, roleCode string) (bool, error) {
