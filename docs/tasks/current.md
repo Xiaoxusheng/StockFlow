@@ -196,3 +196,11 @@
 **待环境项（后续启动，非本轮可完成）**：**阶段 16 真机验收**——PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收（requirements.md 验收场景 9）；**阶段 21 性能优化**——索引、缓存、慢查询治理（architecture.md §7）。两者均需真机/压测环境到位后启动。挂账与未完成：CI Actions 首跑验证待 push（main 领先 origin/main 9 提交）；集成测试契约缺口与隔离改造待立项（SF_TEST_REDIS 密码、auth 相对路径迁移目录、并发扣减断言矛盾、单据域夹具隔离，见 changelog 同日条目）；阶段 22 生产部署的环境配置/发布流程已推进，7 验收场景走通（M4）待现场。
 
 细节与证据见 docs/changelog.md 同日「后端收尾轮」条目。
+
+## 2026-10-05 联调：真联调交付轮（本地便携环境 + 12 域簇契约联调 + Dashboard/分析接真数据 + 终局门禁）
+
+**做什么**：① 本地 Windows 便携开发环境——PG 16.10 + Redis 5.0.14.1 便携件落 `.local-env/`（零安装、零管理员权限、不动注册表/系统服务），docs/dev-environment.md 全程实测手册（启动/建库/种子/账号/踩坑 8 条/从零重建速查）+ scripts/ci-local.sh 无 make 门禁脚本；② 前后端真联调——后端 :8080 + vite dev 起真环境，12 域簇 SmokeCheck 19 代表端点 + 写路径 + 会话链路 HTTP 实测，修复三类契约断裂（items:null→[]、reports SKUID 列映射、报表时间形态）与 batch_id 缺省语义行为修复；③ 后端补齐前端先行挂账契约——Dashboard/分析域 6 端点（internal/reports/dashboard.go：日末趋势「现存量锚点回推」、ABC 分档后端计算）；④ 000018 迁移（质检 result CHECK 空串逃生门，修手动建单 500）；⑤ 演示种子 §8.5 趋势形态（期初流水分散近 7 天 + 4 笔净零对补影流水）；⑥ 前端 106 文件（87 改 + 19 新增）契约对齐 + 单据域表单/抽屉 + 路由接线 + Dashboard/AnalyticsPage 接真数据 + vite 代理故障可见化 + 草稿清理（web/src/api 两个 txt 对照稿删除）；⑦ .gitignore 覆盖 .local-env/ 与 data/（运行时上传件）。逐项细节见 docs/changelog.md 同日「真联调轮」「前端收口轮」「000018 迁移」「联调终局汇总」四条目。
+
+**做到哪（终局）**：全部交付并按 feat(server)/feat(web)/chore(dev)/docs 四提交落库。终局门禁全绿——`go build ./... && go vet ./... && go test ./...` 退出码 0（22 包 ok）、`cd web && npm run build`（tsc -b && vite build）退出码 0；独立复测 5/5 通过。过程未过项均已收敛：收口轮 npm run build 曾 9 报错（并行簇在途文件）终局归零；5173/5174 端口被外部进程占用为环境项（vite 落 5174 走 127.0.0.1 验证）。
+
+**遗留什么**：阶段 16 真机验收与阶段 21 性能优化（待环境，见 2026-10-04 收尾轮节）；main 领先 origin/main 未推送、CI Actions 首跑验证待 push；本地便携环境仅限开发库（trust 认证 + 固定开发密钥，严禁用于部署环境，dev-environment.md §4 有红线标注）；上轮同属联调工作的前端认证改动（stores/auth.ts is_super 归一、LoginPage 先落 token 再调 me 死循环修复、PcLayout 全局搜索/通知接线）已随本轮 feat(web) 提交收口。

@@ -14,6 +14,44 @@
 
 ## 文档记录
 
+## [2026-10-05] 联调：终局汇总——本地便携环境 + 12 域簇契约联调修复 + Dashboard/分析接真数据 + 终局门禁全绿
+
+- **本地便携环境（Windows 便携版，零安装/零管理员权限/不动系统服务）**：docs/dev-environment.md 落盘全程实测手册——PG 16.10 与 Redis 5.0.14.1 便携件落 `.local-env/`（initdb `--locale=C` 规避中文 Windows UTF8 冲突、migrate 必须 `-tags postgres`、Windows 版 psql 连接串必须走 `-d` 否则静默假成功退出码 0）；`scripts/ci-local.sh` 落盘 Makefile `ci` 的无 make 等价实现（fmt-check → vet → vet -tags integration → test → build → 七守卫 → guard-status，任一失败非零退出）；`.gitignore` 覆盖 `.local-env/` 与 `data/`（storage.root `./data/files` 为运行时上传件目录，config.example.yaml:53，勿入库）；演示测试账号五枚（dev_manager/dev_receiver/dev_shipper/dev_stocktaker/dev_viewer）绑仓库可验 SPECIFIED_WAREHOUSE 数据权限。
+- **前后端契约联调修复（12 域簇 SmokeCheck）**：12 域簇 19 代表端点 + 写路径（新建供应商→列表可见→停用）+ 会话链路（登录→刷新恢复→token 轮换→登出失效→再登录）HTTP 实测，修复三类契约断裂（空列表 items:null→[]、reports 行结构 SKUID 列映射错致 sku_id 恒 0、报表时间字段 RFC3339 未收敛）与 batch_id 缺省语义行为修复（缺省隐式隐藏全部批次行、与 /api/inventory/summary 口径不一致）——逐项见同日「真联调轮」条目。后端本轮落地 10 文件（7 改：reports 域 repository/routes/service、inventory/handler.go、sysops/notifications.go、dev_seed.sql §8.5 趋势形态、dev_seed_test.go；3 新增：internal/reports/dashboard.go 与 000018 成对迁移）；前端 106 文件（87 改 + 19 新增：api 契约对齐、单据域表单/抽屉、报表五组件、异常创建弹窗/详情抽屉、BackupPage、调拨表单/在途抽屉、ScanDirectCard 等）——收口细节见同日「前端收口轮」条目。
+- **图表接真数据**：Dashboard 四层与 /inventory/analytics 全部消费 6 个新端点真实数据——`GET /api/reports/dashboard/{today,trend,tasks,alerts,warehouse-stock}` + `GET /api/inventory/analytics`（reports 实现、挂 inventory:inventory:list，同 summary/alerts「数据域读权限承载 reports 实现」裁决口径）；日末库存/金额趋势「现存量锚点回推」、ABC 80/15/5 分档后端计算；前端按契约回对（snake_case 字段、视图仅决定指标面板不作请求参数下发、自定义档 time_from/time_to 冻结参数名），无写死数据。
+- **门禁与冒烟结论（通过/未过均如实）**：终局门禁全绿、独立复测 5/5 通过（本轮独立复测员终局结论）。提交前本会话复测：`go build ./... && go vet ./... && go test ./...` 退出码 0（22 包 ok）；`cd web && npm run build`（tsc -b && vite build）退出码 0（built in 37.26s）。过程未过项已全部收敛：① 收口轮 `npm run build` 曾 9 报错（并行簇在途/新增文件所致，见同日「前端收口轮」条目），终局实测归零；② 联调期间 5173/5174 端口被外部进程占用——环境项非门禁失败，vite 落 5174 走 `127.0.0.1` 验证。终局无未修复失败项。
+- 影响范围：docs/dev-environment.md（新增）、scripts/ci-local.sh（新增）、.gitignore、internal/ 与 db/ 共 10 文件、web/ 106 文件、docs/api.md、docs/changelog.md、docs/tasks/current.md。
+
+## [2026-10-05] 联调：真联调轮——Dashboard/分析域 6 端点补齐 + 12 域簇 SmokeCheck 三类断裂修复
+
+- **环境**：迁移核对（库 000018 与磁盘一致）；后端 :8080 与 vite dev 按 dev-environment.md 启动（5173 被无关项目 CamBox 占用，StockFlow vite 落 5174；`[::1]:5174` 另被外部 node 进程精确绑定，vite 代理验证走 `127.0.0.1:5174`）。
+- **后端补齐（internal/reports/dashboard.go 新文件，docs/api.md §9 已回写）**：兑现前端先行挂账契约——`GET /api/reports/dashboard/{today,trend,tasks,alerts,warehouse-stock}` 与 `GET /api/inventory/analytics` 六端点（reports 实现、挂 inventory:inventory:list，同 summary/alerts 裁决口径）；日末库存/金额趋势用"现存量锚点回推"（LOCK/RELEASE/INSPECT_*/MOVE 不入总量净变化集），ABC 80/15/5 分档由后端计算；Dashboard/AnalyticsPage 前端零改动接通真实数据（camelCase/snake_case 按契约回对）。
+- **契约断裂修复（SmokeCheck 实测发现）**：`GET /api/notifications` 与 reports 五端点空列表 `items:null → items:[]`（nil slice 序列化）；reports 五行结构 `SKUID` 补 `gorm:"column:sku_id"`（GORM 连续大写缩写默认映射 `sk_uid`，sku_id 恒 0）；reports 域时间字段（stat_date/last_moved_at）收敛 api.md §2 统一格式（裸 time.Time 曾输出 RFC3339）。
+- **演示种子（db/seed/dev_seed.sql §8.5）**：期初流水时间分散近 7 天 + 4 笔净零对补影流水（现存量锚点不变、恒等式不变），趋势/出库/周转获得非零真实值；dev_seed_verify.sql 全过。
+- **前端（web/vite.config.ts）**：dev 代理加 error 可见化（连接失败打印并回 502 JSON，默认静默 500）。
+- **草稿清理**：web/src/api/camel_variants.txt、snake_fields.txt（上轮 camel→snake 字段对照结论已全部反映于实现与 api.md，抽验实测响应印证后删除）。
+- **行为修复（独立复测员发现）**：GET /api/inventory、/api/inventory-ledgers、/api/serials 的 batch_id 过滤缺省语义修正（internal/inventory/handler.go parseBatchIDQuery——缺省此前被包装为 &0 触发 `AND batch_id=0`，缺省列表隐式隐藏 8 行批次库存、与 /api/inventory/summary 口径不一致；现未提供=不过滤，显式 0=非批次行、>0=指定批次语义保留）。复测：缺省 total 16→24、8 行批次行（batch_id 9601-9607）全部可见、Σtotal_qty=1787 与 summary 一致、sku_id=9403 由 0→1。docs/api.md §9 已回写。
+- **门禁**：go build ./... / go vet ./... / go test ./... 通过；web tsc -b && vite build 通过；12 域簇 19 代表端点 + 写路径（新建供应商→列表可见→停用）+ 会话链路（登录→刷新恢复→token 轮换→登出失效→再登录）HTTP 实测全过。
+
+## [2026-10-05] 前端：收口轮——共享文件改动落实（菜单权限码归一/假入口清除/新路由接线）+ 单据域交付补记
+
+- **单据域交付（并行簇成果收口，本条目落实其共享文件依赖）**：approve 响应类型对齐、allocations 封装与展示 + 整单重分配、采购/入库创建-编辑-提交-审核-取消-关闭链路 UI（PurchaseOrderFormPage/InboundFormPage 创建与草稿编辑共用组件，列表「新建」与详情「编辑」跳转目标）、销售/采购退货创建入口（PurchaseReturnCreateDrawer/SalesReturnCreateDrawer）。
+- **路由接线（router/index.tsx）**：新增 2 个 lazy 导入（PurchaseOrderFormPage/InboundFormPage）+ 4 条无菜单路由（purchases/new、purchases/:id/edit、inbound/new、inbound/:id/edit，静态段先于动态段、与 :id 动态段共存）+ 1 条系统管理路由（system/backups → BackupPage，IMPLEMENTED_PATHS 同步补 '/system/backups' 防占位重复）；出库作业注释失真修正（四作业端点自 M2 已注册，internal/sales/routes.go:94-112）、系统管理余量注释更新（/system/notifications 无独立页面路由）。
+- **菜单权限码归一（config/menu.tsx）**：①「库存预警」inventory:alert:view → inventory:stock/view——端点 GET /api/inventory/alerts 自 d314103 起挂 inventory:inventory:list（internal/reports/routes.go:56，库存域读口径裁决；提出簇所引「挂 reports:report:read」为裁决前旧口径），经 RESOURCE_ALIASES stock→['stock','inventory'] 归一命中，与实时库存同码同源不产生 403 断裂；②移除「系统管理-通知」菜单项（path 无路由点入 404 + 权限码 system:notification:view 后端不存在双重假入口，真实入口为顶栏 NotificationDrawer）；③新增「备份」菜单项（system:backup:view，命中 permissions.go:362-365 冻结码）；④「我的工作台」删 permission: 'workbench:view'（后端权限清单零命中，fail-closed 致非超管永远不可见；工作台为个人汇总页无资源域语义，与 Dashboard 同性质缺省码放行）。
+- **权限匹配逻辑收口（types/permission.ts）**：matchBackendPermission 新增 DOMAIN_BOUND_RESOURCES 跨域同名资源段域段校验（task 资源段当前仅属 printing 域 printing:task:*，不限定会误亮「我的任务」入口而其端点 GET /api/tasks 不存在）——修后任务域码立项前非超管不可见（fail-closed 与端点未交付一致）；esbuild 打包真实模块回归：新旧 canAccess 对 56 个带码菜单 × 5 组角色基线（seed.go 仓库管理员实值集等）差异仅 task:view 的 true→false 一条，stock/department 别名映射与 view 放行语义零变化。
+- **API/类型收口（api/exception.ts、types/status.ts）**：exceptionApi 补 attachImages（POST /api/exceptions/{id}/images，d314103 交付的图片取证挂接端点，ExceptionImageInput file_ids）——创建入参不带图片（后端 ExceptionCreateInput 无 image_refs 字段，「创建后挂接」为已裁决口径）；status.ts 按异常六态口径清理：补 open 键、移除旧七态虚构键 discovered/created（grep 无消费方）、pending_recheck 移正至盘点组注释（CountDetailPage/CountTaskListPage/CountCards 盘点 PENDING_REVIEW 文案键，非异常域）。
+- **同批既有落实确认（本会话 git diff 核实，非本条目产出）**：types/api.ts ApiResponse.details?: unknown、types/permission.ts 注释行号修正、UserListPage 删本地 ASCII 密码正则改 import PASSWORD_RULE（@/api/auth 单一来源）均已在工作区未提交改动中完成。
+- 验证：`go build ./... && go vet ./... && go test ./...` 全绿；改动文件（menu.tsx/permission.ts/status.ts/router/index.tsx/exception.ts）`npx tsc -b` 全量诊断零错误 + `npx eslint` 零告警；`npm run build` 整体未通过——9 个报错文件全部为并行簇未提交/新增文件（client.ts LoginResult 解包、TransferListPage/TransferInTransitDrawer/ExceptionCreateModal 等），与本次收口改动无关，待各簇自行修复后合流复验。
+- 影响范围：web/src/config/menu.tsx、web/src/types/permission.ts、web/src/types/status.ts、web/src/router/index.tsx、web/src/api/exception.ts、docs/changelog.md。
+
+## [2026-10-05] 后端：000018 迁移——质检单 result CHECK 放宽空串逃生门（手动建单 500 修复）
+
+- **缺陷（e2e 实测转告，request_id 316a1b79）**：POST /api/quality 手动建单运行时必 500「violates check constraint chk_quality_orders_result」——CreateQC（internal/purchase/service_quality.go:138 起）与 QCCreatorService.CreateQC（:521 起）两条创建路径构造 QualityOrder 均不设 Result，模型零值空串（internal/purchase/models.go:290）违反 000007 九值 CHECK（无空串逃生门）。
+- **修复口径**：质检单状态机 PENDING→INSPECTING→COMPLETED，result 在 COMPLETED 才落定，创建期/检验中语义即「未检」，空串是唯一诚实取值——000018 给 CHECK 补 `result = '' OR` 逃生门（删旧建新，先例 000017），不动列默认值、不发明「未检」伪结果值；业务侧质检完成仍落定九类之一。
+- **真库验证（本地开发库，dev-environment.md §3）**：migrate up 17→18 clean、down 1 级 18→17 → 重新 up 回 18 双向往返通过；事务内 INSERT 验证三态——空串放行（CreateQC 零值写入形态）、九类值抽检放行（合格/转不良品仓）、非法值「未检」仍被 CHECK 拒绝（未放宽过头）。
+- **同批核实（barcodes deleted_at 转告项）**：d314103 已以模型侧 BaseCols 基座修复（internal/database/model.go:148-159 无软删字段基座；Barcode/Role/Permission/Department/ProductCategory/Unit 等表无 deleted_at 列的实体全部改嵌 BaseCols）——真库 psql 核实 barcodes 表 9 列无 deleted_at，与模型一致；一次性 GORM 程序复现原 500 查询形态（ListBarcodesBySKUs/FindBarcode/分类/单位）全部执行成功不再 42703（验证程序即删）。提出簇所引「Barcode 内嵌 BaseModel」为修复前旧貌，无需再补迁移。
+- 影响范围：db/migrations/000018_relax_quality_result_check.up.sql + down.sql 成对；业务代码零改动。
+
 ## [2026-10-04] 后端：收尾轮汇总——遗留债务清偿 + 000015/000016 迁移 + CI 流水线 + swag 汇总 + 服务器部署升级与真库回归
 
 - **遗留债务清偿（核对员债务清单 F3–F21）**：guard-inventory 守卫接线（含 _test.go fixture 豁免复核修正）、仓库根 Windows 保留名杂散文件 `nul` 删除、数据权限集成测试落盘（`//go:build integration`，需 `SF_TEST_PG_*` 本机未执行——诚实标注）、GET /api/users department_id 非法值 fail-fast、seed 残留行幂等修复、迁移 000015 交付、release JWT 密钥表驱动测试、BindErrorDetails 收敛 52 个 ShouldBindJSON 绑定路径、panic 日志 zap.String 化 + 2KB 截断；同日独立复核修正轮 5 项（F3 守卫误伤 / F20 补收敛 14 处 / 000015 down 缺口 / F16 措辞补注 / 状态文件更正）。逐项细节见同日「清偿轮」「清偿轮复核修正」两条目，不在此重复。
