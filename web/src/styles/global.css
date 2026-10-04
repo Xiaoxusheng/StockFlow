@@ -42,3 +42,15 @@ body {
 *::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* 栅格卡片等高：Col 本身随行等高（flex stretch），但内部 Card 只有内容高，
+   导致同一行卡片参差不齐。凡直接置于 Col 的 Card 一律撑满（frontend.md §6 统一卡片网格）。 */
+.ant-col > .ant-card {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.ant-col > .ant-card > .ant-card-body {
+  flex: 1;
+}
