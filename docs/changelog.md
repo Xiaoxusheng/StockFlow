@@ -18,8 +18,10 @@
 
 - **db/migrations/000013**：`chk_device_logs_level CHECK (level IN ('INFO','WARN','ERROR'))` 误置于 `device_configs` 表（该表无 `level` 列，任何 PostgreSQL 上迁移必然失败——生产首启实测复现 `pq: column "level" does not exist`）；按 internal/devices/models.go 值域注释移回 `device_logs` 建表语句。
 - **db/migrations/000015**：移除 `idx_inventory_ledgers_creator_created (created_by, created_at)`——`inventory_ledgers` 无 `created_by` 列（操作者列为 `operator_id`，000005），且流水列表 `LedgerQuery`（internal/inventory/query.go）无创建人筛选；其余 8 张主单据表 `created_by` 索引核实有效保留。down 同步。
+- **internal/database/migrate.go**：`m.Close()` 在 `m.Up()` 之前调用——golang-migrate 驱动的 `Close()` 会关闭专用锁连接（`pg_advisory_lock` 运行其上）与底层 `*sql.DB`，导致 `MigrateUp` 在任何环境必然失败（真库回归实测复现 `try lock failed ... sql: connection is already closed`）；移至 `Up()` 之后调用。该缺陷自 M1（0d8fe22）引入，此前集成测试因未设 `SF_TEST_*` 全部 Skip、从未在真库执行过，本次服务器真库回归首次暴露。
+- **集成测试环境契约缺口（未改测试代码，如实挂账）**：cache/auth 的 `TestIntegrationRedisRoundTrip` 只读 `SF_TEST_REDIS_ADDR`、不读密码（internal/auth/integration_test.go:46、internal/cache/integration_test.go:23 均未传 Password），与生产 Redis 必须 `requirepass` 的部署安全基线不兼容，对生产库执行必失败；待测试侧补密码支持或提供免密测试 Redis 后回归。
 - **部署物**：Dockerfile 预建 `/app/data` 并 `chown app:app`（M3 文件中心 storage.root 默认 `./data/files`，非 root 容器内 mkdir 失败导致启动 panic）；docker-compose.yml app 服务新增命名卷 `filesdata:/app/data` 持久化文件中心与 sysops 备份物理文件。
-- 本地未暴露的原因：集成测试走 GORM AutoMigrate 建表，不执行 SQL 迁移文件；门禁 `go build/vet/test` 不加载迁移 SQL。两处缺陷均由服务器真库迁移首启暴露。
+- 本地未暴露的原因：集成测试走 GORM AutoMigrate 建表，不执行 SQL 迁移文件；门禁 `go build/vet/test` 不加载迁移 SQL、且无 `SF_TEST_*` 环境时集成测试全部 Skip。四处缺陷均由服务器真库部署与回归首次暴露。
 - 同步更新：deployment.md §10（filesdata 卷与 bind mount 属主要求）。
 - 影响范围：全新库首启迁移路径修复；已应用 000013/000015 的环境不存在（生产库首启即本次部署）。
 

@@ -39,10 +39,14 @@ func MigrateUp(dsn, migrationsDir string) error {
 	if err != nil {
 		return fmt.Errorf("初始化 migrate 失败: %w", err)
 	}
-	_, _ = m.Close() // 关闭 source 与 migrate 持有的 database 实例（sqlDB 本身的 Close 由 defer 负责，重复关闭安全）
 
-	if err := m.Up(); err != nil && !errors.Is(err, migrate.ErrNoChange) {
-		return fmt.Errorf("执行迁移失败: %w", err)
+	// m.Close() 会关闭 migrate 驱动持有的专用锁连接（pg_advisory_lock 运行其上），
+	// 必须在 Up() 之后调用——先 Close 后 Up 会使 Up 必然失败（sql: connection is
+	// already closed，2026-10-04 服务器真库回归实测复现）；sqlDB 由 defer 兜底关闭。
+	upErr := m.Up()
+	_, _ = m.Close()
+	if upErr != nil && !errors.Is(upErr, migrate.ErrNoChange) {
+		return fmt.Errorf("执行迁移失败: %w", upErr)
 	}
 	return nil
 }
