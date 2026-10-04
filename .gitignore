@@ -41,6 +41,12 @@ coverage.html
 bin/
 tmp/
 
+# 本地便携环境（便携 PG/Redis 下载件与数据目录，见 docs/dev-environment.md；勿入库）
+.local-env/
+
+# 后端运行时文件存储（storage.root ./data/files 的上传件/冒烟产物，见 config.example.yaml；勿入库）
+data/
+
 # Go 后端本地配置（可能含密钥：deployment.md §1 禁止写死密钥，只提交 config.example.yaml）
 config.yaml
 config.*.yaml
