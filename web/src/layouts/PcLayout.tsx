@@ -123,10 +123,13 @@ export function PcLayout() {
     [location.pathname],
   )
   const [openKeys, setOpenKeys] = useState<string[]>(openKey ? [openKey] : [])
-  // 跨分组跳转时自动展开目标分组
-  if (openKey && !openKeys.includes(openKey)) {
-    setOpenKeys([...openKeys, openKey])
-  }
+  // 跨分组跳转时自动展开目标分组。必须挂在路由变化上而非渲染期：渲染期每帧断言
+  // 会把用户刚点收起的当前分组立刻弹回（onOpenChange 置空后下一帧又被塞回），菜单表现为"收不回去"。
+  useEffect(() => {
+    if (openKey) {
+      setOpenKeys((prev) => (prev.includes(openKey) ? prev : [...prev, openKey]))
+    }
+  }, [openKey])
 
   const breadcrumbItems = useMemo(() => {
     if (trail.group && trail.page && trail.group !== trail.page) {
