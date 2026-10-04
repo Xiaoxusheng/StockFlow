@@ -272,7 +272,9 @@ func (r *runtimeRepo) listInbox(ctx context.Context, f inboxFilter) ([]inboxItem
 	if err := r.db.WithContext(ctx).Raw("SELECT COUNT(*) "+base, args...).Scan(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("sysops: 通知计数失败: %w", err)
 	}
-	var rows []inboxItem
+	// 预置非 nil 空 slice：nil slice 会被序列化为 items:null，违反统一分页契约
+	// （api.md §2.1——空列表必须是 []，前端 PageResult.items: T[]）。
+	rows := make([]inboxItem, 0)
 	list := `SELECT id, type, title, content, "read", created_at ` + base +
 		` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`
 	args = append(args, f.PageSize, (f.Page-1)*f.PageSize)

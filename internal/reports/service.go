@@ -139,7 +139,7 @@ func (s *Service) StagnantStock(ctx context.Context, sc Scope, page, pageSize in
 	now := s.now()
 	out := rows[:0]
 	for _, r := range rows {
-		idleDays := int(now.Sub(r.LastMovedAt).Hours() / 24)
+		idleDays := int(now.Sub(r.LastMovedAt.Time).Hours() / 24)
 		tier := stagnantTier(idleDays, tiers)
 		if tier == "" {
 			continue // 时间边界内的行（cutoff 为最小档位边界，防御性过滤）
@@ -256,7 +256,7 @@ func alertMessage(a AlertItem, now time.Time) string {
 	case "slow_moving":
 		idle := 0
 		if a.LastMovedAt != nil {
-			idle = int(now.Sub(*a.LastMovedAt).Hours() / 24)
+			idle = int(now.Sub(a.LastMovedAt.Time).Hours() / 24)
 		}
 		return fmt.Sprintf("已 %d 天未发生移动，现存量 %.4f（阈值 %s 天）", idle, a.CurrentQty, trimFloat(a.Threshold))
 	default:

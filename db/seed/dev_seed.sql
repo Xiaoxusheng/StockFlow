@@ -338,7 +338,10 @@ LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
 ON CONFLICT (warehouse_id, bin_id, sku_id, batch_id) DO NOTHING;
 
 -- 期初流水（与上方库存行同 VALUES 成对；inventory_ledgers 为 append-only 审计数据，
--- database.md §7：业务运行账号无 UPDATE/DELETE 权限，本段仅 INSERT）
+-- database.md §7：业务运行账号无 UPDATE/DELETE 权限，本段仅 INSERT）。
+-- 2026-10-05 联调轮（docs/database.md §8.2 演示数据趋势形态）：期初建账时间由集中灌数
+-- 日（now()）改为按 id 段分散近 7 天（SELECT 内 CASE 定值，VALUES 仍 6 列、期初-流水
+-- 仍 1:1 成对；verify §6 与 seed 守卫均不校验日期）——日末库存锚点回推曲线呈自然爬升。
 INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
                                change_type, business_type, business_no, status_from, status_to,
                                qty_before, qty_change, qty_after,
@@ -346,8 +349,14 @@ INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, she
 SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, COALESCE(bat.id, 0),
        'INBOUND', '期初', 'DEV-SEED-OPEN-' || v.id::text, 'available', 'available',
        0, v.qty, v.qty,
-       0, 'dev-seed', 'dev-seed', 'DEV SEED', now()
-FROM (VALUES (9851, 'WH-D01', 'S-01-11', 'SKU-D001-01', NULL, 12.0000::numeric(18, 4)),
+       0, 'dev-seed', 'dev-seed', 'DEV SEED',
+       CASE WHEN v.id <= 9854 THEN '2026-09-29 09:30:00+08'::timestamptz
+            WHEN v.id <= 9858 THEN '2026-09-30 10:10:00+08'::timestamptz
+            WHEN v.id <= 9862 THEN '2026-10-01 11:20:00+08'::timestamptz
+            WHEN v.id <= 9866 THEN '2026-10-02 14:00:00+08'::timestamptz
+            WHEN v.id <= 9870 THEN '2026-10-03 15:30:00+08'::timestamptz
+            ELSE '2026-10-04 08:40:00+08'::timestamptz END
+FROM (VALUES              (9851, 'WH-D01', 'S-01-11', 'SKU-D001-01', NULL, 12.0000::numeric(18, 4)),
              (9852, 'WH-D01', 'S-01-11', 'SKU-D001-02', NULL, 30.0000::numeric(18, 4)),
              (9853, 'WH-D01', 'S-01-12', 'SKU-D002-01', 'B2609-D002', 6.0000::numeric(18, 4)),
              (9854, 'WH-D01', 'S-01-12', 'SKU-D002-02', NULL, 15.0000::numeric(18, 4)),
@@ -378,6 +387,30 @@ JOIN shelves s ON s.id = b.shelf_id
 JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
 LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
 ON CONFLICT (ledger_no) DO NOTHING;
+
+-- 2026-10-05 联调轮补影流水（id 9875-9878，business_type='演示'、business_no=
+-- 'DEV-SEED-FLOW-*'）：两对先入后出净零对（+15/-15、+30/-30，同键相消 Σ 净变化=0），
+-- 出库趋势线与周转率获得非零真实值；现存量锚点、恒等式与期初成对断言均不受影响。
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, 0,
+       v.ctype, '演示', 'DEV-SEED-FLOW-' || v.id::text, 'available', 'available',
+       v.q_before, v.q_change, v.q_after,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED', v.at
+FROM (VALUES (9875, 'WH-D01', 'S-01-21', 'SKU-D003-02', 'INBOUND',  150.0000::numeric(18,4),  15.0000::numeric(18,4), 165.0000::numeric(18,4), '2026-10-04 15:30:00+08'::timestamptz),
+             (9876, 'WH-D01', 'S-01-21', 'SKU-D003-02', 'OUTBOUND', 165.0000::numeric(18,4), -15.0000::numeric(18,4), 150.0000::numeric(18,4), '2026-10-05 00:30:00+08'::timestamptz),
+             (9877, 'WH-D01', 'R-01-12', 'SKU-D009-01', 'INBOUND',  300.0000::numeric(18,4),  30.0000::numeric(18,4), 330.0000::numeric(18,4), '2026-10-05 00:50:00+08'::timestamptz),
+             (9878, 'WH-D01', 'R-01-12', 'SKU-D009-01', 'OUTBOUND', 330.0000::numeric(18,4), -30.0000::numeric(18,4), 300.0000::numeric(18,4), '2026-10-05 01:10:00+08'::timestamptz)) AS v(id, wh_code, bin_code, sku_code, ctype, q_before, q_change, q_after, at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT (ledger_no) DO NOTHING;
+
+
 
 -- ============ 9) 序列号（启用序列号管理的 SKU，一物一行，数量与期初库存吻合） ============
 -- SKU-D001-01@一号仓 12 件 / SKU-D002-01@一号仓 6 件（批次 B2609-D002）/ SKU-D006-01@二号仓 5 件

@@ -50,8 +50,19 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.GET("/reports/stagnant-stock", RequirePerm(PermReportRead), h.stagnantStock)
 	rg.GET("/reports/replenishment-suggestions", RequirePerm(PermReportRead), h.replenishment)
 
+	// Dashboard 五端点（2026-10-05 联调轮补齐前端先行挂账契约——dashboard.go；
+	// 消费方 Dashboard 页无独立权限码、全员可见，故挂库存域列表读权限，
+	// 与下方 summary/alerts 的"数据域读权限承载 reports 实现"裁决同口径）。
+	rg.GET("/reports/dashboard/today", RequirePerm(auth.PermInventoryList), h.dashboardToday)
+	rg.GET("/reports/dashboard/trend", RequirePerm(auth.PermInventoryList), h.dashboardTrend)
+	rg.GET("/reports/dashboard/tasks", RequirePerm(auth.PermInventoryList), h.dashboardTasks)
+	rg.GET("/reports/dashboard/alerts", RequirePerm(auth.PermInventoryList), h.dashboardAlertFeed)
+	rg.GET("/reports/dashboard/warehouse-stock", RequirePerm(auth.PermInventoryList), h.dashboardWarehouseStock)
+
 	// Dashboard/库存页聚合（reports 实现、inventory 前缀挂载——plan §9.1，GET
 	// /api/inventory/trace 先例；权限挂 inventory:inventory:list，口径见文件头注）。
 	rg.GET("/inventory/summary", RequirePerm(auth.PermInventoryList), h.dashboardSummary)
 	rg.GET("/inventory/alerts", RequirePerm(auth.PermInventoryList), h.dashboardAlerts)
+	// 库存分析（/inventory/analytics 页数据源，2026-10-05 补齐；inventory 前缀挂载同上）。
+	rg.GET("/inventory/analytics", RequirePerm(auth.PermInventoryList), h.inventoryAnalytics)
 }

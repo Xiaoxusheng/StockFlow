@@ -278,8 +278,13 @@ var devSeedAllowedTables = map[string]bool{
 
 func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
-	if len(ins) != len(devSeedAllowedTables) {
-		t.Fatalf("INSERT 语句应恰为 %d 条（每表一条），实际 %d", len(devSeedAllowedTables), len(ins))
+	// 2026-10-05 联调轮：inventory_ledgers 允许第 2 条 INSERT——演示出库形态补影段
+	// （净零对，business_type='演示'；docs/database.md §8.2 扩展，api.md §9 回写），
+	// 其余每表仍恰一条。
+	const extraLedgerInserts = 1
+	if len(ins) != len(devSeedAllowedTables)+extraLedgerInserts {
+		t.Fatalf("INSERT 语句应恰为 %d 条（每表一条 + ledger 补影段 %d 条），实际 %d",
+			len(devSeedAllowedTables)+extraLedgerInserts, extraLedgerInserts, len(ins))
 	}
 	counts := map[string]int{}
 	seen := map[string]bool{}
@@ -320,8 +325,14 @@ func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 		}
 	}
 	for tbl := range devSeedAllowedTables {
-		if counts[tbl] != 1 {
-			t.Fatalf("表 %s 的 INSERT 语句数应为 1，实际 %d", tbl, counts[tbl])
+		// 2026-10-05 联调轮：inventory_ledgers 允许 2 条（期初成对段 + 演示出库补影段，
+		// 见 TestDevSeedOpeningInventoryPairedWithLedger 的分段断言），其余每表 1 条。
+		want := 1
+		if tbl == "inventory_ledgers" {
+			want = 2
+		}
+		if counts[tbl] != want {
+			t.Fatalf("表 %s 的 INSERT 语句数应为 %d，实际 %d", tbl, want, counts[tbl])
 		}
 	}
 }
@@ -535,7 +546,42 @@ func TestDevSeedMasterdataCoverage(t *testing.T) {
 func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
 	inv := insertsOf(t, ins, "inventory", 1)
-	led := insertsOf(t, ins, "inventory_ledgers", 1)
+	// 2026-10-05 联调轮：inventory_ledgers 有两条 INSERT（期初成对段 + 演示出库补影段）。
+	// 成对断言只圈定期初条（含 '期初' 字面口径）；补影条按净零对单独断言（语义与
+	// dev_seed_verify.sql §6 按 business_type='期初' 圈定同口径）。
+	var led, shadow seedInsert
+	shadowCount := 0
+	for _, s := range ins {
+		if s.table != "inventory_ledgers" {
+			continue
+		}
+		if strings.Contains(s.text, "'期初'") {
+			led = s
+		} else {
+			shadow = s
+			shadowCount++
+		}
+	}
+	if led.text == "" {
+		t.Fatal("未找到期初流水 INSERT（应含 '期初' 口径字面）")
+	}
+	if shadowCount != 1 {
+		t.Fatalf("补影流水 INSERT 应恰 1 条，实际 %d", shadowCount)
+	}
+	if led.text == "" {
+		t.Fatal("未找到期初流水 INSERT（应含 '期初' 口径字面）")
+	}
+	// 补影段净零对：Σ qty_change = 0（不改任何现存量锚点）
+	var shadowNet float64
+	for _, tup := range shadow.tuples {
+		if len(tup) != 9 {
+			t.Fatalf("补影流水 VALUES 元组应为 9 列，实际 %v", tup)
+		}
+		shadowNet += parseQty(t, tup[6], "补影流水")
+	}
+	if shadowNet != 0 {
+		t.Fatalf("补影流水净变化应恒为 0（净零对），实际 %v", shadowNet)
+	}
 
 	// 六列数量中只写 total/available 两列（其余默认 0，恒等式因此成立）
 	for _, c := range []string{"total_qty", "available_qty"} {

@@ -316,3 +316,68 @@ PUT  /api/users/{id}
 DELETE /api/auth/sessions/{id} 的 {id} 为会话 SID（字符串形态），swagger 注解已
      由 int 修正为 string（仅文档修正，行为不变）。
 ```
+
+### 2026-10-05 联调轮（真联调 Smoke 发现的断裂修复 + Dashboard/分析域端点补齐）
+
+新增端点（前端先行契约兑现——web/src/api/dashboard.ts、web/src/api/inventory.ts
+InventoryAnalytics 立项挂账项，internal/reports/dashboard.go 实现；swag 注解同步）：
+
+```text
+GET /api/reports/dashboard/today           Dashboard 第一层今日指标（camelCase 与前端
+                                           DashboardTodayMetrics 契约逐字段回对）
+GET /api/reports/dashboard/trend           第二层趋势（range=7d/30d/90d/custom，
+                                           custom 必带 time_from/time_to；行形
+                                           {date,inbound,outbound,stockQty}）
+GET /api/reports/dashboard/tasks           第三层任务概览（type/label/count/link）
+GET /api/reports/dashboard/alerts          第三层预警条目（id/type/level/sku_code/
+                                           product_name/message/created_at，取前 8）
+GET /api/reports/dashboard/warehouse-stock 第四层仓库分布（warehouse_code/名称/
+                                           sku_count/total_qty/bin_utilization 0~100）
+GET /api/inventory/analytics               库存分析（total_stock_value/total_qty/
+                                           total_sku_count/turnover_rate/turnover_days/
+                                           abc[]/trend[]；days 默认 30 上限 366；
+                                           ABC 80/15/5 分档由后端计算——前端不得
+                                           自行分档的既有契约）
+```
+
+以上六端点均为 reports 域实现、挂 `inventory:inventory:list`（与 /api/inventory/
+summary|alerts 的"数据域读权限承载 reports 实现"裁决同口径——Dashboard 页无独立
+权限码、全员可见）。日末库存趋势采用"现存量锚点回推"（日末 = Σtotal_qty − 之后
+INBOUND/OUTBOUND/TRANSFER/ADJUST 净变化；LOCK/RELEASE/INSPECT_*/MOVE 不改变总量
+不入净变化集），演示种子配平后锚点与流水重构恒等。
+
+修复的契约断裂（真联调 SmokeCheck 实测发现）：
+
+```text
+GET /api/notifications        空列表 items:null → items:[]（nil slice 序列化；
+                              listInbox 预置空 slice。统一分页契约 api.md §2.1）
+GET /api/reports/inventory-summary、/api/reports/inventory-turnover、
+GET /api/reports/stagnant-stock、/api/reports/replenishment-suggestions、
+    inbound/outbound-stats
+     1) 行结构 SKUID 字段补 gorm:"column:sku_id"——GORM 对连续大写缩写的默认列名
+        映射为 sk_uid，与 SQL 别名 sku_id 不匹配，sku_id 恒 0（warehouse_id 正常、
+        sku_code 正常，仅 sku_id 断裂）；
+     2) 空列表 items:null → items:[]（nil slice 同上，五个报表仓储统一预置）。
+GET /api/reports/inbound-stats、/api/reports/outbound-stats、/api/inventory/alerts、
+GET /api/reports/inventory-turnover、/api/reports/stagnant-stock
+     时间字段统一 api.md §2 YYYY-MM-DD HH:mm:ss（JSONTime）：stat_date /
+     last_moved_at 此前裸 time.Time 序列化为 RFC3339（2026-10-04 数据中心收敛轮
+     的漏网，报表域 2026-10-05 收敛完毕）。
+```
+
+行为修复（独立复测员发现，联调轮修复）：
+
+```text
+GET /api/inventory、/api/inventory-ledgers、/api/serials
+     batch_id 过滤参数缺省语义修正：未提供=不过滤（此前缺省被 parseBatchIDQuery
+     包装为 &0，仓储拼 AND batch_id=0，缺省列表隐式隐藏全部批次库存行——
+     inventory 全表 24 行仅可见 16 行，/api/inventory/summary 口径不一致）；
+     显式 batch_id=0 仍为「只看非批次库存行」、>0 指定批次（不变）。
+```
+演示种子（db/seed/dev_seed.sql §8.5 趋势形态段，is_dev 门禁内、幂等、verify 全过）：
+
+```text
+期初流水 created_at 分散至近 7 天（每天 4 笔，期初-流水仍 1:1 成对）；追加 4 笔
+"先入后出"净零对补影流水（id 9875-9878，business_no DEV-SEED-FLOW-*，Σ 净变化
+为 0——现存量锚点不变、恒等式不变），趋势/出库统计/周转率获得非零真实值。
+```

@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+
+	"github.com/stockflow/server/internal/database"
 )
 
 // 只读聚合 SQL（现场聚合，backend-m3-plan §9.2）：全部为参数化 SELECT，零写语句
@@ -66,7 +68,7 @@ type InventorySummaryRow struct {
 	WarehouseID       int64   `json:"warehouse_id"`
 	WarehouseCode     string  `json:"warehouse_code"`
 	WarehouseName     string  `json:"warehouse_name"`
-	SKUID             int64   `json:"sku_id"`
+	SKUID             int64   `gorm:"column:sku_id" json:"sku_id"`
 	SKUCode           string  `json:"sku_code"`
 	SKUName           string  `json:"sku_name"`
 	TotalQty          float64 `json:"total_qty"`
@@ -108,7 +110,8 @@ func (r *repository) inventorySummary(ctx context.Context, sc Scope, warehouseID
 	scCond, scArgs := sc.cond("i.warehouse_id")
 	base := fmt.Sprintf(inventorySummaryBase, scCond, extra)
 	args := append(append([]any{}, scArgs...), eArgs...)
-	var rows []InventorySummaryRow
+	// 预置非 nil 空 slice：nil slice 序列化为 items:null，违反统一分页契约（api.md §2.1）。
+	rows := make([]InventorySummaryRow, 0)
 	total, err := paged(ctx, r.db, base, args, "i.warehouse_id, i.sku_id", page, pageSize, &rows)
 	return rows, total, err
 }
@@ -118,7 +121,8 @@ func (r *repository) inventorySummary(ctx context.Context, sc Scope, warehouseID
 // FlowStatRow 单据流统计行（按日）。
 type FlowStatRow struct {
 	// StatDate 统计日（YYYY-MM-DD；created_at::date，数据库会话时区）。
-	StatDate time.Time `json:"stat_date"`
+	// StatDate 统计日（api.md §2 时间格式；裸 time.Time 会序列化为 RFC3339）。
+	StatDate database.JSONTime `json:"stat_date"`
 	// OrderCount 当日 DISTINCT 业务单号数（business_no）。
 	OrderCount int64   `json:"order_count"`
 	Qty        float64 `json:"qty"`
@@ -141,7 +145,8 @@ func (r *repository) flowStats(ctx context.Context, sc Scope, changeType, priceC
 	base := fmt.Sprintf(flowStatsBase, priceColumn, scCond)
 	// 占位顺序与 SQL 一致：change_type、created_at 下界/上界、仓库范围（flowStatsBase WHERE %s 在最后）。
 	args := append(append([]any{}, changeType, from, to), scArgs...)
-	var rows []FlowStatRow
+	// 预置非 nil 空 slice：nil slice 序列化为 items:null，违反统一分页契约（api.md §2.1）。
+	rows := make([]FlowStatRow, 0)
 	total, err := paged(ctx, r.db, base, args, "stat_date", page, pageSize, &rows)
 	return rows, total, err
 }
@@ -150,17 +155,17 @@ func (r *repository) flowStats(ctx context.Context, sc Scope, changeType, priceC
 
 // TurnoverRow 库存周转行（按仓 + SKU）。
 type TurnoverRow struct {
-	WarehouseID   int64      `json:"warehouse_id"`
-	WarehouseCode string     `json:"warehouse_code"`
-	WarehouseName string     `json:"warehouse_name"`
-	SKUID         int64      `json:"sku_id"`
-	SKUCode       string     `json:"sku_code"`
-	SKUName       string     `json:"sku_name"`
-	OutboundQty   float64    `json:"outbound_qty"`
-	StartQty      float64    `json:"start_qty"`
-	EndQty        float64    `json:"end_qty"`
-	AvgInventory  float64    `json:"avg_inventory"`
-	LastMovedAt   *time.Time `json:"last_moved_at,omitempty"`
+	WarehouseID   int64              `json:"warehouse_id"`
+	WarehouseCode string             `json:"warehouse_code"`
+	WarehouseName string             `json:"warehouse_name"`
+	SKUID         int64              `gorm:"column:sku_id" json:"sku_id"`
+	SKUCode       string             `json:"sku_code"`
+	SKUName       string             `json:"sku_name"`
+	OutboundQty   float64            `json:"outbound_qty"`
+	StartQty      float64            `json:"start_qty"`
+	EndQty        float64            `json:"end_qty"`
+	AvgInventory  float64            `json:"avg_inventory"`
+	LastMovedAt   *database.JSONTime `json:"last_moved_at,omitempty"`
 	// TurnoverRate/TurnoverDays Service 层纯函数计算（周转率 = 出库量/平均库存；天数 = 周期天数/周转率）。
 	TurnoverRate float64 `json:"turnover_rate"`
 	TurnoverDays float64 `json:"turnover_days"`
@@ -211,7 +216,8 @@ func (r *repository) turnover(ctx context.Context, sc Scope, from, to time.Time,
 	args := append(append([]any{}, scArgs...), from, to)
 	args = append(args, lmArgs...)
 	args = append(args, scArgs...)
-	var rows []TurnoverRow
+	// 预置非 nil 空 slice：nil slice 序列化为 items:null，违反统一分页契约（api.md §2.1）。
+	rows := make([]TurnoverRow, 0)
 	total, err := paged(ctx, r.db, base, args, "c.warehouse_id, c.sku_id", page, pageSize, &rows)
 	return rows, total, err
 }
@@ -223,13 +229,13 @@ type StagnantRow struct {
 	WarehouseID   int64   `json:"warehouse_id"`
 	WarehouseCode string  `json:"warehouse_code"`
 	WarehouseName string  `json:"warehouse_name"`
-	SKUID         int64   `json:"sku_id"`
+	SKUID         int64   `gorm:"column:sku_id" json:"sku_id"`
 	SKUCode       string  `json:"sku_code"`
 	SKUName       string  `json:"sku_name"`
 	TotalQty      float64 `json:"total_qty"`
 	// LastMovedAt 末次移动时间（INBOUND/OUTBOUND/TRANSFER/MOVE/ADJUST 的最后落账；
 	// 无任何流水时回退首次入库建账时间）。
-	LastMovedAt time.Time `json:"last_moved_at"`
+	LastMovedAt database.JSONTime `json:"last_moved_at"`
 	// IdleDays 未动天数（截至查询时点，按自然 24h 折算）。
 	IdleDays int `json:"idle_days"`
 	// Tier 分档（"30"/"60"/"90"…，Service 层按阈值清单分档）。
@@ -269,7 +275,8 @@ func (r *repository) stagnant(ctx context.Context, sc Scope, cutoff time.Time, p
 	args := append(append([]any{}, lmArgs...), stArgs...)
 	args = append(args, cutoff)
 	args = append(args, outArgs...)
-	var rows []StagnantRow
+	// 预置非 nil 空 slice：nil slice 序列化为 items:null，违反统一分页契约（api.md §2.1）。
+	rows := make([]StagnantRow, 0)
 	total, err := paged(ctx, r.db, base, args, "last_moved_at, st.warehouse_id, st.sku_id", page, pageSize, &rows)
 	return rows, total, err
 }
@@ -281,7 +288,7 @@ type ReplenishmentRow struct {
 	WarehouseID      int64   `json:"warehouse_id"`
 	WarehouseCode    string  `json:"warehouse_code"`
 	WarehouseName    string  `json:"warehouse_name"`
-	SKUID            int64   `json:"sku_id"`
+	SKUID            int64   `gorm:"column:sku_id" json:"sku_id"`
 	SKUCode          string  `json:"sku_code"`
 	SKUName          string  `json:"sku_name"`
 	DailyAvgSales    float64 `json:"daily_avg_sales"`
@@ -356,7 +363,8 @@ func (r *repository) replenishment(ctx context.Context, sc Scope, salesFrom time
 	args = append(args, lArgs...)
 	args = append(args, float64(leadPlusBuffer), float64(leadPlusBuffer))
 	args = append(args, bArgs...)
-	var rows []ReplenishmentRow
+	// 预置非 nil 空 slice：nil slice 序列化为 items:null，违反统一分页契约（api.md §2.1）。
+	rows := make([]ReplenishmentRow, 0)
 	total, err := paged(ctx, r.db, base, args, "b.warehouse_id, b.sku_id", page, pageSize, &rows)
 	return rows, total, err
 }
@@ -413,7 +421,7 @@ type AlertItem struct {
 	WarehouseID   int64   `json:"warehouse_id"`
 	WarehouseCode string  `json:"warehouse_code"`
 	WarehouseName string  `json:"warehouse_name"`
-	SKUID         int64   `json:"sku_id"`
+	SKUID         int64   `gorm:"column:sku_id" json:"sku_id"`
 	SKUCode       string  `json:"sku_code"`
 	SKUName       string  `json:"sku_name"`
 	CurrentQty    float64 `json:"current_qty"`
@@ -421,7 +429,7 @@ type AlertItem struct {
 	// BatchNo 批次号（效期类预警携带；其余为空）。
 	BatchNo string `json:"batch_no,omitempty"`
 	// LastMovedAt 末次移动时间（slow_moving 携带；其余为空）。
-	LastMovedAt *time.Time `json:"last_moved_at,omitempty"`
+	LastMovedAt *database.JSONTime `json:"last_moved_at,omitempty"`
 	// Message 预警说明（Service 层按级别模板组装，携计算依据）。
 	Message string `json:"message"`
 }

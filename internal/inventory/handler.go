@@ -185,7 +185,14 @@ func parseIDQuery(c *gin.Context, name string) (int64, bool) {
 	return v, true
 }
 
+// parseBatchIDQuery 解析可选的 batch_id 过滤参数：未提供返回 nil（不过滤——缺省列表
+// 必须可见全部库存行，含批次行）；显式提供返回 &v（0=只看非批次库存行，>0=指定批次）。
+// 修复（api.md §9 2026-10-05 联调轮）：此前缺省经 parseIDQuery 得 (0,true) 被包装为
+// 非 nil 指针，仓储按显式过滤拼 AND batch_id=0，缺省列表隐式隐藏全部批次库存行。
 func parseBatchIDQuery(c *gin.Context) (*int64, bool) {
+	if strings.TrimSpace(c.Query("batch_id")) == "" {
+		return nil, true
+	}
 	v, ok := parseIDQuery(c, "batch_id")
 	if !ok {
 		return nil, false
