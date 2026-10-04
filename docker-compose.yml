@@ -7,6 +7,9 @@ services:
   postgres:
     image: postgres:15-alpine
     restart: unless-stopped
+    # CentOS 7 的 libseccomp 2.3 不认识新版 alpine 镜像的系统调用（clone3/faccessat2），
+    # 会把 initdb 的文件操作一律 EPERM；仅此容器解除 seccomp 过滤（安全审查 S12 的 sslmode 提示仍在）。
+    security_opt: ["seccomp=unconfined"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-stockflow}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
@@ -115,7 +118,7 @@ services:
     environment:
       TZ: Asia/Shanghai
     ports:
-      - "${WEB_BIND:-127.0.0.1}:80:80"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-80}:80"
     networks: [stockflow]
 
 volumes:

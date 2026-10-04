@@ -2,8 +2,6 @@ package inventory
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -12,6 +10,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/stockflow/server/internal/database"
+	"github.com/stockflow/server/internal/docnum"
 	"github.com/stockflow/server/internal/response"
 )
 
@@ -41,15 +40,9 @@ func withTx(ctx context.Context, db *gorm.DB, tx *gorm.DB, fn func(tx *gorm.DB) 
 	return db.WithContext(ctx).Transaction(fn)
 }
 
-// newBusinessNo 生成业务编号：<前缀>-YYYYMMDD-<8位随机hex>。
-// 说明：backend-m1-plan §8.4 规划"独立 PG sequence"，迁移 000005 未含该 sequence
-// （schema 冻结点未交付），M1 以"日期 + 8 位随机后缀 + ledger_no 唯一索引兜底"过渡，
-// 冲突时重试；M2 统一编号规则引擎（business-flow §13.1）引入时切换（已挂交付风险）。
-func newBusinessNo(prefix string, t time.Time) string {
-	b := make([]byte, 4)
-	_, _ = rand.Read(b) // crypto/rand 失败仅导致后缀全零，唯一索引仍兜底
-	return fmt.Sprintf("%s-%s-%s", prefix, t.Format("20060102"), hex.EncodeToString(b))
-}
+// newBusinessNo 已删除（backend-m2-plan §8.3 条 2 / 判据 5）：LED/ADJ 单号统一经
+// internal/docnum 编号引擎发放（business-flow §13.1；writeLedger/writeAdjustment），
+// M1"日期+8位随机hex+唯一索引重试"过渡实现随 MT0 移除。
 
 // ---- 库存行 ----
 
@@ -367,20 +360,207 @@ func insertAdjustment(tx *gorm.DB, a *InventoryAdjustment) error {
 	).Error
 }
 
-// writeAdjustment 写调整单；单号随机后缀碰撞（uk_inventory_adjustments_no）时重生成重试。
-func writeAdjustment(tx *gorm.DB, a *InventoryAdjustment) error {
-	for range insertRetryLimit {
-		a.AdjustmentNo = newBusinessNo("ADJ", time.Now())
-		err := insertAdjustment(tx, a)
-		if err == nil {
-			return nil
+// writeAdjustment 写/落执行调整单并返回 adjustment_no（plan §8.3 条 2/条 3）：
+//   - existingID<=0（M1 形态）：经 docnum（ADJ 前缀，ResetAll）发放单号 insertAdjustment
+//     （status=EXECUTED）；历史遗留同格式单号撞唯一索引时取下一号重试；
+//   - existingID>0（§8.3 条 3，调整审批流复用）：不再插入，按 ID 将既有调整单守卫更新
+//     为 EXECUTED（WHERE status='APPROVED'，影响行数 0 = 状态冲突）。
+//
+// 返回本次落账的调整单单号（Adjust 原语经 MutationResult.AdjustmentNo 透出）。
+func writeAdjustment(tx *gorm.DB, a *InventoryAdjustment, existingID, updatedBy int64) (string, error) {
+	if existingID > 0 {
+		if err := executeAdjustmentByID(tx, existingID, updatedBy); err != nil {
+			return "", err
 		}
-		if pgUniqueViolation(err, "uk_inventory_adjustments_no") {
-			continue
+		no, err := findAdjustmentNoByID(tx, existingID)
+		if err != nil {
+			return "", err
 		}
-		return err
+		return no, nil
 	}
-	return response.NewError(ErrLedgerNumberConflict, nil)
+	rule, _ := docnum.RuleFor("ADJ")
+	for range insertRetryLimit {
+		no, err := docnum.Next(context.Background(), tx, rule)
+		if err != nil {
+			return "", err
+		}
+		a.AdjustmentNo = no
+		if err := insertAdjustment(tx, a); err == nil {
+			return no, nil
+		} else if pgUniqueViolation(err, "uk_inventory_adjustments_no") {
+			continue
+		} else {
+			return "", err
+		}
+	}
+	return "", response.NewError(ErrLedgerNumberConflict, nil)
+}
+
+// executeAdjustmentByID 既有调整单执行落账（守卫 UPDATE：APPROVED→EXECUTED，
+// business-flow §11.1 执行必须经审批）。
+func executeAdjustmentByID(tx *gorm.DB, id, updatedBy int64) error {
+	res := tx.Exec(`
+		UPDATE inventory_adjustments
+		SET status = 'EXECUTED', executed_by = ?, executed_at = now(),
+		    updated_at = now(), updated_by = ?
+		WHERE id = ? AND status = 'APPROVED'`, updatedBy, updatedBy, id)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return response.NewError(response.CodeConflict, map[string]any{
+			"reason": "调整单不存在或未处于已审核（APPROVED）状态", "adjustment_id": id,
+		})
+	}
+	return nil
+}
+
+// findAdjustmentNoByID 回读调整单单号（existingID 路径的结果补全）。
+func findAdjustmentNoByID(tx *gorm.DB, id int64) (string, error) {
+	var no string
+	err := tx.Raw(`SELECT adjustment_no FROM inventory_adjustments WHERE id = ?`, id).Scan(&no).Error
+	return no, err
+}
+
+// hasActiveCountFreeze 盘点冻结守卫查询：行上是否存在 ACTIVE COUNT_FREEZE 锁
+// （business-flow §10.2"冻结范围"；盘点冻结期间 total 恒定的唯一保障点）。
+func hasActiveCountFreeze(tx *gorm.DB, key RowKey) (bool, error) {
+	var n int64
+	err := tx.Raw(`
+		SELECT COUNT(*) FROM inventory_locks
+		WHERE warehouse_id = ? AND bin_id = ? AND sku_id = ? AND batch_id = ?
+		  AND lock_type = 'COUNT_FREEZE' AND status = 'ACTIVE'`,
+		key.WarehouseID, key.BinID, key.SKUID, key.BatchID).Scan(&n).Error
+	return n > 0, err
+}
+
+// ---- 锁定/调整单只读列表（plan §8.3 条 5：GET /api/inventory/locks、/adjustments；
+// 前端先行契约 web/src/api/inventory.ts 已调用）----
+
+// lockFilter 锁定记录查询过滤（数据权限仓库集强制收敛）。
+type lockFilter struct {
+	AllWarehouses bool
+	WarehouseIDs  []int64
+	WarehouseID   int64
+	SKUID         int64
+	LockType      string
+	Status        string
+	SourceType    string
+	SourceNo      string
+}
+
+func (f lockFilter) where() (string, []any) {
+	where := "1 = 1"
+	var args []any
+	if !f.AllWarehouses {
+		if len(f.WarehouseIDs) == 0 {
+			return "1 = 0", nil // fail-closed（permission.md §4）
+		}
+		where += " AND warehouse_id IN ?"
+		args = append(args, f.WarehouseIDs)
+	}
+	if f.WarehouseID > 0 {
+		where += " AND warehouse_id = ?"
+		args = append(args, f.WarehouseID)
+	}
+	if f.SKUID > 0 {
+		where += " AND sku_id = ?"
+		args = append(args, f.SKUID)
+	}
+	if f.LockType != "" {
+		where += " AND lock_type = ?"
+		args = append(args, f.LockType)
+	}
+	if f.Status != "" {
+		where += " AND status = ?"
+		args = append(args, f.Status)
+	}
+	if f.SourceType != "" {
+		where += " AND source_type = ?"
+		args = append(args, f.SourceType)
+	}
+	if f.SourceNo != "" {
+		where += " AND source_no = ?"
+		args = append(args, f.SourceNo)
+	}
+	return where, args
+}
+
+func (r *repository) listLocks(ctx context.Context, f lockFilter, page, pageSize int) ([]InventoryLock, int64, error) {
+	where, args := f.where()
+	var total int64
+	if err := r.db.WithContext(ctx).Raw(
+		"SELECT COUNT(*) FROM inventory_locks WHERE "+where, args...).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []InventoryLock
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT id, warehouse_id, bin_id, sku_id, batch_id, lock_type,
+		       source_type, source_no, qty, status, released_at, released_by, remark,
+		       created_at, updated_at, created_by, updated_by
+		FROM inventory_locks WHERE `+where+`
+		ORDER BY id DESC
+		LIMIT ? OFFSET ?`,
+		append(args, pageSize, (page-1)*pageSize)...).Scan(&rows).Error
+	return rows, total, err
+}
+
+// adjustmentFilter 调整单查询过滤。
+type adjustmentFilter struct {
+	AllWarehouses bool
+	WarehouseIDs  []int64
+	WarehouseID   int64
+	SKUID         int64
+	AdjustType    string
+	Status        string
+}
+
+func (f adjustmentFilter) where() (string, []any) {
+	where := "1 = 1"
+	var args []any
+	if !f.AllWarehouses {
+		if len(f.WarehouseIDs) == 0 {
+			return "1 = 0", nil
+		}
+		where += " AND warehouse_id IN ?"
+		args = append(args, f.WarehouseIDs)
+	}
+	if f.WarehouseID > 0 {
+		where += " AND warehouse_id = ?"
+		args = append(args, f.WarehouseID)
+	}
+	if f.SKUID > 0 {
+		where += " AND sku_id = ?"
+		args = append(args, f.SKUID)
+	}
+	if f.AdjustType != "" {
+		where += " AND adjust_type = ?"
+		args = append(args, f.AdjustType)
+	}
+	if f.Status != "" {
+		where += " AND status = ?"
+		args = append(args, f.Status)
+	}
+	return where, args
+}
+
+func (r *repository) listAdjustments(ctx context.Context, f adjustmentFilter, page, pageSize int) ([]InventoryAdjustment, int64, error) {
+	where, args := f.where()
+	var total int64
+	if err := r.db.WithContext(ctx).Raw(
+		"SELECT COUNT(*) FROM inventory_adjustments WHERE "+where, args...).Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var rows []InventoryAdjustment
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT id, adjustment_no, warehouse_id, sku_id, bin_id, batch_id, adjust_type, qty,
+		       reason, status, approved_by, approved_at, executed_by, executed_at,
+		       created_at, updated_at, created_by, updated_by
+		FROM inventory_adjustments WHERE `+where+`
+		ORDER BY id DESC
+		LIMIT ? OFFSET ?`,
+		append(args, pageSize, (page-1)*pageSize)...).Scan(&rows).Error
+	return rows, total, err
 }
 
 // ---- 批次 ----

@@ -48,6 +48,28 @@ auth:
   rate_limit_ip_per_minute: 30  # /api/auth 公开组 IP 维度滑动窗口限流（S4，Redis 计数；
                                 # Redis 故障 fail-open 并记 error 日志）；用户名维度限流在 auth 域内实现
 
+# ====== M3 平台基座键（backend-m3-plan §3.2 冻结清单） ======
+storage:
+  root: ./data/files     # 文件中心本地存储根（deployment.md §1"文件存储（本地/OSS）"；OSS 留接口不做）
+  upload_max_bytes: 20971520  # 上传上限 20MB：/api/imports、/api/files 路由组局部中间件
+                              # 覆盖全局 1MB（api.md §5 文件大小上限；大包上传按需调大）
+
+queue:
+  concurrency: 10        # asynq 并发 worker 数（复用上方 redis.* 连接配置）；
+                         # redis.enabled=false 时队列走 inline 同步降级（开发/演示无 Redis 可用，
+                         # 生产必须 Redis——deployment.md §1.1）
+  max_retry: 3           # asynq 最大重试（指数退避；重试耗尽任务行终态 FAILED + 站内告警）
+
+datax:
+  import_max_rows: 5000      # 单次导入行数上限，超限 4xx DATAX_TOO_MANY_ROWS
+  batch_size: 200            # 导入分批事务批大小（批内行级原子，批间独立——excel.md §6.2）
+  export_batch_size: 1000    # 导出流式批次（keyset 游标，禁止 offset 深翻页）
+  file_retention_days: 30    # 任务产物/上传文件有效期（file_cleanup 定时清理）
+
+sysops:
+  backup_retention_days: 14  # 备份文件/记录保留期（备份执行为部署侧 pg_dump 执行器——
+                             # Orchestrator 裁决②混合模式；应用侧只登记/核对/清理）
+
 cors:
   allowed_origins:       # 白名单（architecture.md §6）；生产环境用 SF_CORS_ALLOWED_ORIGINS 覆盖
     - http://localhost:5173

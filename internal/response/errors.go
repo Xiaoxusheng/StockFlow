@@ -11,7 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
+
+	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 // RequestIDKey gin Context 键：middleware 写入，本包读取后放入信封（architecture.md §3.1）。
@@ -112,4 +116,59 @@ func AsError(err error) *Error {
 		return e
 	}
 	return NewError(CodeInternalError, nil)
+}
+
+// Envelope 统一响应信封的文档形态定义（api.md §2：{code,message,data,request_id,details}）。
+// 仅供 swag 注解（@Success/@Failure）引用说明信封结构——实际写出经 Err/OK/OKPage，
+// 本结构不参与运行时序列化路径，禁止绕过既有写出函数直接使用本类型。
+type Envelope struct {
+	Code      any    `json:"code"` // 成功 0（数字）；失败为模块命名空间错误码字符串（COMMON_* 等）
+	Message   string `json:"message"`
+	Data      any    `json:"data,omitempty"`
+	RequestID string `json:"request_id"`
+	Details   any    `json:"details,omitempty"` // 校验失败必带（api.md §4）
+}
+
+// BindErrorReason 请求体绑定失败的固定对外文案（清偿项 F20）。
+// 安全边界（go-dev-standard：用户输入不可信、内部错误不外泄）：ShouldBindJSON 的
+// err.Error() 可能携带内部结构/类型信息，一律不得直出 details，统一收敛为本文案。
+const BindErrorReason = "请求体格式错误"
+
+// bindTagMessages validator tag → 字段级固定中文文案（不透传 validator 原始错误串）。
+var bindTagMessages = map[string]string{
+	"required": "必填",
+	"min":      "长度或取值不足",
+	"max":      "长度或取值超出上限",
+	"len":      "长度不符",
+	"oneof":    "取值不在允许范围",
+	"email":    "格式不正确",
+	"gte":      "不能小于下限",
+	"gt":       "必须大于下限",
+	"lte":      "不能大于上限",
+	"lt":       "必须小于上限",
+	"unique":   "存在重复项",
+}
+
+// BindErrorDetails ShouldBindJSON 错误 → 统一 details（api.md §4：校验失败必须带 details）。
+//   - validator 校验失败 → {"reason": BindErrorReason, "fields": {字段名: 固定文案}}；
+//   - JSON 语法错误/类型不符等其他失败 → {"reason": BindErrorReason}。
+//
+// 各域 bind 助手（masterdata/purchase bindJSON、warehouse bindInput 等）与直写
+// ShouldBindJSON 的 handler 统一经此收敛，禁止再以 `"reason": err.Error()` 直出。
+func BindErrorDetails(err error) gin.H {
+	fields := map[string]string{}
+	var ve validator.ValidationErrors
+	if errors.As(err, &ve) {
+		for _, fe := range ve {
+			msg, ok := bindTagMessages[fe.Tag()]
+			if !ok {
+				msg = "格式不正确"
+			}
+			fields[strings.ToLower(fe.Field())] = msg
+		}
+	}
+	if len(fields) == 0 {
+		return gin.H{"reason": BindErrorReason}
+	}
+	return gin.H{"reason": BindErrorReason, "fields": fields}
 }

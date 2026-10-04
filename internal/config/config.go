@@ -23,8 +23,48 @@ type Config struct {
 	Redis    RedisConfig    `mapstructure:"redis"`
 	CORS     CORSConfig     `mapstructure:"cors"`
 	Auth     AuthConfig     `mapstructure:"auth"`
+	Storage  StorageConfig  `mapstructure:"storage"`
+	Queue    QueueConfig    `mapstructure:"queue"`
+	Datax    DataxConfig    `mapstructure:"datax"`
+	Sysops   SysopsConfig   `mapstructure:"sysops"`
 
 	warnings []string // 非阻断启动告警（Validate 收集，main 在日志装配后以 zap warn 输出）
+}
+
+// StorageConfig 文件中心本地存储（backend-m3-plan §3.2；OSS 留接口不做）。
+type StorageConfig struct {
+	// Root 文件中心本地存储根（deployment §1"文件存储（本地/OSS）"）。
+	Root string `mapstructure:"root"`
+	// UploadMaxBytes 上传上限（字节）：/api/imports、/api/files 路由组局部中间件覆盖全局
+	// 1MB（api.md §5 文件大小上限）。
+	UploadMaxBytes int64 `mapstructure:"upload_max_bytes"`
+}
+
+// QueueConfig 异步任务队列（backend-m3-plan §3.2；asynq 复用 redis.* 连接配置，
+// redis.enabled=false 时队列走 inline 同步实现——plan §4.1）。
+type QueueConfig struct {
+	// Concurrency asynq 并发 worker 数。
+	Concurrency int `mapstructure:"concurrency"`
+	// MaxRetry asynq 最大重试（指数退避为 asynq 内建策略）。
+	MaxRetry int `mapstructure:"max_retry"`
+}
+
+// DataxConfig Excel 导入导出参数（backend-m3-plan §3.2、excel §6）。
+type DataxConfig struct {
+	// ImportMaxRows 单次导入行数上限，超限 4xx DATAX_TOO_MANY_ROWS。
+	ImportMaxRows int `mapstructure:"import_max_rows"`
+	// BatchSize 导入分批事务批大小（excel §6.2：批内行级原子，批间独立）。
+	BatchSize int `mapstructure:"batch_size"`
+	// ExportBatchSize 导出流式批次（keyset 游标，禁止 offset 深翻页——plan §6.3）。
+	ExportBatchSize int `mapstructure:"export_batch_size"`
+	// FileRetentionDays 任务产物/上传文件有效期（files.expires_at 推导，file_cleanup 清理）。
+	FileRetentionDays int `mapstructure:"file_retention_days"`
+}
+
+// SysopsConfig 平台运维参数（backend-m3-plan §3.2）。
+type SysopsConfig struct {
+	// BackupRetentionDays 备份文件/记录保留期（file_cleanup 执行清理——plan §10.5）。
+	BackupRetentionDays int `mapstructure:"backup_retention_days"`
 }
 
 // ServerConfig HTTP 服务配置。
@@ -126,6 +166,16 @@ func defaults() map[string]any {
 		"redis.pool_size":               50,
 		"redis.min_idle_conns":          5,
 		"cors.allowed_origins":          []string{"http://localhost:5173"},
+		// M3 平台基座键（backend-m3-plan §3.2 冻结清单）
+		"storage.root":                 "./data/files",
+		"storage.upload_max_bytes":     int64(20971520), // 20MB（api.md §5 文件大小上限）
+		"queue.concurrency":            10,
+		"queue.max_retry":              3,
+		"datax.import_max_rows":        5000,
+		"datax.batch_size":             200,
+		"datax.export_batch_size":      1000,
+		"datax.file_retention_days":    30,
+		"sysops.backup_retention_days": 14,
 	}
 }
 
@@ -252,6 +302,35 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("redis 连接池参数非法: pool_size=%d min_idle_conns=%d",
 				c.Redis.PoolSize, c.Redis.MinIdleConns))
 		}
+	}
+
+	// M3 平台基座键（backend-m3-plan §3.2）：存储/队列/导入导出/备份保留期
+	if c.Storage.Root == "" {
+		errs = append(errs, errors.New("storage.root 不能为空"))
+	}
+	if c.Storage.UploadMaxBytes < 1 {
+		errs = append(errs, fmt.Errorf("storage.upload_max_bytes 必须 > 0，当前 %d", c.Storage.UploadMaxBytes))
+	}
+	if c.Queue.Concurrency < 1 {
+		errs = append(errs, fmt.Errorf("queue.concurrency 必须 >= 1，当前 %d", c.Queue.Concurrency))
+	}
+	if c.Queue.MaxRetry < 0 {
+		errs = append(errs, fmt.Errorf("queue.max_retry 不得为负，当前 %d", c.Queue.MaxRetry))
+	}
+	if c.Datax.ImportMaxRows < 1 {
+		errs = append(errs, fmt.Errorf("datax.import_max_rows 必须 >= 1，当前 %d", c.Datax.ImportMaxRows))
+	}
+	if c.Datax.BatchSize < 1 {
+		errs = append(errs, fmt.Errorf("datax.batch_size 必须 >= 1，当前 %d", c.Datax.BatchSize))
+	}
+	if c.Datax.ExportBatchSize < 1 {
+		errs = append(errs, fmt.Errorf("datax.export_batch_size 必须 >= 1，当前 %d", c.Datax.ExportBatchSize))
+	}
+	if c.Datax.FileRetentionDays < 1 {
+		errs = append(errs, fmt.Errorf("datax.file_retention_days 必须 >= 1，当前 %d", c.Datax.FileRetentionDays))
+	}
+	if c.Sysops.BackupRetentionDays < 1 {
+		errs = append(errs, fmt.Errorf("sysops.backup_retention_days 必须 >= 1，当前 %d", c.Sysops.BackupRetentionDays))
 	}
 
 	for _, origin := range c.CORS.AllowedOrigins {

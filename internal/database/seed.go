@@ -13,9 +13,11 @@ package database
 //   - 默认管理员初始密码经环境变量 SF_ADMIN_INITIAL_PASSWORD 注入（cmd 传入本函数）：
 //     缺失或弱密码即启动失败（deployment.md §3 禁止带病启动）；哈希 bcrypt cost 12；
 //     创建后 must_change_password=TRUE 强制修改（database.md §8.1）；
-//   - 种子内容：16 内置角色（permission.md §1，is_system 禁删）、M1 全量权限点
-//     （backend-m1-plan §5.4.1 冻结清单：24 个 MENU 菜单 + 82 个动作点，MENU 即"默认菜单"
-//     的落位）、默认管理员（绑定 super_admin）、默认仓库示例（database.md §8.1）；
+//   - 种子内容：16 内置角色（permission.md §1，is_system 禁删）、全量权限点
+//     （M1：backend-m1-plan §5.4.1 冻结清单；M2：backend-m2-plan §9.2 冻结清单；
+//     M3：backend-m3-plan §11 冻结清单——合计 63 个 MENU 菜单 + 229 个动作点，
+//     MENU 即"默认菜单"的落位）、默认管理员（绑定 super_admin）、默认仓库示例
+//     （database.md §8.1）；
 //   - 演示数据完全分离：db/seed/dev_seed.sql + make seed-demo（仅 SF_ENV=dev），
 //     任何启动路径不加载（database.md §8.2）；
 //   - 日志红线：任何日志/错误不携带密码与哈希（architecture.md §6）。
@@ -56,7 +58,8 @@ type BootstrapResult struct {
 
 // ---- 种子数据（冻结清单，修改须先改 backend-m1-plan §5.4.1/§7.1 再改这里） ----
 
-// permActionNames 动作词 → 中文名（backend-m1-plan §5.4.1 冻结动作枚举，禁止发明清单外动作词）。
+// permActionNames 动作词 → 中文名。M1 基础枚举（backend-m1-plan §5.4.1）+ M2 作业/审批
+// 动作（backend-m2-plan §9.1 冻结扩展，禁止发明清单外动作词）。
 var permActionNames = map[string]string{
 	"list":              "列表",
 	"read":              "详情",
@@ -69,6 +72,14 @@ var permActionNames = map[string]string{
 	"reset-password":    "重置密码",
 	"unlock":            "解锁",
 	"kick":              "强制下线",
+	// —— M2（backend-m2-plan §9.1）——
+	"submit":  "提交审核",
+	"approve": "审核",
+	"cancel":  "取消",
+	"close":   "关闭",
+	"execute": "作业执行",
+	"claim":   "任务领取",
+	"assign":  "异常分派",
 }
 
 // permResource 权限资源及其动作全集（backend-m1-plan §5.4.1 全量冻结清单，auth 种子同源）。
@@ -98,6 +109,43 @@ var permResources = []permResource{
 	{"inventory:ledger", "库存流水", []string{"list"}},
 	{"inventory:batch", "批次台账", []string{"list"}},
 	{"inventory:serial", "序列号", []string{"list"}},
+	// —— M2 单据域（backend-m2-plan §9.2 冻结清单，域按 api.md §1 领域划分）——
+	{"purchase:purchase", "采购订单", []string{"list", "read", "create", "update", "submit", "approve", "cancel", "close"}},
+	{"purchase:inbound", "入库单", []string{"list", "read", "create", "update", "cancel", "close"}},
+	{"purchase:receipt", "收货单", []string{"list", "read", "execute"}},
+	{"purchase:putaway", "上架任务", []string{"list", "read", "claim", "execute"}},
+	{"purchase:quality", "质检单", []string{"list", "read", "create", "execute"}},
+	{"sales:sales", "销售订单", []string{"list", "read", "create", "update", "submit", "approve", "cancel", "close"}},
+	{"sales:outbound", "出库单", []string{"list", "read", "create", "cancel", "close"}},
+	{"sales:allocation", "库存分配", []string{"list", "read", "create", "execute"}},
+	{"sales:pick", "拣货任务", []string{"list", "read", "claim", "execute"}},
+	{"sales:check", "复核任务", []string{"list", "read", "claim", "execute"}},
+	{"sales:packing", "打包记录", []string{"list", "read", "execute"}},
+	{"sales:shipment", "发货单", []string{"list", "read", "execute"}},
+	{"stockops:transfer", "调拨单", []string{"list", "read", "create", "update", "submit", "approve", "execute", "cancel", "close"}},
+	{"stockops:count", "盘点单", []string{"list", "read", "create", "execute", "approve", "cancel", "close"}},
+	{"stockops:adjustment", "库存调整", []string{"list", "read", "create", "approve", "execute", "cancel"}},
+	{"stockops:move", "仓内移库", []string{"list", "execute"}},
+	{"inventory:lock", "库存锁定", []string{"list"}},
+	{"returns:salesreturn", "销售退货", []string{"list", "read", "create", "update", "submit", "approve", "execute", "cancel", "close"}},
+	{"returns:purchasereturn", "采购退货", []string{"list", "read", "create", "update", "submit", "approve", "execute", "cancel", "close"}},
+	{"returns:exception", "异常中心", []string{"list", "read", "create", "assign", "execute", "close"}},
+	{"returns:trace", "库存追溯", []string{"list"}},
+	// —— M3 平台域（backend-m3-plan §11.1 冻结清单，动作词沿用 M1/M2 冻结枚举零新增）——
+	{"datax:import", "Excel 导入", []string{"list", "read", "create", "execute"}},
+	{"datax:export", "Excel 导出", []string{"list", "read", "create"}},
+	{"datax:file", "文件中心", []string{"list", "read", "create", "delete"}},
+	{"printing:template", "打印模板", []string{"list", "read", "create", "update", "status"}},
+	{"printing:task", "打印任务", []string{"list", "read", "create", "execute"}},
+	{"devices:device", "设备", []string{"list", "read", "create", "update", "status"}},
+	{"devices:scanlog", "扫码日志", []string{"list", "read"}},
+	{"scanner:resolve", "统一扫码解析", []string{"list"}},
+	{"reports:report", "报表", []string{"list", "read"}},
+	{"system:log", "审计日志", []string{"list", "read"}},
+	{"system:job", "定时任务", []string{"list", "read", "status"}},
+	{"system:config", "系统配置", []string{"list", "update"}},
+	{"system:monitor", "系统监控", []string{"list"}},
+	{"system:backup", "备份管理", []string{"list", "read", "create"}},
 }
 
 // menuSeed 菜单权限点：MENU 类型即 database.md §8.1“默认菜单”的落位（plan §7.5），
@@ -134,6 +182,53 @@ var menuSeeds = []menuSeed{
 	{"auth:permission", "权限点", "menu:system", 3},
 	{"auth:dept", "部门", "menu:system", 4},
 	{"auth:session", "在线会话", "menu:system", 5},
+	// —— M2 单据域菜单（backend-m2-plan §9.3：menuSeeds 追加 M2 资源与菜单节点，
+	//    叶子编码 = 资源编码，父先子后）——
+	{"menu:purchase", "采购中心", "", 50},
+	{"purchase:purchase", "采购订单", "menu:purchase", 1},
+	{"purchase:inbound", "入库单", "menu:purchase", 2},
+	{"purchase:receipt", "收货", "menu:purchase", 3},
+	{"purchase:quality", "质检", "menu:purchase", 4},
+	{"purchase:putaway", "上架", "menu:purchase", 5},
+	{"menu:sales", "销售中心", "", 60},
+	{"sales:sales", "销售订单", "menu:sales", 1},
+	{"sales:outbound", "出库单", "menu:sales", 2},
+	{"sales:allocation", "库存分配", "menu:sales", 3},
+	{"sales:pick", "拣货", "menu:sales", 4},
+	{"sales:check", "复核", "menu:sales", 5},
+	{"sales:packing", "打包", "menu:sales", 6},
+	{"sales:shipment", "发货", "menu:sales", 7},
+	{"menu:stockops", "库存作业", "", 70},
+	{"stockops:transfer", "调拨单", "menu:stockops", 1},
+	{"stockops:count", "盘点单", "menu:stockops", 2},
+	{"stockops:adjustment", "库存调整", "menu:stockops", 3},
+	{"stockops:move", "仓内移库", "menu:stockops", 4},
+	{"inventory:lock", "库存锁定", "menu:stockops", 5},
+	{"menu:returns", "退货与异常", "", 80},
+	{"returns:salesreturn", "销售退货", "menu:returns", 1},
+	{"returns:purchasereturn", "采购退货", "menu:returns", 2},
+	{"returns:exception", "异常中心", "menu:returns", 3},
+	{"returns:trace", "库存追溯", "menu:returns", 4},
+	// —— M3 平台域菜单（backend-m3-plan §11.2：数据中心 4 叶 / 设备中心 2 叶 /
+	//    报表中心 1 叶 / 系统管理增 4 叶，叶子编码 = 资源编码，父先子后。
+	//    对 §11.2 原文 6 叶设备中心与"系统管理含设备管理"的落位偏离记录见方案 §11.2 注：
+	//    设备类型页（scanners/pda/pads/printers）共用 devices:device 一个资源点，
+	//    登录日志与审计日志共用 system:log 资源点，叶编码唯一约束（seed_test 判重）
+	//    下各落一叶，页面级拆分由前端对齐轮消化）——
+	{"menu:datax", "数据中心", "", 90},
+	{"datax:import", "Excel 导入", "menu:datax", 1},
+	{"datax:export", "Excel 导出", "menu:datax", 2},
+	{"printing:template", "打印中心", "menu:datax", 3},
+	{"datax:file", "文件中心", "menu:datax", 4},
+	{"menu:devices", "设备中心", "", 100},
+	{"devices:device", "设备管理", "menu:devices", 1},
+	{"devices:scanlog", "扫码日志", "menu:devices", 2},
+	{"menu:reports", "报表中心", "", 110},
+	{"reports:report", "报表", "menu:reports", 1},
+	{"system:log", "审计日志", "menu:system", 6},
+	{"system:job", "定时任务", "menu:system", 7},
+	{"system:config", "系统配置", "menu:system", 8},
+	{"system:monitor", "系统监控", "menu:system", 9},
 }
 
 // systemRole 内置角色（permission.md §1 的 16 个角色全部种子化，is_system=TRUE 禁删）。
@@ -168,8 +263,10 @@ type permissionSeed struct {
 	Sort   int
 }
 
-// buildPermissionSeeds 汇总全部权限点：24 个菜单 + 82 个动作点 = 106 行（冻结清单，
-// 含 2026-10-02 复核补录的 inventory:batch / inventory:serial 两资源）。
+// buildPermissionSeeds 汇总全部权限点：63 个菜单 + 229 个动作点 = 292 行
+// （M1 冻结清单 24 菜单 + 82 动作点，M2 冻结清单 25 菜单 + 106 动作点，
+// M3 冻结清单 14 菜单 + 41 动作点——backend-m1-plan §5.4.1 + backend-m2-plan §9.2/§9.3
+// + backend-m3-plan §11，收编记录见 §11.4 注）。
 // 纯函数，供种子写入与单元测试共用（seed_test.go 以字面冻结清单交叉核对）。
 func buildPermissionSeeds() []permissionSeed {
 	seeds := make([]permissionSeed, 0, len(menuSeeds)+len(permResources)*6)
@@ -194,9 +291,212 @@ func buildPermissionSeeds() []permissionSeed {
 	return seeds
 }
 
-// rolePermissionCodes 返回角色应绑定的权限编码集合（plan §7.1：M1 仅对超级管理员、
-// 系统管理员、仓库管理员、财务/查看人员四个角色配置映射，其余角色随 M2 业务域补配，
-// 避免为不存在的页面造权限映射）。纯函数，供种子写入与单元测试共用。
+// m2RoleGrant M2 角色映射规格（backend-m2-plan §9.3 冻结映射的落位形态）：
+// 以资源为粒度声明授权动作——full=资源冻结清单全部动作；read=list+read；list=list；
+// pick=显式动作子集；extra=裸权限编码。菜单可见性（叶子 + 顶级 + Dashboard）随资源
+// 自动带出（叶子菜单编码 = 资源编码，§9.3"菜单与动作同源"口径），不逐条罗列菜单。
+type m2RoleGrant struct {
+	full  []string
+	read  []string
+	list  []string
+	pick  map[string][]string
+	extra []string
+}
+
+// m2MenuParents M2 四域菜单叶子的顶级父节点（与 menuSeeds 同源；inventory:lock 落
+// 库存作业组）——角色映射编译时用于带出顶级菜单可见性。
+var m2MenuParents = map[string]string{
+	"purchase:purchase": "menu:purchase", "purchase:inbound": "menu:purchase",
+	"purchase:receipt": "menu:purchase", "purchase:quality": "menu:purchase",
+	"purchase:putaway": "menu:purchase",
+	"sales:sales":      "menu:sales", "sales:outbound": "menu:sales", "sales:allocation": "menu:sales",
+	"sales:pick": "menu:sales", "sales:check": "menu:sales",
+	"sales:packing": "menu:sales", "sales:shipment": "menu:sales",
+	"stockops:transfer": "menu:stockops", "stockops:count": "menu:stockops",
+	"stockops:adjustment": "menu:stockops", "stockops:move": "menu:stockops",
+	"inventory:lock":      "menu:stockops",
+	"returns:salesreturn": "menu:returns", "returns:purchasereturn": "menu:returns",
+	"returns:exception": "menu:returns", "returns:trace": "menu:returns",
+}
+
+// m2RoleGrants 12 个业务角色到 M2 资源的映射（backend-m2-plan §9.3 表格逐行落位；
+// super_admin/sys_admin 全量、viewer 全只读、user 不配映射——三者走 switch 既有分支）。
+var m2RoleGrants = map[string]m2RoleGrant{
+	// 采购人员：采购订单全量 + 入库/质检只读 + 追溯/库存列表。
+	// M3（§11.3）：+ datax:export:list/read/create + datax:file（全动作）+ reports:report:list/read。
+	"purchaser": {
+		full:  []string{"purchase:purchase", "datax:file"},
+		read:  []string{"purchase:inbound", "purchase:quality", "datax:export", "reports:report"},
+		list:  []string{"returns:trace", "inventory:inventory"},
+		extra: []string{"datax:export:create"},
+	},
+	// 收货/上架/质检作业员：各自作业域全量 + 异常创建（§11.2 异常统一入口）。
+	// M3（§11.3 仓内作业角色）：+ scanner:resolve + datax:file:list/read（附件查看）+ reports:report:list。
+	"receiver": {
+		full: []string{"purchase:receipt"},
+		read: []string{"purchase:inbound", "datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	"putaway_operator": {
+		full: []string{"purchase:putaway"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	"inspector": {
+		full: []string{"purchase:quality"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	// 销售人员：销售订单全量 + 出库/分配只读。
+	// M3（§11.3）：+ datax:export:list/read/create + datax:file（全动作）+ reports:report:list/read。
+	"salesperson": {
+		full:  []string{"sales:sales", "datax:file"},
+		read:  []string{"sales:outbound", "sales:allocation", "datax:export", "reports:report"},
+		extra: []string{"datax:export:create"},
+	},
+	// 拣货/复核/打包/发货作业员：各自任务域全量 + 异常创建。
+	// M3（§11.3 仓内作业角色）：+ scanner:resolve + datax:file:list/read + reports:report:list。
+	"picker": {
+		full: []string{"sales:pick"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	"checker": {
+		full: []string{"sales:check"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	"packer": {
+		full: []string{"sales:packing"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	"shipper": {
+		full: []string{"sales:shipment"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"returns:exception": {"create"}},
+	},
+	// 盘点员：盘点全量 + 库存调整创建/列表（差异执行走审批链，plan §6.8）。
+	// M3（§11.3 仓内作业角色）：+ scanner:resolve + datax:file:list/read + reports:report:list。
+	"stocktaker": {
+		full: []string{"stockops:count"},
+		read: []string{"datax:file"},
+		list: []string{"scanner:resolve", "reports:report"},
+		pick: map[string][]string{"stockops:adjustment": {"create", "list"}},
+	},
+}
+
+// m2AllResources M2 全部资源（backend-m2-plan §9.2 表内资源编码；manager/operator 的
+// "四域列表读"按本清单展开）。
+var m2AllResources = []string{
+	"purchase:purchase", "purchase:inbound", "purchase:receipt", "purchase:putaway", "purchase:quality",
+	"sales:sales", "sales:outbound", "sales:allocation", "sales:pick", "sales:check", "sales:packing", "sales:shipment",
+	"stockops:transfer", "stockops:count", "stockops:adjustment", "stockops:move", "inventory:lock",
+	"returns:salesreturn", "returns:purchasereturn", "returns:exception", "returns:trace",
+}
+
+// m3MenuParents M3 平台域菜单叶子的顶级父节点（与 menuSeeds 同源；scanner:resolve 与
+// system:backup 无独立菜单叶子——resolve 是能力点非页面、备份页挂系统管理组，
+// 叶子编码 = 资源编码）。
+var m3MenuParents = map[string]string{
+	"datax:import": "menu:datax", "datax:export": "menu:datax",
+	"printing:template": "menu:datax", "datax:file": "menu:datax",
+	"devices:device": "menu:devices", "devices:scanlog": "menu:devices",
+	"reports:report": "menu:reports",
+	"system:log":     "menu:system", "system:job": "menu:system",
+	"system:config": "menu:system", "system:monitor": "menu:system",
+}
+
+// m3AllResources M3 全部资源（backend-m3-plan §11.1 表内 14 资源编码；viewer 的
+// "全部 M3 资源 list"与 viewer 排除 :read 明细点按本清单展开）。
+var m3AllResources = []string{
+	"datax:import", "datax:export", "datax:file",
+	"printing:template", "printing:task",
+	"devices:device", "devices:scanlog", "scanner:resolve",
+	"reports:report",
+	"system:log", "system:job", "system:config", "system:monitor", "system:backup",
+}
+
+// m3ManagerReadResources 仓库经理的 M3 "全 list+read" 资源（§11.3：datax/printing/
+// reports/devices 全部资源；system:* 运维面不授）。
+var m3ManagerReadResources = []string{
+	"datax:import", "datax:export", "datax:file",
+	"printing:template", "printing:task",
+	"devices:device", "devices:scanlog", "scanner:resolve",
+	"reports:report",
+}
+
+// isM3ReadDetail 判断权限编码是否为 M3 资源的 :read 明细点（§11.3 viewer 授权
+// "全部 M3 资源 list"不含 read——M1/M2 资源 read 照旧授权）。
+func isM3ReadDetail(code string) bool {
+	if !strings.HasSuffix(code, ":read") {
+		return false
+	}
+	res := code[:strings.LastIndex(code, ":")]
+	for _, r := range m3AllResources {
+		if r == res {
+			return true
+		}
+	}
+	return false
+}
+
+// compileRoleGrant 把映射规格编译为权限编码集合（动作取自 permResources 冻结动作集，
+// 规格声明的动作词不在资源清单内时忽略——不发明清单外动作）。
+func compileRoleGrant(spec m2RoleGrant) map[string]bool {
+	actionsByRes := make(map[string][]string, len(permResources))
+	for _, r := range permResources {
+		actionsByRes[r.Code] = r.Actions
+	}
+	allowed := map[string]bool{"menu:dashboard": true}
+	grantRes := func(res string, want []string) {
+		if want != nil {
+			set := make(map[string]bool, len(want))
+			for _, a := range want {
+				set[a] = true
+			}
+			for _, a := range actionsByRes[res] {
+				if set[a] {
+					allowed[res+":"+a] = true
+				}
+			}
+		}
+		if p, ok := m2MenuParents[res]; ok {
+			allowed[p] = true // 顶级菜单
+		}
+		if p, ok := m3MenuParents[res]; ok {
+			allowed[p] = true // M3 平台域顶级菜单（§11.2/§11.3）
+		}
+		allowed[res] = true // 叶子菜单（编码 = 资源编码）
+	}
+	for _, res := range spec.full {
+		grantRes(res, actionsByRes[res]) // 全部动作
+	}
+	for _, res := range spec.read {
+		grantRes(res, []string{"list", "read"})
+	}
+	for _, res := range spec.list {
+		grantRes(res, []string{"list"})
+	}
+	for res, acts := range spec.pick {
+		grantRes(res, acts)
+	}
+	for _, code := range spec.extra {
+		allowed[code] = true
+	}
+	return allowed
+}
+
+// rolePermissionCodes 返回角色应绑定的权限编码集合。M1 四角色映射沿用（plan §7.1），
+// M2 按方案 §9.3 扩展 12 个业务角色映射（super_admin/sys_admin 全量、viewer 全只读、
+// user 不配业务映射）。纯函数，供种子写入与单元测试共用。
 func rolePermissionCodes(role string) []string {
 	seeds := buildPermissionSeeds()
 	all := make([]string, 0, len(seeds))
@@ -215,8 +515,26 @@ func rolePermissionCodes(role string) []string {
 	case "super_admin", "sys_admin":
 		return all
 
-	case "warehouse_operator": // 仓库管理员：仓库 + 库存查看（plan §7.1）
-		allowed := map[string]bool{
+	case "viewer": // 财务/查看人员：只读（全部菜单 + list/read，含 M2 资源——§9.3 追加口径；
+		// M3 资源仅 list 不含 read 明细点——backend-m3-plan §11.3）
+		// 安全审查 S9：auth:user:list/read 指向用户目录（含手机号/邮箱等 PII），
+		// 不授权给查看类角色——仅管理类角色（super_admin/sys_admin）可见。
+		out := make([]string, 0, len(all))
+		for _, c := range all {
+			if c == "auth:user:list" || c == "auth:user:read" {
+				continue
+			}
+			if isM3ReadDetail(c) {
+				continue // §11.3：M3 资源仅授权 list，read 明细点不授
+			}
+			if menuCodes[c] || readOnly(c) {
+				out = append(out, c)
+			}
+		}
+		return out
+
+	case "warehouse_operator": // 仓库管理员：M1 仓库+库存查看 + M2 四域列表读 + 移库执行（§9.3）
+		m1 := map[string]bool{
 			"menu:dashboard":           true,
 			"menu:inventory":           true,
 			"inventory:inventory":      true,
@@ -230,8 +548,55 @@ func rolePermissionCodes(role string) []string {
 			"warehouse:bin":            true,
 		}
 		for _, res := range []string{"warehouse:warehouse", "warehouse:zone", "warehouse:shelf", "warehouse:bin"} {
-			allowed[res+":list"] = true
-			allowed[res+":read"] = true
+			m1[res+":list"] = true
+			m1[res+":read"] = true
+		}
+		m2 := compileRoleGrant(m2RoleGrant{
+			read:  m2AllResources,
+			extra: []string{"stockops:move:execute"},
+		})
+		for code := range m2 {
+			m1[code] = true
+		}
+		// M3（backend-m3-plan §11.3）：scanner:resolve + datax:file（全动作，附件管理）
+		// + reports:report:list。
+		m3 := compileRoleGrant(m2RoleGrant{
+			full: []string{"datax:file"},
+			list: []string{"scanner:resolve", "reports:report"},
+		})
+		for code := range m3 {
+			m1[code] = true
+		}
+		out := make([]string, 0, len(m1))
+		for _, c := range all {
+			if m1[c] {
+				out = append(out, c)
+			}
+		}
+		return out
+
+	case "warehouse_manager": // 仓库经理：四域全部列表读 + 各域 approve + 调拨/盘点全量 + 移库执行（§9.3）
+		// 调拨/盘点全量以库存可视性为前提，随 M1 库存查看基线（plan §7.1 仓库视图）补齐
+		// inventory:inventory/ledger 两查询点——不扩及 masterdata/warehouse 管理动作。
+		// M3（§11.3）：datax/printing/reports/devices 全 list+read + datax:export:create
+		// + printing:template 全量 + devices:device:update；system:* 运维面不授。
+		allowed := compileRoleGrant(m2RoleGrant{
+			read: append(append([]string{}, m2AllResources...), m3ManagerReadResources...),
+			full: []string{"stockops:transfer", "stockops:count", "printing:template"},
+			pick: map[string][]string{
+				"purchase:purchase":      {"approve"},
+				"sales:sales":            {"approve"},
+				"stockops:adjustment":    {"approve"},
+				"returns:salesreturn":    {"approve"},
+				"returns:purchasereturn": {"approve"},
+			},
+			extra: []string{"stockops:move:execute", "datax:export:create", "devices:device:update"},
+		})
+		for _, c := range []string{
+			"menu:inventory", "inventory:inventory", "inventory:inventory:list",
+			"inventory:ledger", "inventory:ledger:list",
+		} {
+			allowed[c] = true
 		}
 		out := make([]string, 0, len(allowed))
 		for _, c := range all {
@@ -241,23 +606,37 @@ func rolePermissionCodes(role string) []string {
 		}
 		return out
 
-	case "viewer": // 财务/查看人员：只读（全部菜单 + list/read）
-		// 安全审查 S9：auth:user:list/read 指向用户目录（含手机号/邮箱等 PII），
-		// 不授权给查看类角色——仅管理类角色（super_admin/sys_admin）可见。
-		out := make([]string, 0, len(all))
-		for _, c := range all {
-			if c == "auth:user:list" || c == "auth:user:read" {
-				continue
-			}
-			if menuCodes[c] || readOnly(c) {
-				out = append(out, c)
-			}
-		}
-		return out
-
 	default:
-		return nil // 其余 12 个内置角色 M1 不配映射（随 M2 业务域补配）
+		if role == "user" {
+			// 普通用户（backend-m3-plan §11.3）：仅统一扫码解析（经手任务需要）——
+			// 个人通知为认证即可用（无权限点）；其余不配业务映射，不配 dashboard 菜单
+			// （沿 M1/M2 user 零映射口径）。
+			return []string{"scanner:resolve:list"}
+		}
+		if spec, ok := m2RoleGrants[role]; ok {
+			allowed := compileRoleGrant(spec)
+			out := make([]string, 0, len(allowed))
+			for _, c := range all {
+				if allowed[c] {
+					out = append(out, c)
+				}
+			}
+			return out
+		}
+		return nil // 其余未映射角色：仅菜单与各自经手任务（同 M1 口径）
 	}
+}
+
+// FrozenSeedPermissionCodes 返回全部种子权限点编码（MENU + 动作点，冻结清单顺序）。
+// 探针测试面（backend-m3-plan §11 收编模式：internal/database 外部测试包断言 auth
+// 权限常量与种子同源，常量漏种/漂移即失败）；生产路径不消费。
+func FrozenSeedPermissionCodes() []string {
+	seeds := buildPermissionSeeds()
+	out := make([]string, 0, len(seeds))
+	for _, s := range seeds {
+		out = append(out, s.Code)
+	}
+	return out
 }
 
 // validateAdminInitialPassword 管理员初始密码校验——强密码策略（安全审查 S3 收紧）：
@@ -329,6 +708,68 @@ func BootstrapIfEmpty(db *gorm.DB, adminPassword string) (BootstrapResult, error
 	return res, nil
 }
 
+// permissionSeedGateway 权限点种子存储网关（seedPermissions 依赖注入点，
+// 单测以内存假实现覆盖残留数据场景，不依赖 PostgreSQL）。
+type permissionSeedGateway interface {
+	// insertSeed 插入权限点行，返回新行 id；code 已存在（ON CONFLICT 命中）时返回 sql.ErrNoRows。
+	insertSeed(p permissionSeed, parentID any) (int64, error)
+	// selectIDByCode 回读残留行的 id（部分初始化后的幂等续跑依赖此回填）。
+	selectIDByCode(code string) (int64, error)
+}
+
+// gormPermissionGateway permissionSeedGateway 的 PostgreSQL 实现（引导事务内逐行写入）。
+type gormPermissionGateway struct {
+	tx *gorm.DB
+}
+
+func (g gormPermissionGateway) insertSeed(p permissionSeed, parentID any) (int64, error) {
+	var id int64
+	err := g.tx.Raw(`INSERT INTO permissions (code, name, type, parent_id, sort, status, created_at, updated_at, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, 'ENABLED', now(), now(), 0, 0)
+		ON CONFLICT (code) DO NOTHING
+		RETURNING id`,
+		p.Code, p.Name, p.Type, parentID, p.Sort).Row().Scan(&id)
+	return id, err
+}
+
+func (g gormPermissionGateway) selectIDByCode(code string) (int64, error) {
+	var id int64
+	err := g.tx.Raw(`SELECT id FROM permissions WHERE code = ?`, code).Row().Scan(&id)
+	return id, err
+}
+
+// seedPermissions 逐行幂等写入权限点并构建 code→id 映射。
+// 残留数据（同 code 行已存在，INSERT..RETURNING 返回 sql.ErrNoRows）：跳过不覆盖，
+// 但回读 id 回填映射，保证其子权限不会误判「父级未就绪」而中断引导。
+func seedPermissions(gw permissionSeedGateway, seeds []permissionSeed, res *BootstrapResult) (map[string]int64, error) {
+	permIDs := make(map[string]int64, len(seeds))
+	for _, p := range seeds {
+		var parentID any
+		if p.Parent != "" {
+			id, ok := permIDs[p.Parent]
+			if !ok {
+				return nil, fmt.Errorf("种子权限点 %s 失败：父级 %s 未就绪（menuSeeds 必须父先子后）", p.Code, p.Parent)
+			}
+			parentID = id
+		}
+		id, err := gw.insertSeed(p, parentID)
+		switch {
+		case err == nil:
+			permIDs[p.Code] = id
+			res.PermissionsSeeded++
+		case errors.Is(err, sql.ErrNoRows):
+			existing, qerr := gw.selectIDByCode(p.Code)
+			if qerr != nil {
+				return nil, fmt.Errorf("回读残留权限点 %s 失败: %w", p.Code, qerr)
+			}
+			permIDs[p.Code] = existing
+		default:
+			return nil, fmt.Errorf("种子权限点 %s 失败: %w", p.Code, err)
+		}
+	}
+	return permIDs, nil
+}
+
 // seedBootstrapData 在单事务内完成全部种子（角色/权限点/角色绑定/管理员/默认仓库）。
 // 说明：循环内为单行幂等 INSERT，仅限一次性引导事务（架构 §7 的“禁止循环内查询”
 // 针对业务热路径，此处为 bootstrap 一次性写入，规模 ≤ 102 行，换取逐行可定位的错误信息）。
@@ -350,31 +791,8 @@ func seedBootstrapData(tx *gorm.DB, adminPassword string, res *BootstrapResult) 
 
 	// 2) 权限点：逐行 INSERT ... RETURNING id 以构建 code→id 映射做父子挂接
 	//    （menuSeeds 父先子后；动作点父级=资源菜单节点，保证已入映射）
-	permIDs := make(map[string]int64, 128)
-	for _, p := range buildPermissionSeeds() {
-		var parentID any
-		if p.Parent != "" {
-			id, ok := permIDs[p.Parent]
-			if !ok {
-				return fmt.Errorf("种子权限点 %s 失败：父级 %s 未就绪（menuSeeds 必须父先子后）", p.Code, p.Parent)
-			}
-			parentID = id
-		}
-		var id int64
-		err := tx.Raw(`INSERT INTO permissions (code, name, type, parent_id, sort, status, created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, 'ENABLED', now(), now(), 0, 0)
-			ON CONFLICT (code) DO NOTHING
-			RETURNING id`,
-			p.Code, p.Name, p.Type, parentID, p.Sort).Row().Scan(&id)
-		switch {
-		case err == nil:
-			permIDs[p.Code] = id
-			res.PermissionsSeeded++
-		case errors.Is(err, sql.ErrNoRows):
-			// 已存在（部分初始化的残留数据）：跳过，不覆盖
-		default:
-			return fmt.Errorf("种子权限点 %s 失败: %w", p.Code, err)
-		}
+	if _, err := seedPermissions(gormPermissionGateway{tx: tx}, buildPermissionSeeds(), res); err != nil {
+		return err
 	}
 
 	// 3) 角色绑定权限点（M1 四角色映射，plan §7.1）

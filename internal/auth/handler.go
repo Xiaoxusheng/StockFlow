@@ -58,6 +58,22 @@ func pathID(c *gin.Context, name string) (int64, bool) {
 	return id, true
 }
 
+// queryID 可选整型查询参数（0 = 未提供；非法值 fail-fast，不静默归 0）。
+func queryID(c *gin.Context, name string) (int64, bool) {
+	raw := c.Query(name)
+	if raw == "" {
+		return 0, true
+	}
+	id, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || id <= 0 {
+		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{
+			"field": name, "reason": "必须为正整数",
+		}))
+		return 0, false
+	}
+	return id, true
+}
+
 // ---- /api/auth 公开接口（api.md §6.1 豁免名单）----
 
 // LoginRequest 登录请求体。
@@ -67,6 +83,14 @@ type LoginRequest struct {
 }
 
 // handleLogin POST /api/auth/login。
+// @Summary POST /api/auth/login
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body LoginRequest true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/login [post]
 func handleLogin(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -75,7 +99,7 @@ func handleLogin(c *gin.Context) {
 	}
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	res, err := svc.Login(c.Request.Context(), LoginInput{
@@ -98,6 +122,14 @@ type RefreshRequest struct {
 }
 
 // handleRefresh POST /api/auth/refresh。
+// @Summary POST /api/auth/refresh
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body RefreshRequest true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/refresh [post]
 func handleRefresh(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -106,7 +138,7 @@ func handleRefresh(c *gin.Context) {
 	}
 	var req RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	res, err := svc.Refresh(c.Request.Context(), RefreshInput{
@@ -125,6 +157,13 @@ func handleRefresh(c *gin.Context) {
 // ---- /api/auth 受保护接口 ----
 
 // handleLogout POST /api/auth/logout。
+// @Summary POST /api/auth/logout
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/logout [post]
 func handleLogout(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -140,6 +179,12 @@ func handleLogout(c *gin.Context) {
 }
 
 // handleMe GET /api/auth/me。
+// @Summary GET /api/auth/me
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/me [get]
 func handleMe(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -167,6 +212,14 @@ type ChangePasswordRequest struct {
 }
 
 // handlePassword PUT /api/auth/password。
+// @Summary PUT /api/auth/password
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body ChangePasswordRequest true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/password [put]
 func handlePassword(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -180,7 +233,7 @@ func handlePassword(c *gin.Context) {
 	}
 	var req ChangePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.ChangePassword(c.Request.Context(), sess, actorOf(c), req.OldPassword, req.NewPassword); err != nil {
@@ -191,6 +244,12 @@ func handlePassword(c *gin.Context) {
 }
 
 // handleSessionList GET /api/auth/sessions（auth:session:list；内存分页满足强制分页）。
+// @Summary GET /api/auth/sessions（auth:session:list；内存分页满足强制分页）
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/sessions [get]
 func handleSessionList(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -228,6 +287,13 @@ func handleSessionList(c *gin.Context) {
 }
 
 // handleSessionKick DELETE /api/auth/sessions/:id（auth:session:kick；强制审计）。
+// @Summary DELETE /api/auth/sessions/:id（auth:session:kick；强制审计）
+// @Tags 认证与用户
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/auth/sessions/{id} [delete]
 func handleSessionKick(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -249,6 +315,12 @@ func handleSessionKick(c *gin.Context) {
 // ---- /api/users（plan §5.4：CRUD + 启停/重置密码/解锁/绑定角色；M1 无删除接口）----
 
 // handleUserList GET /api/users。
+// @Summary GET /api/users
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users [get]
 func handleUserList(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -260,7 +332,10 @@ func handleUserList(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	deptID, _ := strconv.ParseInt(c.Query("department_id"), 10, 64)
+	deptID, okDept := queryID(c, "department_id")
+	if !okDept {
+		return
+	}
 	items, total, err := svc.GetUsers(c.Request.Context(), actorOf(c), UserListFilter{
 		Keyword:      c.Query("keyword"),
 		Status:       c.Query("status"),
@@ -276,6 +351,13 @@ func handleUserList(c *gin.Context) {
 }
 
 // handleUserDetail GET /api/users/:id。
+// @Summary GET /api/users/:id
+// @Tags 认证与用户
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id} [get]
 func handleUserDetail(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -295,6 +377,14 @@ func handleUserDetail(c *gin.Context) {
 }
 
 // handleUserCreate POST /api/users。
+// @Summary POST /api/users
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body UserCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users [post]
 func handleUserCreate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -303,7 +393,7 @@ func handleUserCreate(c *gin.Context) {
 	}
 	var req UserCreateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.CreateUser(c.Request.Context(), actorOf(c), req)
@@ -315,6 +405,15 @@ func handleUserCreate(c *gin.Context) {
 }
 
 // handleUserUpdate PUT /api/users/:id。
+// @Summary PUT /api/users/:id
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body UserUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id} [put]
 func handleUserUpdate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -327,7 +426,7 @@ func handleUserUpdate(c *gin.Context) {
 	}
 	var req UserUpdateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.UpdateUser(c.Request.Context(), actorOf(c), id, req)
@@ -339,6 +438,15 @@ func handleUserUpdate(c *gin.Context) {
 }
 
 // handleUserStatus PUT /api/users/:id/status。
+// @Summary PUT /api/users/:id/status
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body StatusRequest true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id}/status [put]
 func handleUserStatus(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -351,7 +459,7 @@ func handleUserStatus(c *gin.Context) {
 	}
 	var req StatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.UpdateUserStatus(c.Request.Context(), actorOf(c), id, req.Status); err != nil {
@@ -362,6 +470,15 @@ func handleUserStatus(c *gin.Context) {
 }
 
 // handleUserResetPassword PUT /api/users/:id/reset-password。
+// @Summary PUT /api/users/:id/reset-password
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body ResetPasswordInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id}/reset-password [put]
 func handleUserResetPassword(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -374,7 +491,7 @@ func handleUserResetPassword(c *gin.Context) {
 	}
 	var req ResetPasswordInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.ResetUserPassword(c.Request.Context(), actorOf(c), id, req); err != nil {
@@ -385,6 +502,14 @@ func handleUserResetPassword(c *gin.Context) {
 }
 
 // handleUserUnlock PUT /api/users/:id/unlock。
+// @Summary PUT /api/users/:id/unlock
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id}/unlock [put]
 func handleUserUnlock(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -403,6 +528,15 @@ func handleUserUnlock(c *gin.Context) {
 }
 
 // handleUserAssignRoles PUT /api/users/:id/roles。
+// @Summary PUT /api/users/:id/roles
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body AssignRolesInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/users/{id}/roles [put]
 func handleUserAssignRoles(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -415,7 +549,7 @@ func handleUserAssignRoles(c *gin.Context) {
 	}
 	var req AssignRolesInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.AssignRoles(c.Request.Context(), actorOf(c), id, req); err != nil {
@@ -428,6 +562,12 @@ func handleUserAssignRoles(c *gin.Context) {
 // ---- /api/roles（CRUD + 绑定权限；无删除，database.md §5.1 清单不含 roles）----
 
 // handleRoleList GET /api/roles。
+// @Summary GET /api/roles
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles [get]
 func handleRoleList(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -453,6 +593,13 @@ func handleRoleList(c *gin.Context) {
 }
 
 // handleRoleDetail GET /api/roles/:id。
+// @Summary GET /api/roles/:id
+// @Tags 认证与用户
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles/{id} [get]
 func handleRoleDetail(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -472,6 +619,14 @@ func handleRoleDetail(c *gin.Context) {
 }
 
 // handleRoleCreate POST /api/roles。
+// @Summary POST /api/roles
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body RoleCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles [post]
 func handleRoleCreate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -480,7 +635,7 @@ func handleRoleCreate(c *gin.Context) {
 	}
 	var req RoleCreateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.CreateRole(c.Request.Context(), actorOf(c), req)
@@ -492,6 +647,15 @@ func handleRoleCreate(c *gin.Context) {
 }
 
 // handleRoleUpdate PUT /api/roles/:id。
+// @Summary PUT /api/roles/:id
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body RoleUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles/{id} [put]
 func handleRoleUpdate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -504,7 +668,7 @@ func handleRoleUpdate(c *gin.Context) {
 	}
 	var req RoleUpdateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.UpdateRole(c.Request.Context(), actorOf(c), id, req)
@@ -521,6 +685,15 @@ type StatusRequest struct {
 }
 
 // handleRoleStatus PUT /api/roles/:id/status。
+// @Summary PUT /api/roles/:id/status
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body StatusRequest true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles/{id}/status [put]
 func handleRoleStatus(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -533,7 +706,7 @@ func handleRoleStatus(c *gin.Context) {
 	}
 	var req StatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.UpdateRoleStatus(c.Request.Context(), actorOf(c), id, req.Status); err != nil {
@@ -544,6 +717,15 @@ func handleRoleStatus(c *gin.Context) {
 }
 
 // handleRoleAssignPermissions PUT /api/roles/:id/permissions。
+// @Summary PUT /api/roles/:id/permissions
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body AssignPermissionsInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/roles/{id}/permissions [put]
 func handleRoleAssignPermissions(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -556,7 +738,7 @@ func handleRoleAssignPermissions(c *gin.Context) {
 	}
 	var req AssignPermissionsInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.AssignPermissions(c.Request.Context(), actorOf(c), id, req); err != nil {
@@ -569,6 +751,12 @@ func handleRoleAssignPermissions(c *gin.Context) {
 // ---- /api/permissions ----
 
 // handlePermissionList GET /api/permissions（分页 + type/status/keyword 筛选）。
+// @Summary GET /api/permissions（分页 + type/status/keyword 筛选）
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/permissions [get]
 func handlePermissionList(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -597,6 +785,12 @@ func handlePermissionList(c *gin.Context) {
 // ---- /api/departments（CRUD + 启停；无删除）----
 
 // handleDeptList GET /api/departments。
+// @Summary GET /api/departments
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/departments [get]
 func handleDeptList(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -622,6 +816,13 @@ func handleDeptList(c *gin.Context) {
 }
 
 // handleDeptDetail GET /api/departments/:id。
+// @Summary GET /api/departments/:id
+// @Tags 认证与用户
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/departments/{id} [get]
 func handleDeptDetail(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -641,6 +842,14 @@ func handleDeptDetail(c *gin.Context) {
 }
 
 // handleDeptCreate POST /api/departments。
+// @Summary POST /api/departments
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body DeptCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/departments [post]
 func handleDeptCreate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -649,7 +858,7 @@ func handleDeptCreate(c *gin.Context) {
 	}
 	var req DeptCreateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.CreateDept(c.Request.Context(), actorOf(c), req)
@@ -661,6 +870,15 @@ func handleDeptCreate(c *gin.Context) {
 }
 
 // handleDeptUpdate PUT /api/departments/:id。
+// @Summary PUT /api/departments/:id
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body DeptUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/departments/{id} [put]
 func handleDeptUpdate(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -673,7 +891,7 @@ func handleDeptUpdate(c *gin.Context) {
 	}
 	var req DeptUpdateInput
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	view, err := svc.UpdateDept(c.Request.Context(), actorOf(c), id, req)
@@ -685,6 +903,15 @@ func handleDeptUpdate(c *gin.Context) {
 }
 
 // handleDeptStatus PUT /api/departments/:id/status。
+// @Summary PUT /api/departments/:id/status
+// @Tags 认证与用户
+// @Accept json
+// @Produce json
+// @Param body body StatusRequest true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/departments/{id}/status [put]
 func handleDeptStatus(c *gin.Context) {
 	svc, ok := svcOf()
 	if !ok {
@@ -697,7 +924,7 @@ func handleDeptStatus(c *gin.Context) {
 	}
 	var req StatusRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
 	if err := svc.UpdateDeptStatus(c.Request.Context(), actorOf(c), id, req.Status); err != nil {

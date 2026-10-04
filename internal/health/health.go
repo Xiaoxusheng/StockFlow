@@ -1,10 +1,13 @@
 // Package health 存活/就绪探针（api.md §8、deployment.md §3），免认证。
-// /health 只表明进程存活；/ready 检查 DB + Redis（api.md §8 的文件系统检查
-// 随阶段 14 文件中心引入，backend-m1-plan §12 已挂账）。
+// /health 只表明进程存活；/ready 检查 DB + Redis + 文件中心存储根
+// （存储检查由 backend-m3-plan §6.4 引入，M1 §12 挂账销项）。
 package health
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -24,20 +27,35 @@ const checkTimeout = 2 * time.Second
 const readinessCacheTTL = time.Second
 
 // Liveness GET /health：进程存活（不查依赖）。
+//
+// @Summary 进程存活探针
+// @Tags 健康检查
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Router /health [get]
 func Liveness() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		response.OK(c, gin.H{"status": "UP"})
 	}
 }
 
-// Readiness GET /ready：DB + Redis 就绪。
+// Readiness GET /ready：DB + Redis + 文件存储就绪。
 //   - rdb 为 nil：配置关闭 Redis，计 DISABLED，不阻塞就绪；
-//   - db 为 nil：装配错误，判 DOWN（503）。
+//   - db 为 nil：装配错误，判 DOWN（503）；
+//   - storageRoots 非 nil（长度 > 0）：M3 文件中心存储根可写探测（backend-m3-plan §6.4，
+//     M1 §12 挂账销项，deployment §3）——根目录可创建且探测文件可写可删，任一失败判 DOWN。
 //
 // 探测失败返回 503 + COMMON_SERVICE_UNAVAILABLE，details 携带各组件状态。
 // 结果带 1 秒本地缓存（readinessCacheTTL）；缓存为本次 Readiness() 调用实例私有
 // （闭包变量 + mutex），不同装配/不同进程间互不串扰。
-func Readiness(db *gorm.DB, rdb *redis.Client) gin.HandlerFunc {
+//
+// @Summary 就绪探针（DB + Redis + 文件存储）
+// @Tags 健康检查
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 503 {object} response.Envelope "服务暂不可用（组件 DOWN，details 携带各组件状态）"
+// @Router /ready [get]
+func Readiness(db *gorm.DB, rdb *redis.Client, storageRoots ...string) gin.HandlerFunc {
 	return cachedReadiness(func(ctx context.Context) (gin.H, bool) {
 		status := gin.H{}
 		ready := true
@@ -64,8 +82,37 @@ func Readiness(db *gorm.DB, rdb *redis.Client) gin.HandlerFunc {
 			status["redis"] = "UP"
 		}
 
+		// 文件中心存储根可写探测（探针文件名固定 + 服务端生成，不拼接任何外部输入；
+		// 探测失败判 DOWN——文件中心上传/导出产物落盘依赖该根）。
+		for _, root := range storageRoots {
+			if err := probeWritableDir(root); err != nil {
+				status["storage"] = "DOWN"
+				ready = false
+				break
+			}
+		}
+		if _, ok := status["storage"]; !ok && len(storageRoots) > 0 {
+			status["storage"] = "UP"
+		}
+
 		return status, ready
 	})
+}
+
+// probeWritableDir 存储根可写探测：确保目录存在 → 唯一探测文件写入 → 校验 → 删除。
+// 任一步失败即返回错误（权限/磁盘/挂载问题在 /ready 及时暴露，deployment §3 禁止带病部署）。
+func probeWritableDir(root string) error {
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		return fmt.Errorf("创建存储根 %s 失败: %w", root, err)
+	}
+	probe := filepath.Join(root, ".ready-probe")
+	if err := os.WriteFile(probe, []byte("ok"), 0o644); err != nil {
+		return fmt.Errorf("写入存储根探测文件失败: %w", err)
+	}
+	if err := os.Remove(probe); err != nil {
+		return fmt.Errorf("清理存储根探测文件失败: %w", err)
+	}
+	return nil
 }
 
 // probeFunc 单次就绪探测：返回组件状态与整体就绪（抽象便于单测注入计数替身）。

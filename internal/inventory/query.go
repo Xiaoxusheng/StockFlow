@@ -163,3 +163,57 @@ func (s *Service) QuerySerials(ctx context.Context, q SerialQuery) ([]SerialNumb
 		BinID: q.BinID, BatchID: q.BatchID, Status: q.Status,
 	}, q.Page, q.PageSize)
 }
+
+// LockQuery 锁定记录查询条件（GET /api/inventory/locks，plan §8.3 条 5；
+// 数据权限 Scope 仓库集强制收敛，permission.md §4）。
+type LockQuery struct {
+	Scope       Scope
+	WarehouseID int64
+	SKUID       int64
+	LockType    string
+	Status      string
+	SourceType  string
+	SourceNo    string
+	Page        int
+	PageSize    int
+}
+
+// QueryLocks 分页查询库存锁定记录。
+func (s *Service) QueryLocks(ctx context.Context, q LockQuery) ([]InventoryLock, int64, error) {
+	if s.db == nil {
+		return nil, 0, gorm.ErrInvalidDB
+	}
+	f := lockFilter{
+		AllWarehouses: q.Scope.AllWarehouses,
+		WarehouseIDs:  q.Scope.WarehouseIDs,
+		WarehouseID:   q.WarehouseID, SKUID: q.SKUID,
+		LockType: q.LockType, Status: q.Status,
+		SourceType: q.SourceType, SourceNo: q.SourceNo,
+	}
+	return s.repo.listLocks(ctx, f, q.Page, q.PageSize)
+}
+
+// AdjustmentQuery 库存调整单查询条件（GET /api/inventory/adjustments，plan §8.3 条 5）。
+type AdjustmentQuery struct {
+	Scope       Scope
+	WarehouseID int64
+	SKUID       int64
+	AdjustType  string
+	Status      string
+	Page        int
+	PageSize    int
+}
+
+// QueryAdjustments 分页查询库存调整单。
+func (s *Service) QueryAdjustments(ctx context.Context, q AdjustmentQuery) ([]InventoryAdjustment, int64, error) {
+	if s.db == nil {
+		return nil, 0, gorm.ErrInvalidDB
+	}
+	f := adjustmentFilter{
+		AllWarehouses: q.Scope.AllWarehouses,
+		WarehouseIDs:  q.Scope.WarehouseIDs,
+		WarehouseID:   q.WarehouseID, SKUID: q.SKUID,
+		AdjustType: q.AdjustType, Status: q.Status,
+	}
+	return s.repo.listAdjustments(ctx, f, q.Page, q.PageSize)
+}

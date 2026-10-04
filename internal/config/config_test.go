@@ -27,6 +27,16 @@ func TestLoadDefaults(t *testing.T) {
 	require.Empty(t, cfg.Server.TrustedProxies) // 空 = 不信任任何代理
 	require.Equal(t, int64(1)<<20, cfg.Server.MaxBodyBytes)
 	require.Equal(t, 30, cfg.Auth.RateLimitIPPerMinute)
+	// M3 平台基座默认值（backend-m3-plan §3.2 冻结清单）
+	require.Equal(t, "./data/files", cfg.Storage.Root)
+	require.Equal(t, int64(20971520), cfg.Storage.UploadMaxBytes)
+	require.Equal(t, 10, cfg.Queue.Concurrency)
+	require.Equal(t, 3, cfg.Queue.MaxRetry)
+	require.Equal(t, 5000, cfg.Datax.ImportMaxRows)
+	require.Equal(t, 200, cfg.Datax.BatchSize)
+	require.Equal(t, 1000, cfg.Datax.ExportBatchSize)
+	require.Equal(t, 30, cfg.Datax.FileRetentionDays)
+	require.Equal(t, 14, cfg.Sysops.BackupRetentionDays)
 }
 
 func TestLoadFromYAMLAndEnvOverrides(t *testing.T) {

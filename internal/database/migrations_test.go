@@ -150,10 +150,49 @@ var m1Files = map[string][]string{
 	},
 }
 
+// M2 五组迁移与其表集合（backend-m2-plan §5 冻结清单，29 表）。
+var m2Files = map[string][]string{
+	"000006_create_doc_shared_tables": {"doc_number_counters", "document_approvals"},
+	"000007_create_purchase_tables": {
+		"purchase_orders", "purchase_order_items",
+		"inbound_orders", "inbound_items",
+		"receipts", "receipt_items",
+		"putaway_tasks", "quality_orders", "quality_items",
+	},
+	"000008_create_sales_tables": {
+		"sales_orders", "sales_order_items",
+		"outbound_orders", "outbound_items",
+		"allocation_records", "pick_tasks", "check_tasks",
+		"packing_records", "packing_items", "shipments",
+	},
+	"000009_create_stockops_tables": {
+		"transfer_orders", "transfer_items",
+		"count_orders", "count_items", "count_differences",
+	},
+	"000010_create_returns_tables": {"return_orders", "return_items", "exceptions"},
+}
+
+// M3 四组迁移与其表集合（backend-m3-plan §5 冻结清单，17 表）。
+var m3Files = map[string][]string{
+	"000011_create_datax_tables": {
+		"import_tasks", "import_task_rows", "export_tasks", "files",
+	},
+	"000012_create_printing_tables": {
+		"print_templates", "print_tasks", "print_task_rows",
+	},
+	"000013_create_device_tables": {
+		"devices", "device_configs", "scan_logs", "device_logs", "app_versions",
+	},
+	"000014_create_sysops_tables": {
+		"scheduled_jobs", "scheduled_job_runs", "system_configs", "notifications", "backup_records",
+	},
+}
+
 // database.md §5.1 软删除清单（库位=bin）。
+// M3 追加 files（backend-m3-plan §5 000011：deleted_at NULL——plan §6.4 删除=软删 + 审计）。
 var softDeleteTables = map[string]bool{
 	"users": true, "products": true, "skus": true, "suppliers": true,
-	"customers": true, "warehouses": true, "bins": true,
+	"customers": true, "warehouses": true, "bins": true, "files": true,
 }
 
 // join 表：仅 created_at/created_by。
@@ -163,8 +202,24 @@ var joinTables = map[string]bool{
 
 // append-only 表（database.md §7 审计数据 + inventory-rules §5 流水）：
 // 仅 created_at，无 updated_at/updated_by/deleted_at。
+// document_approvals 审批记录随 M2 000006 加入（business-flow §12.2 不可修改删除，plan §5）。
+// M3 000013 追加 scan_logs/device_logs（backend-m3-plan §5：append-only 审计表，grants 仅 SELECT+INSERT）。
 var appendOnlyTables = map[string]bool{
 	"operation_logs": true, "login_logs": true, "inventory_ledgers": true,
+	"document_approvals": true, "scan_logs": true, "device_logs": true,
+}
+
+// 自然主键表（M3 000014 system_configs：key varchar 主键，键即业务标识
+// 如 inventory.alert.expiry_days——backend-m3-plan §5 000014 冻结；
+// 无 bigserial 代理键，其余通用字段与软删除范围同业务表口径）。
+var naturalPkTables = map[string]bool{
+	"system_configs": true,
+}
+
+// 计数表（docnum 引擎，backend-m2-plan §4.1）：复合主键 prefix+period，无 bigserial 代理键；
+// 通用字段仅 created_at/updated_at（updated_at 记录最近发放时间），无 deleted_at。
+var counterTables = map[string]bool{
+	"doc_number_counters": true,
 }
 
 func TestMigrationFilesPairedAndSequential(t *testing.T) {
@@ -214,6 +269,380 @@ func TestM1MigrationNamesAndTableSets(t *testing.T) {
 	}
 	if len(created) != 26 {
 		t.Fatalf("M1 应为 26 表（backend-m1-plan §6.2），实际 %d", len(created))
+	}
+}
+
+// contractUpPath 按文件描述名定位 up 文件路径（backend-m1-plan/backend-m2-plan 冻结文件名）。
+func contractUpPath(t *testing.T, byVersion map[int]map[string]string, desc string) string {
+	t.Helper()
+	for _, pair := range byVersion {
+		if strings.HasSuffix(filepath.Base(pair["up"]), desc+".up.sql") {
+			return pair["up"]
+		}
+	}
+	return ""
+}
+
+func TestM2MigrationNamesAndTableSets(t *testing.T) {
+	byVersion := loadMigrations(t)
+
+	// 全库表名 → 首次定义所在迁移（跨 M1/M2 重复定义即违约：同一表只允许一处 DDL 契约）。
+	created := map[string]string{}
+	for desc, wantTables := range m1Files {
+		for _, want := range wantTables {
+			created[want] = desc
+		}
+	}
+
+	for desc, wantTables := range m2Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M2 迁移文件 %s.up.sql（backend-m2-plan §5 冻结清单）", desc)
+		}
+		up := readRepoFile(t, path)
+		defs := extractTables(t, up)
+		if len(defs) == 0 {
+			t.Fatalf("%s 未定义任何表", path)
+		}
+		got := map[string]bool{}
+		for _, d := range defs {
+			got[d.Name] = true
+			if prev, ok := created[d.Name]; ok {
+				t.Fatalf("表 %s 在 %s 与 %s 重复定义", d.Name, prev, path)
+			}
+			created[d.Name] = desc
+		}
+		for _, want := range wantTables {
+			if !got[want] {
+				t.Fatalf("%s 缺少契约表 %s", path, want)
+			}
+		}
+		if len(got) != len(wantTables) {
+			t.Fatalf("%s 表数量 %d 与冻结清单 %d 不符（多定义: %v）", path, len(got), len(wantTables), got)
+		}
+	}
+	// 26（M1）+ 29（M2）= 55：全库业务表全集封闭（database.md §2"至少覆盖"清单的落地基线）。
+	if len(created) != 55 {
+		t.Fatalf("M1+M2 应为 55 表（backend-m1-plan §6.2 + backend-m2-plan §5），实际 %d", len(created))
+	}
+}
+
+// TestM2NoCrossDomainForeignKeys M2 全部单据表不建任何外键：跨域引用一律逻辑单号
+// 或裸 ID + Service 层校验（backend-m2-plan §5 通用规则；域内明细→主单亦走同事务
+// 裸 ID 引用，与 000005 哨兵值约定一致）。
+func TestM2NoCrossDomainForeignKeys(t *testing.T) {
+	byVersion := loadMigrations(t)
+	for desc := range m2Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M2 迁移文件 %s.up.sql", desc)
+		}
+		if strings.Contains(strings.ToUpper(readRepoFile(t, path)), "REFERENCES") {
+			t.Fatalf("%s 不应包含任何 REFERENCES（跨域不建 FK，backend-m2-plan §5）", path)
+		}
+	}
+}
+
+// TestM2StatusValueDomains M2 状态机/值域 CHECK 与冻结契约同源（backend-m2-plan §5/§6；
+// 迁移是状态机第二道防线——与 TestStatusValueDomains 的 M1 契约同构）。
+func TestM2StatusValueDomains(t *testing.T) {
+	byVersion := loadMigrations(t)
+	m2Up := ""
+	for desc := range m2Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M2 迁移文件 %s.up.sql", desc)
+		}
+		m2Up += readRepoFile(t, path)
+	}
+	cases := map[string][]string{
+		// 000006
+		"chk_document_approvals_action": {"'SUBMIT'", "'APPROVE'", "'REJECT'", "'CANCEL'"},
+		// 000007（plan §6.1–§6.3 状态机 + business-flow §4 值域）
+		"chk_purchase_orders_status": {
+			"'DRAFT'", "'PENDING_APPROVAL'", "'APPROVED'", "'PARTIAL_RECEIVED'",
+			"'RECEIVED_ALL'", "'COMPLETED'", "'CANCELLED'",
+		},
+		"chk_inbound_orders_source_type": {"'PURCHASE'", "'OTHER'"},
+		"chk_inbound_orders_status": {
+			"'DRAFT'", "'RECEIVING'", "'AWAITING_QC'", "'AWAITING_PUTAWAY'",
+			"'COMPLETED'", "'CANCELLED'", "'CLOSED'",
+		},
+		"chk_putaway_tasks_from_state":       {"'available'", "'pending_inspect'"},
+		"chk_putaway_tasks_status":           {"'PENDING'", "'IN_PROGRESS'", "'COMPLETED'", "'CANCELLED'"},
+		"chk_quality_orders_source_type":     {"'INBOUND'", "'RETURN'"},
+		"chk_quality_orders_inspection_type": {"'免检'", "'抽检'", "'全检'"},
+		"chk_quality_orders_result": {
+			"'合格'", "'部分合格'", "'不合格'", "'退供应商'", "'报废'",
+			"'返工'", "'降级'", "'转不良品仓'", "'特批放行'",
+		},
+		"chk_quality_orders_status": {"'PENDING'", "'INSPECTING'", "'COMPLETED'"},
+		// 000008（plan §6.4–§6.5 状态机 + business-flow §7.1/§8.3/§8.5 值域）
+		"chk_sales_orders_status": {
+			"'DRAFT'", "'PENDING_APPROVAL'", "'APPROVED'", "'REJECTED'",
+			"'PARTIAL_SHIPPED'", "'SHIPPED_ALL'", "'COMPLETED'", "'CANCELLED'",
+		},
+		"chk_outbound_orders_type": {"'销售出库'", "'生产领料'", "'调拨出库'", "'其他出库'", "'报损出库'"},
+		"chk_outbound_orders_status": {
+			"'PENDING_ALLOCATE'", "'ALLOCATED'", "'PICKING'", "'PICKED'", "'CHECKED'",
+			"'PACKED'", "'PARTIAL_SHIPPED'", "'SHIPPED_ALL'", "'CANCELLED'", "'CLOSED'",
+		},
+		"chk_pick_tasks_status":           {"'PENDING'", "'CLAIMED'", "'PICKING'", "'PICKED'", "'EXCEPTION'", "'CANCELLED'"},
+		"chk_check_tasks_status":          {"'PENDING'", "'DONE'", "'EXCEPTION'"},
+		"chk_check_tasks_result":          {"''", "'错货'", "'少货'", "'多货'", "'批次错误'", "'序列号错误'"},
+		"chk_allocation_records_strategy": {"'FIFO'", "'FEFO'", "'指定批次'", "'指定仓库'", "'指定库位'"},
+		"chk_shipments_status":            {"'PENDING'", "'SHIPPED'", "'IN_TRANSIT'", "'SIGNED'", "'ABNORMAL'"},
+		// 000009（plan §6.6–§6.7 状态机）
+		"chk_transfer_orders_type": {"'WAREHOUSE'", "'BIN'"},
+		"chk_transfer_orders_status": {
+			"'DRAFT'", "'PENDING_APPROVAL'", "'APPROVED'", "'TRANSFERRING'",
+			"'AWAITING_RECEIPT'", "'COMPLETED'", "'CANCELLED'",
+		},
+		"chk_count_orders_status":      {"'DRAFT'", "'COUNTING'", "'PENDING_REVIEW'", "'COMPLETED'", "'CANCELLED'"},
+		"chk_count_differences_status": {"'PENDING'", "'APPROVED'", "'REJECTED'", "'EXECUTED'"},
+		// 000010（plan §6.9–§6.10 状态机 + business-flow §11.2 九类）
+		"chk_return_orders_type": {"'SALES'", "'PURCHASE'"},
+		"chk_return_orders_status": {
+			"'DRAFT'", "'PENDING_APPROVAL'", "'APPROVED'", "'RECEIVING'",
+			"'IN_QC'", "'SHIPPED'", "'COMPLETED'", "'CANCELLED'",
+		},
+		"chk_exceptions_type": {
+			"'收货异常'", "'质检异常'", "'上架异常'", "'库存异常'", "'拣货异常'",
+			"'复核异常'", "'物流异常'", "'盘点异常'", "'系统异常'",
+		},
+		"chk_exceptions_status": {
+			"'OPEN'", "'ASSIGNED'", "'PROCESSING'", "'PENDING_REVIEW'", "'RESOLVED'", "'CLOSED'",
+		},
+	}
+	for constraint, values := range cases {
+		if !strings.Contains(m2Up, constraint) {
+			t.Fatalf("M2 缺少状态值域约束 %s", constraint)
+		}
+		for _, v := range values {
+			if !strings.Contains(m2Up, v) {
+				t.Fatalf("约束 %s 值域缺少 %s", constraint, v)
+			}
+		}
+	}
+}
+
+// TestM2IdempotencyAndDocnumInfra 幂等键部分唯一索引（architecture §3.2/plan §5：
+// HTTP 事件型表 receipts/packing_records/shipments）与 docnum 计数表基础设施
+// （plan §4.1：复合主键 prefix+period，两语句发放落点）。
+func TestM2IdempotencyAndDocnumInfra(t *testing.T) {
+	byVersion := loadMigrations(t)
+	m2Up := ""
+	for desc := range m2Files {
+		m2Up += readRepoFile(t, contractUpPath(t, byVersion, desc))
+	}
+	// 事件型表幂等键部分唯一索引（NULL 不参与，与 000005 流水幂等键同款口径）。
+	for _, want := range []string{
+		"CREATE UNIQUE INDEX uk_receipts_idempotency ON receipts (idempotency_key) WHERE idempotency_key IS NOT NULL",
+		"CREATE UNIQUE INDEX uk_packing_records_idempotency ON packing_records (idempotency_key) WHERE idempotency_key IS NOT NULL",
+		"CREATE UNIQUE INDEX uk_shipments_idempotency ON shipments (idempotency_key) WHERE idempotency_key IS NOT NULL",
+	} {
+		if !strings.Contains(normalize(m2Up), want) {
+			t.Fatalf("M2 缺少幂等键部分唯一索引：%s", want)
+		}
+	}
+	// 单号唯一（database.md §6 / plan §5：全部主单据 *_no UNIQUE 索引）。
+	for _, idx := range []string{
+		"uk_purchase_orders_no", "uk_inbound_orders_no", "uk_receipts_no", "uk_putaway_tasks_no",
+		"uk_quality_orders_no", "uk_sales_orders_no", "uk_outbound_orders_no", "uk_pick_tasks_no",
+		"uk_check_tasks_no", "uk_packing_records_no", "uk_shipments_no", "uk_transfer_orders_no",
+		"uk_count_orders_no", "uk_return_orders_no", "uk_exceptions_no",
+	} {
+		if !strings.Contains(m2Up, "CREATE UNIQUE INDEX "+idx) {
+			t.Fatalf("M2 缺少单号唯一索引 %s", idx)
+		}
+	}
+	// doc_number_counters 复合主键（plan §4.1：发放走 UPDATE ... WHERE prefix=? AND period=?）。
+	if !strings.Contains(normalize(m2Up), "PRIMARY KEY (prefix, period)") {
+		t.Fatal("doc_number_counters 缺少复合主键 (prefix, period)（backend-m2-plan §4.1）")
+	}
+	// (warehouse_id, status) 列表索引（database.md §6.1 + plan §10.5 数据权限过滤免 join）。
+	for _, idx := range []string{
+		"idx_purchase_orders_warehouse_status", "idx_inbound_orders_warehouse_status",
+		"idx_quality_orders_warehouse_status", "idx_sales_orders_warehouse_status",
+		"idx_outbound_orders_warehouse_status", "idx_pick_tasks_warehouse_status",
+		"idx_check_tasks_warehouse_status", "idx_shipments_warehouse_status",
+		"idx_count_orders_warehouse_status",
+	} {
+		if !strings.Contains(m2Up, "CREATE INDEX "+idx) {
+			t.Fatalf("M2 缺少 (warehouse_id, status) 列表索引 %s", idx)
+		}
+	}
+}
+
+// TestM3MigrationNamesAndTableSets M3 四组迁移表清单与 backend-m3-plan §5 冻结契约一致，
+// 且与 M1/M2 表全集无重复定义（同一表只允许一处 DDL 契约）。
+func TestM3MigrationNamesAndTableSets(t *testing.T) {
+	byVersion := loadMigrations(t)
+
+	created := map[string]string{} // 表名 → 首次定义所在迁移
+	for desc, wantTables := range m1Files {
+		for _, want := range wantTables {
+			created[want] = desc
+		}
+	}
+	for desc, wantTables := range m2Files {
+		for _, want := range wantTables {
+			created[want] = desc
+		}
+	}
+
+	for desc, wantTables := range m3Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M3 迁移文件 %s.up.sql（backend-m3-plan §5 冻结清单）", desc)
+		}
+		up := readRepoFile(t, path)
+		defs := extractTables(t, up)
+		if len(defs) == 0 {
+			t.Fatalf("%s 未定义任何表", path)
+		}
+		got := map[string]bool{}
+		for _, d := range defs {
+			got[d.Name] = true
+			if prev, ok := created[d.Name]; ok {
+				t.Fatalf("表 %s 在 %s 与 %s 重复定义", d.Name, prev, path)
+			}
+			created[d.Name] = desc
+		}
+		for _, want := range wantTables {
+			if !got[want] {
+				t.Fatalf("%s 缺少契约表 %s", path, want)
+			}
+		}
+		if len(got) != len(wantTables) {
+			t.Fatalf("%s 表数量 %d 与冻结清单 %d 不符（多定义: %v）", path, len(got), len(wantTables), got)
+		}
+	}
+	// 26（M1）+ 29（M2）+ 17（M3）= 72：全库业务表全集封闭。
+	if len(created) != 72 {
+		t.Fatalf("M1+M2+M3 应为 72 表（backend-m1-plan §6.2 + backend-m2-plan §5 + backend-m3-plan §5），实际 %d", len(created))
+	}
+}
+
+// TestM3NoCrossDomainForeignKeys M3 全部平台表不建任何外键：devices.warehouse_id、
+// files.business_no 等一律裸 ID/单号 + Service 层校验（backend-m3-plan §5 通用规则）。
+func TestM3NoCrossDomainForeignKeys(t *testing.T) {
+	byVersion := loadMigrations(t)
+	for desc := range m3Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M3 迁移文件 %s.up.sql", desc)
+		}
+		if strings.Contains(strings.ToUpper(readRepoFile(t, path)), "REFERENCES") {
+			t.Fatalf("%s 不应包含任何 REFERENCES（跨域不建 FK，backend-m3-plan §5）", path)
+		}
+	}
+}
+
+// TestM3StatusValueDomains M3 状态机/值域 CHECK 与 backend-m3-plan §5 冻结契约同源
+// （值域大小写逐字对齐方案：scheduled_jobs/system_configs 为小写值域，其余大写）。
+func TestM3StatusValueDomains(t *testing.T) {
+	byVersion := loadMigrations(t)
+	m3Up := ""
+	for desc := range m3Files {
+		path := contractUpPath(t, byVersion, desc)
+		if path == "" {
+			t.Fatalf("缺少 M3 迁移文件 %s.up.sql", desc)
+		}
+		m3Up += readRepoFile(t, path)
+	}
+	cases := map[string][]string{
+		// 000011（plan §5/§6.1–§6.3：导入九类、向导六态、行六态、导出 16 模块、范围五值、任务五态）
+		"chk_import_tasks_type": {
+			"'PRODUCT'", "'SKU'", "'SUPPLIER'", "'CUSTOMER'", "'WAREHOUSE'", "'LOCATION'",
+			"'PURCHASE_ORDER'", "'SALES_ORDER'", "'INITIAL_INVENTORY'",
+		},
+		"chk_import_tasks_status": {
+			"'PARSED'", "'VALIDATED'", "'EXECUTING'", "'SUCCESS'", "'PARTIAL_SUCCESS'", "'FAILED'",
+		},
+		"chk_import_task_rows_status": {"'RAW'", "'VALID'", "'INVALID'", "'QUEUED'", "'SUCCESS'", "'FAILED'"},
+		"chk_export_tasks_module": {
+			"'PRODUCT'", "'SKU'", "'SUPPLIER'", "'CUSTOMER'", "'WAREHOUSE'", "'LOCATION'",
+			"'PURCHASE_ORDER'", "'PURCHASE_INBOUND'", "'QUALITY'", "'SALES_OUTBOUND'",
+			"'INVENTORY'", "'INVENTORY_LEDGER'", "'TRANSFER'", "'COUNT'", "'EXCEPTION'", "'REPORT'",
+		},
+		"chk_export_tasks_scope":  {"'CURRENT_PAGE'", "'SELECTED'", "'ALL'", "'BY_FILTER'", "'TIME_RANGE'"},
+		"chk_export_tasks_status": {"'QUEUED'", "'PROCESSING'", "'SUCCESS'", "'PARTIAL_SUCCESS'", "'FAILED'"},
+		// 000012（plan §5/§7：打印 9 对象、5 纸张、5 码制、任务四态 + 执行确认结果）
+		"chk_print_templates_object_type": {
+			"'SKU_LABEL'", "'BIN_LABEL'", "'CARTON_CODE'", "'PALLET_CODE'", "'INBOUND_ORDER'",
+			"'OUTBOUND_ORDER'", "'PICK_ORDER'", "'COUNT_ORDER'", "'SHIPMENT_ORDER'",
+		},
+		"chk_print_templates_paper":             {"'A4'", "'A5'", "'THERMAL_40_30'", "'THERMAL_60_40'", "'THERMAL_100_50'"},
+		"chk_print_templates_barcode_symbology": {"'CODE128'", "'CODE39'", "'EAN13'", "'EAN8'", "'UPC'"},
+		"chk_print_templates_status":            {"'ENABLED'", "'DISABLED'"},
+		"chk_print_tasks_status":                {"'QUEUED'", "'PROCESSING'", "'SUCCESS'", "'FAILED'"},
+		"chk_print_tasks_result":                {"'SUCCESS'", "'FAILED'"},
+		// 000013（plan §5/§8：设备类型/状态/激活为小写/大写混合冻结值域）
+		"chk_devices_type":              {"'pc'", "'pad'", "'pda'", "'scanner'", "'printer'"},
+		"chk_devices_status":            {"'ENABLED'", "'DISABLED'"},
+		"chk_devices_activation_status": {"'PENDING'", "'ACTIVATED'"},
+		"chk_device_logs_level":         {"'INFO'", "'WARN'", "'ERROR'"},
+		"chk_app_versions_platform":     {"'android'"},
+		"chk_app_versions_status":       {"'DRAFT'", "'PUBLISHED'", "'DEPRECATED'"},
+		// 000014（plan §5/§4.3/§10：last_run_status 小写、触发方式三值、配置类型四值、通知六类、备份混合模式状态机）
+		"chk_scheduled_jobs_last_run_status": {"'success'", "'failed'", "'running'", "'never'"},
+		"chk_scheduled_job_runs_trigger":     {"'SCHEDULED'", "'MANUAL'", "'SKIPPED'"},
+		"chk_system_configs_type":            {"'text'", "'number'", "'boolean'", "'enum'"},
+		"chk_notifications_type": {
+			"'SYSTEM'", "'APPROVAL'", "'STOCK_ALERT'", "'EXPIRY_ALERT'", "'EXCEPTION'", "'TASK'",
+		},
+		"chk_backup_records_trigger": {"'AUTO'", "'MANUAL'"},
+		"chk_backup_records_status":  {"'REQUESTED'", "'RUNNING'", "'SUCCESS'", "'FAILED'"},
+	}
+	for constraint, values := range cases {
+		if !strings.Contains(m3Up, constraint) {
+			t.Fatalf("M3 缺少状态值域约束 %s", constraint)
+		}
+		for _, v := range values {
+			if !strings.Contains(m3Up, v) {
+				t.Fatalf("约束 %s 值域缺少 %s", constraint, v)
+			}
+		}
+	}
+}
+
+// TestM3IdempotencyAndPlatformInfra M3 幂等键部分唯一索引（plan §5 000014：notifications
+// dedup_key 预警幂等、backup_records 在途唯一——并发手动触发 409）、单号唯一（IMP/EXP/PT）、
+// 复合唯一与设备/配置基础设施索引。
+func TestM3IdempotencyAndPlatformInfra(t *testing.T) {
+	byVersion := loadMigrations(t)
+	m3Up := ""
+	for desc := range m3Files {
+		m3Up += readRepoFile(t, contractUpPath(t, byVersion, desc))
+	}
+	// 部分唯一索引（NULL/状态过滤不参与约束，与 M1 流水幂等键同款口径）。
+	for _, want := range []string{
+		"CREATE UNIQUE INDEX uk_notifications_dedup ON notifications (dedup_key) WHERE dedup_key IS NOT NULL",
+		`CREATE UNIQUE INDEX uk_backup_records_inflight ON backup_records ("trigger") WHERE status IN ('REQUESTED', 'RUNNING')`,
+		"CREATE INDEX idx_files_expires_at ON files (expires_at) WHERE expires_at IS NOT NULL",
+	} {
+		if !strings.Contains(normalize(m3Up), want) {
+			t.Fatalf("M3 缺少部分索引：%s", want)
+		}
+	}
+	// 任务单号唯一（IMP/EXP/PT 经 internal/docnum 发放，plan §12.3）。
+	for _, idx := range []string{
+		"uk_import_tasks_no", "uk_export_tasks_no", "uk_print_tasks_no",
+	} {
+		if !strings.Contains(m3Up, "CREATE UNIQUE INDEX "+idx) {
+			t.Fatalf("M3 缺少单号唯一索引 %s", idx)
+		}
+	}
+	// 复合/业务唯一索引。
+	for _, idx := range []string{
+		"uk_import_task_rows_task_row", "uk_print_task_rows_task_seq",
+		"uk_devices_code", "uk_device_configs_device", "uk_app_versions_platform_code",
+		"uk_scheduled_jobs_code",
+	} {
+		if !strings.Contains(m3Up, "CREATE UNIQUE INDEX "+idx) {
+			t.Fatalf("M3 缺少唯一索引 %s", idx)
+		}
 	}
 }
 
@@ -282,6 +711,19 @@ func TestCommonColumnsAndSoftDeleteScope(t *testing.T) {
 				if !strings.Contains(body, "created_at") {
 					t.Fatalf("append-only 表 %s 缺少 created_at", d.Name)
 				}
+			case counterTables[d.Name]:
+				// 计数表（plan §4.1）：复合主键无 bigserial；created_at/updated_at 记录
+				// 建行与最近发放，无 deleted_at（号码不回收，无生命周期删除语义）。
+				for _, need := range []string{"created_at", "updated_at", "next_no"} {
+					if !strings.Contains(body, need) {
+						t.Fatalf("计数表 %s 缺少 %s（backend-m2-plan §4.1）", d.Name, need)
+					}
+				}
+				for _, forbidden := range []string{"deleted_at", "bigserial"} {
+					if strings.Contains(body, forbidden) {
+						t.Fatalf("计数表 %s 不应包含 %s", d.Name, forbidden)
+					}
+				}
 			case joinTables[d.Name]:
 				for _, need := range []string{"created_at", "created_by"} {
 					if !strings.Contains(body, need) {
@@ -291,6 +733,22 @@ func TestCommonColumnsAndSoftDeleteScope(t *testing.T) {
 				for _, forbidden := range []string{"updated_at", "updated_by", "deleted_at"} {
 					if strings.Contains(body, forbidden) {
 						t.Fatalf("join 表 %s 不应包含 %s", d.Name, forbidden)
+					}
+				}
+			case naturalPkTables[d.Name]:
+				// 自然主键表（system_configs，backend-m3-plan §5 000014）：key 即业务主键，
+				// 无 bigserial 代理键；通用字段与业务表同口径，不做软删除。
+				if !strings.Contains(body, "primary key") {
+					t.Fatalf("自然主键表 %s 缺少 primary key 声明", d.Name)
+				}
+				for _, need := range []string{"created_at", "updated_at", "created_by", "updated_by"} {
+					if !strings.Contains(body, need) {
+						t.Fatalf("自然主键表 %s 缺少通用字段 %s", d.Name, need)
+					}
+				}
+				for _, forbidden := range []string{"bigserial", "deleted_at"} {
+					if strings.Contains(body, forbidden) {
+						t.Fatalf("自然主键表 %s 不应包含 %s", d.Name, forbidden)
 					}
 				}
 			default:
@@ -457,7 +915,9 @@ func TestStatusValueDomains(t *testing.T) {
 
 func TestGrantsAndSeedFilesPresent(t *testing.T) {
 	grants := readRepoFile(t, "../../db/grants/app_grants.sql")
-	for _, audit := range []string{"inventory_ledgers", "operation_logs", "login_logs"} {
+	// document_approvals 审批记录随 M2 000006 加入审计分层（backend-m2-plan §5：仅 INSERT）；
+	// scan_logs/device_logs 随 M3 000013 加入（backend-m3-plan §5 grants 纪律：仅 SELECT+INSERT）。
+	for _, audit := range []string{"inventory_ledgers", "document_approvals", "operation_logs", "login_logs", "scan_logs", "device_logs"} {
 		if !strings.Contains(grants, audit) {
 			t.Fatalf("app_grants.sql 未覆盖审计表 %s（database.md §7.2）", audit)
 		}
@@ -465,6 +925,11 @@ func TestGrantsAndSeedFilesPresent(t *testing.T) {
 	if !strings.Contains(grants, "REVOKE UPDATE, DELETE, TRUNCATE") ||
 		!strings.Contains(grants, "GRANT SELECT, INSERT") {
 		t.Fatal("app_grants.sql 缺少审计表“仅 SELECT+INSERT”的分层授权")
+	}
+	// M3 清理维护角色段（backend-m3-plan §5 grants 纪律/§4.3/§15）：审计日志/扫码日志
+	// 清理由部署侧维护脚本以独立维护角色执行，应用运行账号仍无 UPDATE/DELETE。
+	if !strings.Contains(grants, "maint_user") || !strings.Contains(grants, "GRANT SELECT, DELETE") {
+		t.Fatal("app_grants.sql 缺少清理维护角色段（backend-m3-plan §5：仅 operation_logs/login_logs/scan_logs/device_logs 的 SELECT+DELETE）")
 	}
 
 	seed := readRepoFile(t, "../../db/seed/dev_seed.sql")

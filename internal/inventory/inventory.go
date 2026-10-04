@@ -25,6 +25,8 @@ type options struct {
 //
 //	GET /api/inventory           inventory:inventory:list（列表）
 //	GET /api/inventory/{id}      inventory:inventory:list（详情；§5.4.1 冻结该资源仅 list 动作）
+//	GET /api/inventory/locks     inventory:lock:list（锁定记录查询，M2 §8.3 条 5）
+//	GET /api/inventory/adjustments stockops:adjustment:list（调整单列表，M2 §8.3 条 5）
 //	GET /api/inventory-ledgers   inventory:ledger:list
 //	GET /api/batches             inventory:batch:list
 //	GET /api/serials             inventory:serial:list
@@ -50,6 +52,8 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	h := &handler{svc: svc}
 
 	rg.GET("/inventory", auth.RequirePermission(auth.PermInventoryList), h.listInventory)
+	rg.GET("/inventory/locks", auth.RequirePermission(auth.PermLockList), h.listLocks)
+	rg.GET("/inventory/adjustments", auth.RequirePermission(auth.PermAdjustmentList), h.listAdjustments)
 	rg.GET("/inventory/:id", auth.RequirePermission(auth.PermInventoryList), h.getInventory)
 	rg.GET("/inventory-ledgers", auth.RequirePermission(auth.PermLedgerList), h.listLedgers)
 	rg.GET("/batches", auth.RequirePermission(auth.PermBatchList), h.listBatches)

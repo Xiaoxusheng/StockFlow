@@ -221,6 +221,12 @@ func scopeOf(c *gin.Context) Scope {
 
 // ---- GET /api/inventory（列表）----
 
+// @Summary GET /api/inventory
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/inventory [get]
 func (h *handler) listInventory(c *gin.Context) {
 	page, pageSize, err := response.ParsePage(c)
 	if err != nil {
@@ -257,6 +263,13 @@ func (h *handler) listInventory(c *gin.Context) {
 
 // ---- GET /api/inventory/{id}（详情）----
 
+// @Summary GET /api/inventory/:id
+// @Tags 库存
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/inventory/{id} [get]
 func (h *handler) getInventory(c *gin.Context) {
 	id, ok := parseIDParam(c, "id")
 	if !ok {
@@ -276,6 +289,12 @@ func (h *handler) getInventory(c *gin.Context) {
 
 // ---- GET /api/inventory-ledgers（流水，只读）----
 
+// @Summary GET /api/inventory-ledgers
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/inventory-ledgers [get]
 func (h *handler) listLedgers(c *gin.Context) {
 	page, pageSize, err := response.ParsePage(c)
 	if err != nil {
@@ -335,6 +354,12 @@ func (h *handler) listLedgers(c *gin.Context) {
 
 // ---- GET /api/batches（批次台账）----
 
+// @Summary GET /api/batches
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/batches [get]
 func (h *handler) listBatches(c *gin.Context) {
 	page, pageSize, err := response.ParsePage(c)
 	if err != nil {
@@ -374,6 +399,12 @@ func (h *handler) listBatches(c *gin.Context) {
 
 // ---- GET /api/serials（序列号）----
 
+// @Summary GET /api/serials
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/serials [get]
 func (h *handler) listSerials(c *gin.Context) {
 	page, pageSize, err := response.ParsePage(c)
 	if err != nil {
@@ -411,6 +442,161 @@ func (h *handler) listSerials(c *gin.Context) {
 	items := make([]SerialView, 0, len(rows))
 	for i := range rows {
 		items = append(items, newSerialView(&rows[i]))
+	}
+	response.OKPage(c, items, page, pageSize, total)
+}
+
+// ---- 锁定记录 / 调整单列表（GET /api/inventory/locks、/adjustments，plan §8.3 条 5）----
+
+// LockView 库存锁定记录视图（inventory-rules §4 字段清单）。
+type LockView struct {
+	ID          database.ID       `json:"id"`
+	WarehouseID database.ID       `json:"warehouse_id"`
+	BinID       database.ID       `json:"bin_id"`
+	SKUID       database.ID       `json:"sku_id"`
+	BatchID     database.ID       `json:"batch_id"`
+	LockType    string            `json:"lock_type"`
+	SourceType  string            `json:"source_type"`
+	SourceNo    string            `json:"source_no"`
+	Qty         Qty               `json:"qty"`
+	Status      string            `json:"status"`
+	ReleasedAt  database.JSONTime `json:"released_at"`
+	ReleasedBy  database.ID       `json:"released_by"`
+	Remark      string            `json:"remark"`
+	CreatedAt   database.JSONTime `json:"created_at"`
+	UpdatedAt   database.JSONTime `json:"updated_at"`
+}
+
+func newLockView(m *InventoryLock) LockView {
+	return LockView{
+		ID: m.ID, WarehouseID: database.ID(m.WarehouseID), BinID: database.ID(m.BinID),
+		SKUID: database.ID(m.SKUID), BatchID: database.ID(m.BatchID),
+		LockType: m.LockType, SourceType: m.SourceType, SourceNo: m.SourceNo,
+		Qty: m.Qty, Status: m.Status, ReleasedAt: m.ReleasedAt,
+		ReleasedBy: database.ID(m.ReleasedBy), Remark: m.Remark,
+		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}
+}
+
+// AdjustmentView 库存调整单视图（business-flow §11.1 字段清单）。
+type AdjustmentView struct {
+	ID           database.ID       `json:"id"`
+	AdjustmentNo string            `json:"adjustment_no"`
+	WarehouseID  database.ID       `json:"warehouse_id"`
+	SKUID        database.ID       `json:"sku_id"`
+	BinID        database.ID       `json:"bin_id"`
+	BatchID      database.ID       `json:"batch_id"`
+	AdjustType   string            `json:"adjust_type"`
+	Qty          Qty               `json:"qty"`
+	Reason       string            `json:"reason"`
+	Status       string            `json:"status"`
+	ExecutedBy   database.ID       `json:"executed_by"`
+	ExecutedAt   database.JSONTime `json:"executed_at"`
+	CreatedAt    database.JSONTime `json:"created_at"`
+	UpdatedAt    database.JSONTime `json:"updated_at"`
+}
+
+func newAdjustmentView(m *InventoryAdjustment) AdjustmentView {
+	return AdjustmentView{
+		ID: m.ID, AdjustmentNo: m.AdjustmentNo,
+		WarehouseID: database.ID(m.WarehouseID), SKUID: database.ID(m.SKUID),
+		BinID: database.ID(m.BinID), BatchID: database.ID(m.BatchID),
+		AdjustType: m.AdjustType, Qty: m.Qty, Reason: m.Reason, Status: m.Status,
+		ExecutedBy: database.ID(m.ExecutedBy), ExecutedAt: m.ExecutedAt,
+		CreatedAt: m.CreatedAt, UpdatedAt: m.UpdatedAt,
+	}
+}
+
+// @Summary GET /api/inventory/locks
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/inventory/locks [get]
+func (h *handler) listLocks(c *gin.Context) {
+	page, pageSize, err := response.ParsePage(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	q := LockQuery{Scope: scopeOf(c), Page: page, PageSize: pageSize}
+	for field, dst := range map[string]*int64{
+		"warehouse_id": &q.WarehouseID, "sku_id": &q.SKUID,
+	} {
+		v, ok := parseIDQuery(c, field)
+		if !ok {
+			return
+		}
+		*dst = v
+	}
+	q.LockType = strings.TrimSpace(c.Query("lock_type"))
+	if q.LockType != "" && !lockTypes[q.LockType] {
+		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{
+			"field": "lock_type", "reason": "非法锁定类型",
+			"allowed": []string{"ORDER_HOLD", "COUNT_FREEZE", "QC_FREEZE", "MANUAL_FREEZE", "EXCEPTION_FREEZE"},
+		}))
+		return
+	}
+	q.Status = strings.TrimSpace(c.Query("status"))
+	if q.Status != "" && q.Status != "ACTIVE" && q.Status != "RELEASED" && q.Status != "CONSUMED" {
+		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{
+			"field": "status", "reason": "非法锁定状态", "allowed": []string{"ACTIVE", "RELEASED", "CONSUMED"},
+		}))
+		return
+	}
+	q.SourceType = strings.TrimSpace(c.Query("source_type"))
+	q.SourceNo = strings.TrimSpace(c.Query("source_no"))
+	rows, total, err := h.svc.QueryLocks(c.Request.Context(), q)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	items := make([]LockView, 0, len(rows))
+	for i := range rows {
+		items = append(items, newLockView(&rows[i]))
+	}
+	response.OKPage(c, items, page, pageSize, total)
+}
+
+// @Summary GET /api/inventory/adjustments
+// @Tags 库存
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/inventory/adjustments [get]
+func (h *handler) listAdjustments(c *gin.Context) {
+	page, pageSize, err := response.ParsePage(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	q := AdjustmentQuery{Scope: scopeOf(c), Page: page, PageSize: pageSize}
+	for field, dst := range map[string]*int64{
+		"warehouse_id": &q.WarehouseID, "sku_id": &q.SKUID,
+	} {
+		v, ok := parseIDQuery(c, field)
+		if !ok {
+			return
+		}
+		*dst = v
+	}
+	q.AdjustType = strings.TrimSpace(c.Query("adjust_type"))
+	if q.AdjustType != "" && !adjustTypes[q.AdjustType] {
+		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{
+			"field": "adjust_type", "reason": "非法调整类型",
+			"allowed": []string{"盘盈", "盘亏", "损耗", "报废", "其他"},
+		}))
+		return
+	}
+	q.Status = strings.TrimSpace(c.Query("status"))
+	rows, total, err := h.svc.QueryAdjustments(c.Request.Context(), q)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	items := make([]AdjustmentView, 0, len(rows))
+	for i := range rows {
+		items = append(items, newAdjustmentView(&rows[i]))
 	}
 	response.OKPage(c, items, page, pageSize, total)
 }

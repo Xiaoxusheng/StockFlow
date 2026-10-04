@@ -1,0 +1,6696 @@
+basePath: /
+definitions:
+  github_com_stockflow_server_internal_response.Envelope:
+    properties:
+      code:
+        description: 成功 0（数字）；失败为模块命名空间错误码字符串（COMMON_* 等）
+      data: {}
+      details:
+        description: 校验失败必带（api.md §4）
+      message:
+        type: string
+      request_id:
+        type: string
+    type: object
+  internal_auth.AssignPermissionsInput:
+    properties:
+      permission_ids:
+        items:
+          type: integer
+        type: array
+    type: object
+  internal_auth.AssignRolesInput:
+    properties:
+      role_ids:
+        items:
+          type: integer
+        type: array
+    type: object
+  internal_auth.ChangePasswordRequest:
+    properties:
+      new_password:
+        type: string
+      old_password:
+        type: string
+    required:
+    - new_password
+    - old_password
+    type: object
+  internal_auth.DeptCreateInput:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+      parent_id:
+        type: integer
+      status:
+        type: string
+    type: object
+  internal_auth.DeptUpdateInput:
+    properties:
+      name:
+        type: string
+      parent_id:
+        type: integer
+    type: object
+  internal_auth.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  internal_auth.RefreshRequest:
+    properties:
+      refresh_token:
+        type: string
+    required:
+    - refresh_token
+    type: object
+  internal_auth.ResetPasswordInput:
+    properties:
+      new_password:
+        type: string
+    type: object
+  internal_auth.RoleCreateInput:
+    properties:
+      code:
+        type: string
+      name:
+        type: string
+      status:
+        type: string
+    type: object
+  internal_auth.RoleUpdateInput:
+    properties:
+      name:
+        type: string
+    type: object
+  internal_auth.StatusRequest:
+    properties:
+      status:
+        type: string
+    required:
+    - status
+    type: object
+  internal_auth.UserCreateInput:
+    properties:
+      data_scope:
+        type: string
+      department_id:
+        type: integer
+      email:
+        type: string
+      password:
+        type: string
+      phone:
+        type: string
+      real_name:
+        type: string
+      role_ids:
+        items:
+          type: integer
+        type: array
+      username:
+        type: string
+      warehouse_ids:
+        items:
+          type: integer
+        type: array
+    type: object
+  internal_auth.UserUpdateInput:
+    properties:
+      data_scope:
+        type: string
+      department_id:
+        type: integer
+      email:
+        type: string
+      phone:
+        type: string
+      real_name:
+        type: string
+      role_ids:
+        items:
+          type: integer
+        type: array
+      warehouse_ids:
+        items:
+          type: integer
+        type: array
+    type: object
+  internal_datax.ConfirmInput:
+    properties:
+      confirmed:
+        type: boolean
+    type: object
+  internal_datax.ExportCreateInput:
+    properties:
+      filters:
+        additionalProperties:
+          type: string
+        type: object
+      ids:
+        items:
+          type: string
+        type: array
+      module:
+        type: string
+      page:
+        type: integer
+      page_size:
+        type: integer
+      scope:
+        type: string
+      time_from:
+        type: string
+      time_to:
+        type: string
+    type: object
+  internal_devices.ActivateInput:
+    properties:
+      app_version:
+        type: string
+      brand:
+        type: string
+      device_code:
+        type: string
+      model:
+        type: string
+      os:
+        type: string
+      token:
+        type: string
+    type: object
+  internal_devices.DeviceCreateInput:
+    properties:
+      brand:
+        type: string
+      code:
+        type: string
+      model:
+        type: string
+      name:
+        type: string
+      remark:
+        type: string
+      type:
+        type: string
+      warehouse_id:
+        description: 0=暂不绑定（devices.md §6.3 可后续绑定）
+        type: integer
+    type: object
+  internal_devices.HeartbeatInput:
+    properties:
+      app_version:
+        type: string
+      battery_level:
+        type: integer
+      last_error:
+        type: string
+    type: object
+  internal_devices.ResolveInput:
+    properties:
+      code:
+        type: string
+      page:
+        type: string
+      symbology:
+        type: string
+    type: object
+  internal_printing.ExecuteInput:
+    properties:
+      message:
+        type: string
+      result:
+        type: string
+    type: object
+  internal_printing.TaskCreateInput:
+    properties:
+      copies:
+        type: integer
+      data_ids:
+        items:
+          type: string
+        type: array
+      template_id:
+        type: integer
+    type: object
+  internal_printing.TemplateSaveInput:
+    properties:
+      barcode_symbology:
+        type: string
+      fields:
+        items:
+          type: string
+        type: array
+      header_text:
+        type: string
+      name:
+        type: string
+      object_type:
+        type: string
+      paper:
+        type: string
+      qrcode_enabled:
+        type: boolean
+      remark:
+        type: string
+    type: object
+  internal_returns.ApproveInput:
+    properties:
+      approved:
+        type: boolean
+      opinion:
+        type: string
+    type: object
+  internal_returns.CancelInput:
+    properties:
+      reason:
+        type: string
+    type: object
+  internal_returns.ExceptionAssignInput:
+    properties:
+      assignee_id:
+        type: integer
+      assignee_name:
+        type: string
+    type: object
+  internal_returns.ExceptionCreateInput:
+    properties:
+      bin_id:
+        description: 可空定位：0=未定位
+        type: integer
+      detail:
+        type: string
+      freeze_batch_id:
+        description: 0=非批次 SKU
+        type: integer
+      freeze_enabled:
+        description: |-
+          冻结选项：定位到具体库存行时才可冻结（仓库+库位+SKU 定位，inventory-rules §4.1）；
+          FreezeQty 为冻结量（解冻释放取量依据）。
+        type: boolean
+      freeze_qty:
+        type: string
+      freeze_warehouse_id:
+        type: integer
+      owner_id:
+        type: integer
+      owner_name:
+        type: string
+      remark:
+        type: string
+      serial_no:
+        type: string
+      sku_id:
+        description: 可空定位：0=未定位
+        type: integer
+      source_no:
+        type: string
+      source_type:
+        description: 产生环节的单据类型（收货/拣货/复核/盘点等）
+        type: string
+      type:
+        description: 九类中文值域（business-flow §11.2）
+        type: string
+    type: object
+  internal_returns.PurchaseReturnCreateInput:
+    properties:
+      lines:
+        items:
+          $ref: '#/definitions/internal_returns.PurchaseReturnLineInput'
+        type: array
+      po_no:
+        type: string
+      remark:
+        type: string
+      supplier_id:
+        type: integer
+      warehouse_id:
+        type: integer
+    type: object
+  internal_returns.PurchaseReturnLineInput:
+    properties:
+      line_no:
+        type: integer
+      qty_return:
+        type: string
+      reason:
+        type: string
+      remark:
+        type: string
+      sku_id:
+        type: integer
+    type: object
+  internal_returns.QCResultInput:
+    properties:
+      lines:
+        items:
+          $ref: '#/definitions/internal_returns.QCResultLineInput'
+        type: array
+      qc_no:
+        type: string
+    type: object
+  internal_returns.QCResultLineInput:
+    properties:
+      batch_id:
+        type: integer
+      bin_id:
+        type: integer
+      line_no:
+        type: integer
+      qty_defective:
+        type: string
+      qty_qualified:
+        type: string
+      serials_passed:
+        description: |-
+          SerialsPassed 质检合格逐件序列号（可选，序列号 SKU 逐件回 IN_STOCK；
+          不良件保持 RETURNED 待处置）。
+        items:
+          type: string
+        type: array
+      shelf_id:
+        type: integer
+      zone_id:
+        type: integer
+    type: object
+  internal_returns.ReceiveInput:
+    properties:
+      lines:
+        items:
+          $ref: '#/definitions/internal_returns.ReceiveLineInput'
+        type: array
+    type: object
+  internal_returns.ReceiveLineInput:
+    properties:
+      batch_no:
+        type: string
+      bin_id:
+        type: integer
+      line_no:
+        type: integer
+      qty:
+        type: string
+      serials:
+        items:
+          type: string
+        type: array
+      shelf_id:
+        type: integer
+      zone_id:
+        type: integer
+    type: object
+  internal_returns.SalesReturnCreateInput:
+    properties:
+      customer_id:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/internal_returns.SalesReturnLineInput'
+        type: array
+      remark:
+        type: string
+      so_no:
+        type: string
+      warehouse_id:
+        type: integer
+    type: object
+  internal_returns.SalesReturnLineInput:
+    properties:
+      line_no:
+        type: integer
+      qty_return:
+        type: string
+      reason:
+        type: string
+      remark:
+        type: string
+      sku_id:
+        type: integer
+    type: object
+  internal_returns.ShipInput:
+    properties:
+      lines:
+        items:
+          $ref: '#/definitions/internal_returns.ShipLineInput'
+        type: array
+    type: object
+  internal_returns.ShipLineInput:
+    properties:
+      batch_id:
+        type: integer
+      bin_id:
+        type: integer
+      line_no:
+        type: integer
+      qty:
+        type: string
+      serials:
+        items:
+          type: string
+        type: array
+      shelf_id:
+        type: integer
+      zone_id:
+        type: integer
+    type: object
+  internal_returns.SubmitQCInput:
+    properties:
+      remark:
+        type: string
+    type: object
+  internal_sales.ApproveInput:
+    properties:
+      action:
+        description: APPROVE / REJECT
+        type: string
+      opinion:
+        type: string
+    type: object
+  internal_sales.CancelInput:
+    properties:
+      reason:
+        type: string
+    type: object
+  internal_sales.CheckConfirmInput:
+    properties:
+      pass:
+        type: boolean
+      result:
+        type: string
+      serial:
+        description: 序列号任务必填：重新扫描确认的序列号（§8.3 逐件确认）
+        type: string
+    type: object
+  internal_sales.CloseInput:
+    properties:
+      reason:
+        type: string
+    type: object
+  internal_sales.CreateOrderInput:
+    properties:
+      customer_id:
+        type: integer
+      delivery_method:
+        type: string
+      items:
+        items:
+          $ref: '#/definitions/internal_sales.OrderItemInput'
+        type: array
+      remark:
+        type: string
+      shipping_address:
+        type: string
+      warehouse_id:
+        type: integer
+    type: object
+  internal_sales.OrderItemInput:
+    properties:
+      line_no:
+        type: integer
+      price:
+        type: integer
+      qty:
+        type: integer
+      remark:
+        type: string
+      sku_id:
+        type: integer
+    type: object
+  internal_sales.PackInput:
+    properties:
+      carrier:
+        type: string
+      height:
+        type: integer
+      idempotency_key:
+        type: string
+      length:
+        type: integer
+      lines:
+        items:
+          $ref: '#/definitions/internal_sales.PackLineInput'
+        type: array
+      outbound_no:
+        type: string
+      packing_material:
+        type: string
+      remark:
+        type: string
+      tracking_no:
+        type: string
+      volume:
+        type: integer
+      weight:
+        type: integer
+      width:
+        type: integer
+    type: object
+  internal_sales.PackLineInput:
+    properties:
+      line_no:
+        type: integer
+      qty:
+        type: integer
+    type: object
+  internal_sales.PickConfirmInput:
+    properties:
+      picked_qty:
+        type: integer
+      scanned_code:
+        description: 扫码录入值（M2 记录不解析，plan §12 扫码不做）
+        type: string
+      serials:
+        description: 序列号 SKU 必填：逐件采集（inventory-rules §8.2）
+        items:
+          type: string
+        type: array
+    type: object
+  internal_sales.ReallocateInput:
+    properties:
+      line_no:
+        type: integer
+      outbound_no:
+        type: string
+    type: object
+  internal_sales.ShipInput:
+    properties:
+      carrier:
+        type: string
+      idempotency_key:
+        type: string
+      lines:
+        description: 缺省 = 全部未发货明细行
+        items:
+          $ref: '#/definitions/internal_sales.ShipLineInput'
+        type: array
+      outbound_no:
+        type: string
+      remark:
+        type: string
+      tracking_no:
+        type: string
+    type: object
+  internal_sales.ShipLineInput:
+    properties:
+      line_no:
+        type: integer
+    type: object
+  internal_sales.ShipStatusInput:
+    properties:
+      remark:
+        type: string
+      status:
+        description: SHIPPED 后续：IN_TRANSIT / SIGNED / ABNORMAL
+        type: string
+    type: object
+  internal_stockops.MoveInput:
+    properties:
+      from:
+        $ref: '#/definitions/internal_stockops.MoveKeyInput'
+      qty:
+        description: numeric(18,4) 文本
+        type: string
+      remark:
+        type: string
+      source_no:
+        description: 作业依据号（必填，流水追溯）
+        type: string
+      to:
+        $ref: '#/definitions/internal_stockops.MoveKeyInput'
+    type: object
+  internal_stockops.MoveKeyInput:
+    properties:
+      batch_id:
+        type: integer
+      bin_id:
+        type: integer
+      shelf_id:
+        type: integer
+      sku_id:
+        type: integer
+      warehouse_id:
+        type: integer
+      zone_id:
+        type: integer
+    type: object
+  internal_sysops.jobStatusPayload:
+    properties:
+      enabled:
+        type: boolean
+    type: object
+  internal_sysops.saveConfigsPayload:
+    properties:
+      items:
+        items:
+          properties:
+            key:
+              type: string
+            value:
+              type: string
+          type: object
+        type: array
+    type: object
+  internal_warehouse.BinCreateInput:
+    properties:
+      bin_type:
+        description: 缺省 PICK
+        type: string
+      code:
+        type: string
+      column_no:
+        type: integer
+      layer:
+        description: 缺省 1
+        type: integer
+      max_capacity:
+        type: number
+      shelf_id:
+        type: integer
+      warehouse_id:
+        type: integer
+      zone_id:
+        type: integer
+    required:
+    - code
+    - shelf_id
+    type: object
+  internal_warehouse.BinUpdateInput:
+    properties:
+      bin_type:
+        type: string
+      code:
+        type: string
+      column_no:
+        type: integer
+      layer:
+        type: integer
+      max_capacity:
+        type: number
+    type: object
+  internal_warehouse.ShelfCreateInput:
+    properties:
+      capacity:
+        type: number
+      code:
+        type: string
+      columns:
+        type: integer
+      layers:
+        description: 缺省 1
+        type: integer
+      warehouse_id:
+        description: 可选：提供时必须与 zone 归属一致
+        type: integer
+      zone_id:
+        type: integer
+    required:
+    - code
+    - zone_id
+    type: object
+  internal_warehouse.ShelfUpdateInput:
+    properties:
+      capacity:
+        type: number
+      code:
+        type: string
+      columns:
+        type: integer
+      layers:
+        type: integer
+    type: object
+  internal_warehouse.StatusInput:
+    properties:
+      status:
+        type: string
+    required:
+    - status
+    type: object
+  internal_warehouse.WarehouseCreateInput:
+    properties:
+      address:
+        type: string
+      area:
+        type: number
+      capacity:
+        type: number
+      code:
+        type: string
+      contact:
+        type: string
+      manager_user_id:
+        type: integer
+      name:
+        type: string
+      phone:
+        type: string
+      type:
+        type: string
+    required:
+    - code
+    - name
+    type: object
+  internal_warehouse.WarehouseUpdateInput:
+    properties:
+      address:
+        type: string
+      area:
+        type: number
+      capacity:
+        type: number
+      code:
+        type: string
+      contact:
+        type: string
+      manager_user_id:
+        type: integer
+      name:
+        type: string
+      phone:
+        type: string
+      type:
+        type: string
+    type: object
+  internal_warehouse.ZoneCreateInput:
+    properties:
+      capacity:
+        type: number
+      code:
+        type: string
+      name:
+        type: string
+      warehouse_id:
+        type: integer
+      zone_type:
+        description: 缺省 STORAGE
+        type: string
+    required:
+    - code
+    - name
+    - warehouse_id
+    type: object
+  internal_warehouse.ZoneUpdateInput:
+    properties:
+      capacity:
+        type: number
+      code:
+        type: string
+      name:
+        type: string
+      zone_type:
+        type: string
+    type: object
+info:
+  contact: {}
+  description: StockFlow（库流智能仓储管理系统）后端 API。统一信封 {code,message,data,request_id,details}（api.md
+    §2）。
+  title: StockFlow API
+  version: "1.0"
+paths:
+  /api/allocations:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/allocations
+      tags:
+      - 销售出库
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.ReallocateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 重新分配（释放旧锁 + 重分配 + 记录替换，同事务）
+      tags:
+      - 销售出库
+  /api/auth/login:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/auth/login
+      tags:
+      - 认证与用户
+  /api/auth/logout:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/auth/logout
+      tags:
+      - 认证与用户
+  /api/auth/me:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/auth/me
+      tags:
+      - 认证与用户
+  /api/auth/password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.ChangePasswordRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/auth/password
+      tags:
+      - 认证与用户
+  /api/auth/refresh:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.RefreshRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/auth/refresh
+      tags:
+      - 认证与用户
+  /api/auth/sessions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/auth/sessions（auth:session:list；内存分页满足强制分页）
+      tags:
+      - 认证与用户
+  /api/auth/sessions/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/auth/sessions/:id（auth:session:kick；强制审计）
+      tags:
+      - 认证与用户
+  /api/batches:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/batches
+      tags:
+      - 库存
+  /api/bins:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/bins
+      tags:
+      - 仓库与库位
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.BinCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/bins
+      tags:
+      - 仓库与库位
+  /api/bins/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/bins/:id
+      tags:
+      - 仓库与库位
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/bins/:id
+      tags:
+      - 仓库与库位
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.BinUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/bins/:id
+      tags:
+      - 仓库与库位
+  /api/bins/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.StatusInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/bins/:id/status
+      tags:
+      - 仓库与库位
+  /api/checks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/checks
+      tags:
+      - 销售出库
+  /api/checks/{id}/claim:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/checks/:id/claim
+      tags:
+      - 销售出库
+  /api/checks/{id}/confirm:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CheckConfirmInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/checks/:id/confirm
+      tags:
+      - 销售出库
+  /api/checks/{id}/reopen:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 复核异常重开（EXCEPTION→PENDING；PUT /api/checks/{id}/reopen）
+      tags:
+      - 销售出库
+  /api/counts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/counts
+      tags:
+      - 库存作业
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts
+      tags:
+      - 库存作业
+  /api/counts/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/counts/:id
+      tags:
+      - 库存作业
+  /api/counts/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts/:id/cancel
+      tags:
+      - 库存作业
+  /api/counts/{id}/complete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts/:id/complete
+      tags:
+      - 库存作业
+  /api/counts/{id}/finish:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts/:id/finish
+      tags:
+      - 库存作业
+  /api/counts/{id}/items:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/counts/:id/items
+      tags:
+      - 库存作业
+  /api/counts/{id}/reject:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts/:id/reject
+      tags:
+      - 库存作业
+  /api/counts/{id}/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/counts/:id/start
+      tags:
+      - 库存作业
+  /api/customers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/customers
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/customers
+      tags:
+      - 基础资料
+  /api/customers/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/customers/:id
+      tags:
+      - 基础资料
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/customers/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/customers/:id
+      tags:
+      - 基础资料
+  /api/customers/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/customers/:id/status
+      tags:
+      - 基础资料
+  /api/data-tasks/export/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/data-tasks/export/:id
+      tags:
+      - 数据中心
+  /api/data-tasks/import/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/data-tasks/import/:id（数据中心任务卡详情刷新）
+      tags:
+      - 数据中心
+  /api/departments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/departments
+      tags:
+      - 认证与用户
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.DeptCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/departments
+      tags:
+      - 认证与用户
+  /api/departments/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/departments/:id
+      tags:
+      - 认证与用户
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.DeptUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/departments/:id
+      tags:
+      - 认证与用户
+  /api/departments/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.StatusRequest'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/departments/:id/status
+      tags:
+      - 认证与用户
+  /api/devices:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices（type/status/warehouse_id/online/keyword + 分页）
+      tags:
+      - 设备中心
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_devices.DeviceCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices → 激活二维码 payload（devices.md §6.2）
+      tags:
+      - 设备中心
+  /api/devices/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices/:id
+      tags:
+      - 设备中心
+  /api/devices/{id}/activation:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices/:id/activation（前端待激活轮询——device.ts:176）
+      tags:
+      - 设备中心
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/devices/:id/activation（旧 token 作废，token_version+1）
+      tags:
+      - 设备中心
+  /api/devices/{id}/bind:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体（匿名结构体，字段见 handler 定义）
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/:id/bind
+      tags:
+      - 设备中心
+  /api/devices/{id}/config:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体（设备上报原始载荷）
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/devices/:id/config（devices.md §7.3 下发项白名单校验）
+      tags:
+      - 设备中心
+  /api/devices/{id}/disable:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/:id/disable
+      tags:
+      - 设备中心
+  /api/devices/{id}/logs:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices/:id/logs（level 筛选 + 分页）
+      tags:
+      - 设备中心
+  /api/devices/{id}/unbind:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/:id/unbind
+      tags:
+      - 设备中心
+  /api/devices/activate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_devices.ActivateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/activate（一次性激活码；plan §8.2）
+      tags:
+      - 设备中心
+  /api/devices/app/versions/latest:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices/app/versions/latest?platform=android
+      tags:
+      - 设备中心
+  /api/devices/heartbeat:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_devices.HeartbeatInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/heartbeat
+      tags:
+      - 设备中心
+  /api/devices/self/config:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/devices/self/config
+      tags:
+      - 设备中心
+  /api/devices/self/logs:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体（匿名结构体，字段见 handler 定义）
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/devices/self/logs（≤100 条/次——plan §8.2）
+      tags:
+      - 设备中心
+  /api/exceptions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/exceptions
+      tags:
+      - 退货与异常
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ExceptionCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/exceptions/:id
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}/assign:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ExceptionAssignInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/assign
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}/close:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/close
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}/resolve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/resolve
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}/review:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/review
+      tags:
+      - 退货与异常
+  /api/exceptions/{id}/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/start
+      tags:
+      - 退货与异常
+  /api/exports:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/exports
+      tags:
+      - 数据中心
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_datax.ExportCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exports（敏感操作：创建即审计，Service 同事务完成）
+      tags:
+      - 数据中心
+  /api/exports/{id}/file:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/exports/:id/file（终态后可下载；流式 + 审计）
+      tags:
+      - 数据中心
+  /api/files:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/files
+      tags:
+      - 数据中心
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/files（multipart：module 必填、business_no 选填、file）
+      tags:
+      - 数据中心
+  /api/files/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/files/:id（软删 + 审计）
+      tags:
+      - 数据中心
+  /api/files/{id}/download:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/files/:id/download（权限 + 过期/软删拒绝 + 流式 + 下载审计）
+      tags:
+      - 数据中心
+  /api/files/{id}/preview:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/files/:id/preview（仅图片原样返回；plan §6.4）
+      tags:
+      - 数据中心
+  /api/imports:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/imports
+      tags:
+      - 数据中心
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/imports（multipart：import_type + file）
+      tags:
+      - 数据中心
+  /api/imports/{id}/confirm:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_datax.ConfirmInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/imports/:id/confirm（高危类型请求体 confirmed=true 二次确认）
+      tags:
+      - 数据中心
+  /api/imports/{id}/error-file:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/imports/:id/error-file（错误 Excel 流式下发 + 下载审计）
+      tags:
+      - 数据中心
+  /api/imports/{id}/preview:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/imports/:id/preview
+      tags:
+      - 数据中心
+  /api/imports/{id}/validate:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/imports/:id/validate
+      tags:
+      - 数据中心
+  /api/imports/templates:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/imports/templates
+      tags:
+      - 数据中心
+  /api/imports/templates/{type}:
+    get:
+      parameters:
+      - description: 路径参数 type
+        in: path
+        name: type
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/imports/templates/:type（xlsx 流式下发）
+      tags:
+      - 数据中心
+  /api/inbounds:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inbounds
+      tags:
+      - 采购入库
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/inbounds
+      tags:
+      - 采购入库
+  /api/inbounds/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inbounds/:id
+      tags:
+      - 采购入库
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/inbounds/:id
+      tags:
+      - 采购入库
+  /api/inbounds/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/inbounds/:id/cancel
+      tags:
+      - 采购入库
+  /api/inbounds/{id}/close:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/inbounds/:id/close
+      tags:
+      - 采购入库
+  /api/inventory:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory
+      tags:
+      - 库存
+  /api/inventory-ledgers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory-ledgers
+      tags:
+      - 库存
+  /api/inventory/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/:id
+      tags:
+      - 库存
+  /api/inventory/adjustments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/adjustments
+      tags:
+      - 库存
+  /api/inventory/alerts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/alerts
+      tags:
+      - 报表
+  /api/inventory/locks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/locks
+      tags:
+      - 库存
+  /api/inventory/moves:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_stockops.MoveInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 仓内移库
+      tags:
+      - 库存作业
+  /api/inventory/summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/summary（reports 实现、inventory 前缀挂载）
+      tags:
+      - 报表
+  /api/inventory/trace:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/trace
+      tags:
+      - 退货与异常
+  /api/logs/logins:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/logs/logins
+      tags:
+      - 系统运维
+  /api/logs/operations:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/logs/operations
+      tags:
+      - 系统运维
+  /api/logs/operations/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/logs/operations/:id
+      tags:
+      - 系统运维
+  /api/notifications:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/notifications
+      tags:
+      - 系统运维
+  /api/notifications/{id}/read:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/notifications/:id/read
+      tags:
+      - 系统运维
+  /api/notifications/read-all:
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/notifications/read-all
+      tags:
+      - 系统运维
+  /api/notifications/unread-count:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/notifications/unread-count
+      tags:
+      - 系统运维
+  /api/outbounds:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/outbounds
+      tags:
+      - 销售出库
+  /api/outbounds/{no}:
+    get:
+      parameters:
+      - description: 路径参数 no
+        in: path
+        name: "no"
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/outbounds/:no
+      tags:
+      - 销售出库
+  /api/outbounds/{no}/cancel:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CancelInput'
+      - description: 路径参数 no
+        in: path
+        name: "no"
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/outbounds/:no/cancel
+      tags:
+      - 销售出库
+  /api/outbounds/{no}/close:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CloseInput'
+      - description: 路径参数 no
+        in: path
+        name: "no"
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/outbounds/:no/close
+      tags:
+      - 销售出库
+  /api/outbounds/{no}/picks:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 no
+        in: path
+        name: "no"
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 生成拣货任务（ALLOCATED→PICKING）
+      tags:
+      - 销售出库
+  /api/packing:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/packing
+      tags:
+      - 销售出库
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.PackInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/packing
+      tags:
+      - 销售出库
+  /api/permissions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/permissions（分页 + type/status/keyword 筛选）
+      tags:
+      - 认证与用户
+  /api/picks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/picks
+      tags:
+      - 销售出库
+  /api/picks/{id}/claim:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/picks/:id/claim
+      tags:
+      - 销售出库
+  /api/picks/{id}/confirm:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.PickConfirmInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/picks/:id/confirm
+      tags:
+      - 销售出库
+  /api/picks/{id}/exception:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体（匿名结构体，字段见 handler 定义）
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/picks/:id/exception
+      tags:
+      - 销售出库
+  /api/prints/barcode:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/barcode?text=&symbology=&width=&height=
+      tags:
+      - 打印中心
+  /api/prints/history:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/history
+      tags:
+      - 打印中心
+  /api/prints/tasks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/tasks
+      tags:
+      - 打印中心
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_printing.TaskCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/prints/tasks
+      tags:
+      - 打印中心
+  /api/prints/tasks/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/tasks/:id
+      tags:
+      - 打印中心
+  /api/prints/tasks/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_printing.ExecuteInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/prints/tasks/:id/execute
+      tags:
+      - 打印中心
+  /api/prints/templates:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/templates
+      tags:
+      - 打印中心
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_printing.TemplateSaveInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/prints/templates
+      tags:
+      - 打印中心
+  /api/prints/templates/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/prints/templates/:id
+      tags:
+      - 打印中心
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_printing.TemplateSaveInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/prints/templates/:id
+      tags:
+      - 打印中心
+  /api/prints/templates/{id}/copy:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/prints/templates/:id/copy
+      tags:
+      - 打印中心
+  /api/prints/templates/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体（匿名结构体，字段见 handler 定义）
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/prints/templates/:id/status
+      tags:
+      - 打印中心
+  /api/product-categories:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/product-categories
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/product-categories
+      tags:
+      - 基础资料
+  /api/product-categories/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/product-categories/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/product-categories/:id
+      tags:
+      - 基础资料
+  /api/product-categories/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/product-categories/:id/status
+      tags:
+      - 基础资料
+  /api/products:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/products
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/products
+      tags:
+      - 基础资料
+  /api/products/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/products/:id
+      tags:
+      - 基础资料
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/products/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/products/:id
+      tags:
+      - 基础资料
+  /api/products/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/products/:id/status
+      tags:
+      - 基础资料
+  /api/purchase-returns:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchase-returns
+      tags:
+      - 退货与异常
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.PurchaseReturnCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchase-returns/:id
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ApproveInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/approve
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.CancelInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/cancel
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}/complete:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/complete
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}/ship:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ShipInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/ship
+      tags:
+      - 退货与异常
+  /api/purchase-returns/{id}/submit:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/submit
+      tags:
+      - 退货与异常
+  /api/purchases:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchases
+      tags:
+      - 采购入库
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchases
+      tags:
+      - 采购入库
+  /api/purchases/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchases/:id
+      tags:
+      - 采购入库
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/purchases/:id
+      tags:
+      - 采购入库
+  /api/purchases/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchases/:id/approve
+      tags:
+      - 采购入库
+  /api/purchases/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchases/:id/cancel
+      tags:
+      - 采购入库
+  /api/purchases/{id}/close:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchases/:id/close
+      tags:
+      - 采购入库
+  /api/purchases/{id}/submit:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchases/:id/submit
+      tags:
+      - 采购入库
+  /api/putaway:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/putaway
+      tags:
+      - 采购入库
+  /api/putaway/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/putaway/:id
+      tags:
+      - 采购入库
+  /api/putaway/{id}/claim:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/putaway/:id/claim
+      tags:
+      - 采购入库
+  /api/putaway/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/putaway/:id/execute
+      tags:
+      - 采购入库
+  /api/putaway/recommend:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 推荐库位（§5.3 基础规则经 BinRecommender）
+      tags:
+      - 采购入库
+  /api/quality:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/quality
+      tags:
+      - 采购入库
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/quality
+      tags:
+      - 采购入库
+  /api/quality/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/quality/:id
+      tags:
+      - 采购入库
+  /api/quality/{id}/execute:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/quality/:id/execute
+      tags:
+      - 采购入库
+  /api/quality/{id}/start:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/quality/:id/start
+      tags:
+      - 采购入库
+  /api/receipts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/receipts
+      tags:
+      - 采购入库
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 收货确认（幂等：Idempotency-Key 头优先于请求体键——plan §7）
+      tags:
+      - 采购入库
+  /api/receipts/{id}:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/receipts/no/:no
+      tags:
+      - 采购入库
+  /api/receipts/no/{no}:
+    get:
+      parameters:
+      - description: 路径参数 no
+        in: path
+        name: "no"
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/receipts/no/:no
+      tags:
+      - 采购入库
+  /api/reports:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports
+      tags:
+      - 报表
+  /api/reports/inbound-stats:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/inbound-stats
+      tags:
+      - 报表
+  /api/reports/inventory-summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/inventory-summary
+      tags:
+      - 报表
+  /api/reports/inventory-turnover:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/inventory-turnover
+      tags:
+      - 报表
+  /api/reports/outbound-stats:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/outbound-stats
+      tags:
+      - 报表
+  /api/reports/replenishment-suggestions:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/replenishment-suggestions
+      tags:
+      - 报表
+  /api/reports/stagnant-stock:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/stagnant-stock
+      tags:
+      - 报表
+  /api/returns:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/returns
+      tags:
+      - 退货与异常
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.SalesReturnCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/returns
+      tags:
+      - 退货与异常
+  /api/returns/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchase-returns/:id
+      tags:
+      - 退货与异常
+  /api/returns/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ApproveInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/approve
+      tags:
+      - 退货与异常
+  /api/returns/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.CancelInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/cancel
+      tags:
+      - 退货与异常
+  /api/returns/{id}/quality:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.QCResultInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/returns/:id/quality
+      tags:
+      - 退货与异常
+  /api/returns/{id}/receive:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ReceiveInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/returns/:id/receive
+      tags:
+      - 退货与异常
+  /api/returns/{id}/submit:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/purchase-returns/:id/submit
+      tags:
+      - 退货与异常
+  /api/returns/{id}/submit-qc:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.SubmitQCInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/returns/:id/submit-qc
+      tags:
+      - 退货与异常
+  /api/roles:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/roles
+      tags:
+      - 认证与用户
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.RoleCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/roles
+      tags:
+      - 认证与用户
+  /api/roles/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/roles/:id
+      tags:
+      - 认证与用户
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.RoleUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/roles/:id
+      tags:
+      - 认证与用户
+  /api/roles/{id}/permissions:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.AssignPermissionsInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/roles/:id/permissions
+      tags:
+      - 认证与用户
+  /api/roles/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.StatusRequest'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/roles/:id/status
+      tags:
+      - 认证与用户
+  /api/sales:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/sales
+      tags:
+      - 销售出库
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CreateOrderInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/sales
+      tags:
+      - 销售出库
+  /api/sales/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/sales/:id
+      tags:
+      - 销售出库
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CreateOrderInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/sales/:id
+      tags:
+      - 销售出库
+  /api/sales/{id}/approve:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.ApproveInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/sales/:id/approve
+      tags:
+      - 销售出库
+  /api/sales/{id}/cancel:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CancelInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/sales/:id/cancel
+      tags:
+      - 销售出库
+  /api/sales/{id}/close:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.CloseInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/sales/:id/close
+      tags:
+      - 销售出库
+  /api/sales/{id}/submit:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/sales/:id/submit
+      tags:
+      - 销售出库
+  /api/scanner/logs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/scanner/logs（devices:scanlog:list；仓库范围数据权限）
+      tags:
+      - 设备中心
+  /api/scanner/resolve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_devices.ResolveInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/scanner/resolve（只识别不执行业务——scanner.md §5.3）
+      tags:
+      - 设备中心
+  /api/serials:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/serials
+      tags:
+      - 库存
+  /api/shelves:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/shelves
+      tags:
+      - 仓库与库位
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.ShelfCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/shelves
+      tags:
+      - 仓库与库位
+  /api/shelves/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/shelves/:id
+      tags:
+      - 仓库与库位
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.ShelfUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/shelves/:id
+      tags:
+      - 仓库与库位
+  /api/shelves/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.StatusInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/shelves/:id/status
+      tags:
+      - 仓库与库位
+  /api/shipments:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/shipments
+      tags:
+      - 销售出库
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.ShipInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/shipments
+      tags:
+      - 销售出库
+  /api/shipments/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sales.ShipStatusInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/shipments/:id/status
+      tags:
+      - 销售出库
+  /api/skus:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/skus
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/skus
+      tags:
+      - 基础资料
+  /api/skus/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/skus/:id
+      tags:
+      - 基础资料
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/skus/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/skus/:id
+      tags:
+      - 基础资料
+  /api/skus/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/skus/:id/status
+      tags:
+      - 基础资料
+  /api/suppliers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/suppliers
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/suppliers
+      tags:
+      - 基础资料
+  /api/suppliers/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/suppliers/:id
+      tags:
+      - 基础资料
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/suppliers/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/suppliers/:id
+      tags:
+      - 基础资料
+  /api/suppliers/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/suppliers/:id/status
+      tags:
+      - 基础资料
+  /api/system/backups:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/backups
+      tags:
+      - 系统运维
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/system/backups
+      tags:
+      - 系统运维
+  /api/system/backups/{id}/download:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/backups/:id/download
+      tags:
+      - 系统运维
+  /api/system/backups/pg-dump-template:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/backups/pg-dump-template
+      tags:
+      - 系统运维
+  /api/system/configs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/configs
+      tags:
+      - 系统运维
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sysops.saveConfigsPayload'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/system/configs
+      tags:
+      - 系统运维
+  /api/system/jobs:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/jobs
+      tags:
+      - 系统运维
+  /api/system/jobs/{id}/run-logs:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/jobs/:id/run-logs
+      tags:
+      - 系统运维
+  /api/system/jobs/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_sysops.jobStatusPayload'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/system/jobs/:id/status
+      tags:
+      - 系统运维
+  /api/system/monitor:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/system/monitor
+      tags:
+      - 系统运维
+  /api/transfers:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/transfers
+      tags:
+      - 库存作业
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers
+      tags:
+      - 库存作业
+  /api/transfers/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/transfers/:id
+      tags:
+      - 库存作业
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/transfers/:id
+      tags:
+      - 库存作业
+  /api/transfers/{id}/approve:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers/:id/approve
+      tags:
+      - 库存作业
+  /api/transfers/{id}/arrive:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers/:id/arrive
+      tags:
+      - 库存作业
+  /api/transfers/{id}/cancel:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers/:id/cancel
+      tags:
+      - 库存作业
+  /api/transfers/{id}/outbound:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers/:id/outbound
+      tags:
+      - 库存作业
+  /api/transfers/{id}/receive:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/transfers/:id/receive
+      tags:
+      - 库存作业
+  /api/transfers/{id}/submit:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: / approve / outbound / arrive / receive / cancel 共用"迁移类动作"响应形态：
+      tags:
+      - 库存作业
+  /api/transfers/in-transit:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/transfers/in-transit
+      tags:
+      - 库存作业
+  /api/units:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/units
+      tags:
+      - 基础资料
+    post:
+      consumes:
+      - application/json
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/units
+      tags:
+      - 基础资料
+  /api/units/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/units/:id
+      tags:
+      - 基础资料
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/units/:id
+      tags:
+      - 基础资料
+  /api/units/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/units/:id/status
+      tags:
+      - 基础资料
+  /api/users:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/users
+      tags:
+      - 认证与用户
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.UserCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/users
+      tags:
+      - 认证与用户
+  /api/users/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/users/:id
+      tags:
+      - 认证与用户
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.UserUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/users/:id
+      tags:
+      - 认证与用户
+  /api/users/{id}/reset-password:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.ResetPasswordInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/users/:id/reset-password
+      tags:
+      - 认证与用户
+  /api/users/{id}/roles:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.AssignRolesInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/users/:id/roles
+      tags:
+      - 认证与用户
+  /api/users/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_auth.StatusRequest'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/users/:id/status
+      tags:
+      - 认证与用户
+  /api/users/{id}/unlock:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/users/:id/unlock
+      tags:
+      - 认证与用户
+  /api/warehouses:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/warehouses
+      tags:
+      - 仓库与库位
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.WarehouseCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/warehouses
+      tags:
+      - 仓库与库位
+  /api/warehouses/{id}:
+    delete:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: DELETE /api/warehouses/:id
+      tags:
+      - 仓库与库位
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/warehouses/:id
+      tags:
+      - 仓库与库位
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.WarehouseUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/warehouses/:id
+      tags:
+      - 仓库与库位
+  /api/warehouses/{id}/map:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/warehouses/:id/map（库位地图，plan §5.4）
+      tags:
+      - 仓库与库位
+  /api/warehouses/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.StatusInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/warehouses/:id/status
+      tags:
+      - 仓库与库位
+  /api/zones:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/zones
+      tags:
+      - 仓库与库位
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.ZoneCreateInput'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/zones
+      tags:
+      - 仓库与库位
+  /api/zones/{id}:
+    get:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/zones/:id
+      tags:
+      - 仓库与库位
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.ZoneUpdateInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/zones/:id
+      tags:
+      - 仓库与库位
+  /api/zones/{id}/status:
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_warehouse.StatusInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: PUT /api/zones/:id/status
+      tags:
+      - 仓库与库位
+  /health:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 进程存活探针
+      tags:
+      - 健康检查
+  /ready:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "503":
+          description: 服务暂不可用（组件 DOWN，details 携带各组件状态）
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: 就绪探针（DB + Redis + 文件存储）
+      tags:
+      - 健康检查
+securityDefinitions:
+  BearerAuth:
+    description: 值格式 "Bearer <access_token>"（api.md §6.1）。
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"

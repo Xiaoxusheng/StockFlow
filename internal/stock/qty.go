@@ -1,4 +1,4 @@
-package inventory
+package stock
 
 import (
 	"database/sql/driver"

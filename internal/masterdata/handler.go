@@ -60,7 +60,7 @@ func queryInt64(c *gin.Context, name string) (int64, bool) {
 // bindJSON 统一请求体绑定（错误统一 COMMON_INVALID_PARAM + 原因）。
 func bindJSON(c *gin.Context, req any) bool {
 	if err := c.ShouldBindJSON(req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return false
 	}
 	return true
@@ -78,6 +78,12 @@ func pageOf(c *gin.Context) (int, int, bool) {
 
 // ---- 商品（masterdata:product:*）----
 
+// @Summary GET /api/products
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products [get]
 func handleProductList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -101,6 +107,13 @@ func handleProductList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/products/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products/{id} [get]
 func handleProductDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -114,6 +127,13 @@ func handleProductDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/products
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products [post]
 func handleProductCreate(c *gin.Context, svc *Service) {
 	var req ProductCreateInput
 	if !bindJSON(c, &req) {
@@ -127,6 +147,14 @@ func handleProductCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/products/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products/{id} [put]
 func handleProductUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -149,6 +177,14 @@ type StatusRequest struct {
 	Status string `json:"status" binding:"required"`
 }
 
+// @Summary PUT /api/products/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products/{id}/status [put]
 func handleProductStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -166,6 +202,13 @@ func handleProductStatus(c *gin.Context, svc *Service) {
 	response.OK(c, gin.H{"status": req.Status, "cascade_disabled_skus": cascaded})
 }
 
+// @Summary DELETE /api/products/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/products/{id} [delete]
 func handleProductDelete(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -185,6 +228,12 @@ type SKUStatusRequest struct {
 	Enabled *bool `json:"enabled" binding:"required"`
 }
 
+// @Summary GET /api/skus
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus [get]
 func handleSKUList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -218,6 +267,13 @@ func handleSKUList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/skus/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus/{id} [get]
 func handleSKUDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -231,6 +287,13 @@ func handleSKUDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/skus
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus [post]
 func handleSKUCreate(c *gin.Context, svc *Service) {
 	var req SKUCreateInput
 	if !bindJSON(c, &req) {
@@ -244,6 +307,14 @@ func handleSKUCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/skus/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus/{id} [put]
 func handleSKUUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -261,6 +332,14 @@ func handleSKUUpdate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/skus/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus/{id}/status [put]
 func handleSKUStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -277,6 +356,13 @@ func handleSKUStatus(c *gin.Context, svc *Service) {
 	response.OK(c, gin.H{"is_enabled": *req.Enabled})
 }
 
+// @Summary DELETE /api/skus/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/skus/{id} [delete]
 func handleSKUDelete(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -291,6 +377,12 @@ func handleSKUDelete(c *gin.Context, svc *Service) {
 
 // ---- 商品分类（masterdata:category:*；无删除接口）----
 
+// @Summary GET /api/product-categories
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/product-categories [get]
 func handleCategoryList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -325,6 +417,13 @@ func handleCategoryList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/product-categories/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/product-categories/{id} [get]
 func handleCategoryDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -338,6 +437,13 @@ func handleCategoryDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/product-categories
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/product-categories [post]
 func handleCategoryCreate(c *gin.Context, svc *Service) {
 	var req CategoryCreateInput
 	if !bindJSON(c, &req) {
@@ -351,6 +457,14 @@ func handleCategoryCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/product-categories/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/product-categories/{id} [put]
 func handleCategoryUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -368,6 +482,14 @@ func handleCategoryUpdate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/product-categories/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/product-categories/{id}/status [put]
 func handleCategoryStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -386,6 +508,12 @@ func handleCategoryStatus(c *gin.Context, svc *Service) {
 
 // ---- 计量单位（masterdata:unit:*；无删除接口）----
 
+// @Summary GET /api/units
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/units [get]
 func handleUnitList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -404,6 +532,13 @@ func handleUnitList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/units/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/units/{id} [get]
 func handleUnitDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -417,6 +552,13 @@ func handleUnitDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/units
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/units [post]
 func handleUnitCreate(c *gin.Context, svc *Service) {
 	var req UnitCreateInput
 	if !bindJSON(c, &req) {
@@ -430,6 +572,14 @@ func handleUnitCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/units/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/units/{id} [put]
 func handleUnitUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -447,6 +597,14 @@ func handleUnitUpdate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/units/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/units/{id}/status [put]
 func handleUnitStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -465,6 +623,12 @@ func handleUnitStatus(c *gin.Context, svc *Service) {
 
 // ---- 供应商（masterdata:supplier:*）----
 
+// @Summary GET /api/suppliers
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers [get]
 func handleSupplierList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -483,6 +647,13 @@ func handleSupplierList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/suppliers/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers/{id} [get]
 func handleSupplierDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -496,6 +667,13 @@ func handleSupplierDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/suppliers
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers [post]
 func handleSupplierCreate(c *gin.Context, svc *Service) {
 	var req SupplierCreateInput
 	if !bindJSON(c, &req) {
@@ -509,6 +687,14 @@ func handleSupplierCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/suppliers/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers/{id} [put]
 func handleSupplierUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -526,6 +712,14 @@ func handleSupplierUpdate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/suppliers/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers/{id}/status [put]
 func handleSupplierStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -542,6 +736,13 @@ func handleSupplierStatus(c *gin.Context, svc *Service) {
 	response.OK(c, gin.H{"status": req.Status})
 }
 
+// @Summary DELETE /api/suppliers/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/suppliers/{id} [delete]
 func handleSupplierDelete(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -556,6 +757,12 @@ func handleSupplierDelete(c *gin.Context, svc *Service) {
 
 // ---- 客户（masterdata:customer:*）----
 
+// @Summary GET /api/customers
+// @Tags 基础资料
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers [get]
 func handleCustomerList(c *gin.Context, svc *Service) {
 	page, pageSize, ok := pageOf(c)
 	if !ok {
@@ -574,6 +781,13 @@ func handleCustomerList(c *gin.Context, svc *Service) {
 	response.OKPage(c, items, page, pageSize, total)
 }
 
+// @Summary GET /api/customers/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers/{id} [get]
 func handleCustomerDetail(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -587,6 +801,13 @@ func handleCustomerDetail(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary POST /api/customers
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers [post]
 func handleCustomerCreate(c *gin.Context, svc *Service) {
 	var req CustomerCreateInput
 	if !bindJSON(c, &req) {
@@ -600,6 +821,14 @@ func handleCustomerCreate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/customers/:id
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers/{id} [put]
 func handleCustomerUpdate(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -617,6 +846,14 @@ func handleCustomerUpdate(c *gin.Context, svc *Service) {
 	response.OK(c, v)
 }
 
+// @Summary PUT /api/customers/:id/status
+// @Tags 基础资料
+// @Accept json
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers/{id}/status [put]
 func handleCustomerStatus(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -633,6 +870,13 @@ func handleCustomerStatus(c *gin.Context, svc *Service) {
 	response.OK(c, gin.H{"status": req.Status})
 }
 
+// @Summary DELETE /api/customers/:id
+// @Tags 基础资料
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/customers/{id} [delete]
 func handleCustomerDelete(c *gin.Context, svc *Service) {
 	id, ok := pathID(c, "id")
 	if !ok {

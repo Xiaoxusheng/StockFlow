@@ -49,4 +49,11 @@ var (
 	ErrBinNotFound = response.Register("INVENTORY_BIN_NOT_FOUND", "库位不存在、已停用或不属于该仓库", http.StatusBadRequest)
 	// ErrLedgerNumberConflict 流水号生成冲突（重试后仍碰撞，理论上仅随机后缀碰撞时出现）。
 	ErrLedgerNumberConflict = response.Register("INVENTORY_LEDGER_NUMBER_CONFLICT", "流水号生成冲突，请重试", http.StatusConflict)
+	// ErrRowCountFrozen 库存行处于盘点冻结期（存在 ACTIVE COUNT_FREEZE）：改变行 total
+	// 的原语（上架/出库扣减/调整/移库）拒绝执行——冻结期间行总量必须恒定，盘点差异
+	// 才能以冻结快照为准（business-flow §10.2"冻结范围"、plan §6.7；M2 修复轮补齐）。
+	ErrRowCountFrozen = response.Register("INVENTORY_ROW_COUNT_FROZEN", "库存行盘点冻结中，暂不可执行该库存变更", http.StatusConflict)
+	// ErrWarehouseScopeDenied 目标仓库不在操作者数据权限范围内（permission.md §4
+	// fail-closed；期初库存导入写入器按 Actor 仓库范围快照拒绝跨仓行——plan §13.6）。
+	ErrWarehouseScopeDenied = response.Register("INVENTORY_WAREHOUSE_SCOPE_DENIED", "目标仓库不在数据权限范围内", http.StatusForbidden)
 )

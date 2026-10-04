@@ -126,7 +126,7 @@ func queryStatus(c *gin.Context) (string, bool) {
 func bindInput[T any](c *gin.Context) (*T, bool) {
 	var req T
 	if err := c.ShouldBindJSON(&req); err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, map[string]any{"reason": err.Error()}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return nil, false
 	}
 	return &req, true
@@ -135,6 +135,12 @@ func bindInput[T any](c *gin.Context) (*T, bool) {
 // —— /api/warehouses ——
 
 // listWarehouses GET /api/warehouses。
+// @Summary GET /api/warehouses
+// @Tags 仓库与库位
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses [get]
 func (h *handler) listWarehouses(c *gin.Context) {
 	page, pageSize, ok := parsePage(c)
 	if !ok {
@@ -161,6 +167,14 @@ func (h *handler) listWarehouses(c *gin.Context) {
 }
 
 // createWarehouse POST /api/warehouses。
+// @Summary POST /api/warehouses
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body WarehouseCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses [post]
 func (h *handler) createWarehouse(c *gin.Context) {
 	in, ok := bindInput[WarehouseCreateInput](c)
 	if !ok {
@@ -175,6 +189,13 @@ func (h *handler) createWarehouse(c *gin.Context) {
 }
 
 // getWarehouse GET /api/warehouses/:id。
+// @Summary GET /api/warehouses/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses/{id} [get]
 func (h *handler) getWarehouse(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -189,6 +210,15 @@ func (h *handler) getWarehouse(c *gin.Context) {
 }
 
 // updateWarehouse PUT /api/warehouses/:id。
+// @Summary PUT /api/warehouses/:id
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body WarehouseUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses/{id} [put]
 func (h *handler) updateWarehouse(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -207,6 +237,13 @@ func (h *handler) updateWarehouse(c *gin.Context) {
 }
 
 // deleteWarehouse DELETE /api/warehouses/:id。
+// @Summary DELETE /api/warehouses/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses/{id} [delete]
 func (h *handler) deleteWarehouse(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -220,6 +257,15 @@ func (h *handler) deleteWarehouse(c *gin.Context) {
 }
 
 // updateWarehouseStatus PUT /api/warehouses/:id/status。
+// @Summary PUT /api/warehouses/:id/status
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body StatusInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses/{id}/status [put]
 func (h *handler) updateWarehouseStatus(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -237,6 +283,13 @@ func (h *handler) updateWarehouseStatus(c *gin.Context) {
 }
 
 // warehouseMap GET /api/warehouses/:id/map（库位地图，plan §5.4）。
+// @Summary GET /api/warehouses/:id/map（库位地图，plan §5.4）
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/warehouses/{id}/map [get]
 func (h *handler) warehouseMap(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -253,6 +306,12 @@ func (h *handler) warehouseMap(c *gin.Context) {
 // —— /api/zones ——
 
 // listZones GET /api/zones。
+// @Summary GET /api/zones
+// @Tags 仓库与库位
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/zones [get]
 func (h *handler) listZones(c *gin.Context) {
 	page, pageSize, ok := parsePage(c)
 	if !ok {
@@ -284,6 +343,14 @@ func (h *handler) listZones(c *gin.Context) {
 }
 
 // createZone POST /api/zones。
+// @Summary POST /api/zones
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body ZoneCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/zones [post]
 func (h *handler) createZone(c *gin.Context) {
 	in, ok := bindInput[ZoneCreateInput](c)
 	if !ok {
@@ -298,6 +365,13 @@ func (h *handler) createZone(c *gin.Context) {
 }
 
 // getZone GET /api/zones/:id。
+// @Summary GET /api/zones/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/zones/{id} [get]
 func (h *handler) getZone(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -312,6 +386,15 @@ func (h *handler) getZone(c *gin.Context) {
 }
 
 // updateZone PUT /api/zones/:id。
+// @Summary PUT /api/zones/:id
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body ZoneUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/zones/{id} [put]
 func (h *handler) updateZone(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -330,6 +413,15 @@ func (h *handler) updateZone(c *gin.Context) {
 }
 
 // updateZoneStatus PUT /api/zones/:id/status。
+// @Summary PUT /api/zones/:id/status
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body StatusInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/zones/{id}/status [put]
 func (h *handler) updateZoneStatus(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -349,6 +441,12 @@ func (h *handler) updateZoneStatus(c *gin.Context) {
 // —— /api/shelves ——
 
 // listShelves GET /api/shelves。
+// @Summary GET /api/shelves
+// @Tags 仓库与库位
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/shelves [get]
 func (h *handler) listShelves(c *gin.Context) {
 	page, pageSize, ok := parsePage(c)
 	if !ok {
@@ -384,6 +482,14 @@ func (h *handler) listShelves(c *gin.Context) {
 }
 
 // createShelf POST /api/shelves。
+// @Summary POST /api/shelves
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body ShelfCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/shelves [post]
 func (h *handler) createShelf(c *gin.Context) {
 	in, ok := bindInput[ShelfCreateInput](c)
 	if !ok {
@@ -398,6 +504,13 @@ func (h *handler) createShelf(c *gin.Context) {
 }
 
 // getShelf GET /api/shelves/:id。
+// @Summary GET /api/shelves/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/shelves/{id} [get]
 func (h *handler) getShelf(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -412,6 +525,15 @@ func (h *handler) getShelf(c *gin.Context) {
 }
 
 // updateShelf PUT /api/shelves/:id。
+// @Summary PUT /api/shelves/:id
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body ShelfUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/shelves/{id} [put]
 func (h *handler) updateShelf(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -430,6 +552,15 @@ func (h *handler) updateShelf(c *gin.Context) {
 }
 
 // updateShelfStatus PUT /api/shelves/:id/status。
+// @Summary PUT /api/shelves/:id/status
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body StatusInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/shelves/{id}/status [put]
 func (h *handler) updateShelfStatus(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -449,6 +580,12 @@ func (h *handler) updateShelfStatus(c *gin.Context) {
 // —— /api/bins ——
 
 // listBins GET /api/bins。
+// @Summary GET /api/bins
+// @Tags 仓库与库位
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins [get]
 func (h *handler) listBins(c *gin.Context) {
 	page, pageSize, ok := parsePage(c)
 	if !ok {
@@ -490,6 +627,14 @@ func (h *handler) listBins(c *gin.Context) {
 }
 
 // createBin POST /api/bins。
+// @Summary POST /api/bins
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body BinCreateInput true "请求体"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins [post]
 func (h *handler) createBin(c *gin.Context) {
 	in, ok := bindInput[BinCreateInput](c)
 	if !ok {
@@ -504,6 +649,13 @@ func (h *handler) createBin(c *gin.Context) {
 }
 
 // getBin GET /api/bins/:id。
+// @Summary GET /api/bins/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins/{id} [get]
 func (h *handler) getBin(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -518,6 +670,15 @@ func (h *handler) getBin(c *gin.Context) {
 }
 
 // updateBin PUT /api/bins/:id。
+// @Summary PUT /api/bins/:id
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body BinUpdateInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins/{id} [put]
 func (h *handler) updateBin(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -536,6 +697,13 @@ func (h *handler) updateBin(c *gin.Context) {
 }
 
 // deleteBin DELETE /api/bins/:id。
+// @Summary DELETE /api/bins/:id
+// @Tags 仓库与库位
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins/{id} [delete]
 func (h *handler) deleteBin(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {
@@ -549,6 +717,15 @@ func (h *handler) deleteBin(c *gin.Context) {
 }
 
 // updateBinStatus PUT /api/bins/:id/status。
+// @Summary PUT /api/bins/:id/status
+// @Tags 仓库与库位
+// @Accept json
+// @Produce json
+// @Param body body StatusInput true "请求体"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/bins/{id}/status [put]
 func (h *handler) updateBinStatus(c *gin.Context) {
 	id, ok := pathID(c, "id")
 	if !ok {

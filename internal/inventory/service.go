@@ -3,12 +3,12 @@ package inventory
 import (
 	"context"
 	"strings"
-	"time"
 
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 
 	"github.com/stockflow/server/internal/database"
+	"github.com/stockflow/server/internal/docnum"
 	"github.com/stockflow/server/internal/middleware"
 	"github.com/stockflow/server/internal/response"
 )
@@ -49,32 +49,11 @@ func NewService(db *gorm.DB, rdb *redis.Client, opts ...Option) *Service {
 	}
 }
 
-// Actor 操作者归因（操作日志与流水 operator 冗余字段；调用方经 auth.CurrentUser 带出，
-// 系统级调用 OperatorID=0，plan §4.4）。
-type Actor struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	RequestID string `json:"request_id"`
-	IP        string `json:"ip"`
-	UserAgent string `json:"user_agent"`
-	Method    string `json:"method"`
-	Path      string `json:"path"`
-}
+// Actor/RowKey/Source/MutationResult/LedgerRef 与九个原语 Op 结构已别名承接
+// internal/stock（aliases.go，backend-m2-plan §3/§8.3 条 4），本文件不再重复定义。
 
-// RowKey 五维定位键（inventory-rules §3）。定位 = warehouse + bin + sku + batch
-// （zone/shelf 随 bin 冗余，迁移 uk_inventory_location 注释）；BatchID=0 表示非批次 SKU。
-// 行创建类变更（Putaway/盘盈/移库目标行）必须携带 ZoneID/ShelfID。
-type RowKey struct {
-	WarehouseID int64 `json:"warehouse_id"`
-	ZoneID      int64 `json:"zone_id"`
-	ShelfID     int64 `json:"shelf_id"`
-	BinID       int64 `json:"bin_id"`
-	SKUID       int64 `json:"sku_id"`
-	BatchID     int64 `json:"batch_id"`
-}
-
-// details 五维键的结构化 details（api.md §4：校验失败必须带 details）。
-func (k RowKey) details(reason string) map[string]any {
+// rowKeyDetails 五维键的结构化 details（api.md §4：校验失败必须带 details）。
+func rowKeyDetails(k RowKey, reason string) map[string]any {
 	return map[string]any{
 		"reason":       reason,
 		"warehouse_id": k.WarehouseID, "zone_id": k.ZoneID, "shelf_id": k.ShelfID,
@@ -84,29 +63,10 @@ func (k RowKey) details(reason string) map[string]any {
 
 // notEnoughErr 库存不足错误（plan §8.3：details 带具体 SKU/库位/需求量与可用量）。
 func notEnoughErr(key RowKey, reason string, need, avail Qty) error {
-	d := key.details(reason)
+	d := rowKeyDetails(key, reason)
 	d["need"] = need.String()
 	d["available"] = avail.String()
 	return response.NewError(ErrNotEnough, d)
-}
-
-// Source 来源单据（inventory-rules §5：任何库存变化必须可追溯来源单据）。
-type Source struct {
-	Type string `json:"type"` // 业务单据类型（如 inbound_order/sales_order/count_order）
-	No   string `json:"no"`   // 业务单号
-}
-
-// MutationResult 变更结果。流水是库存变更的最小审计单元；Lock 类另带锁记录 ID。
-type MutationResult struct {
-	Replay bool      `json:"replay"` // true=幂等重放（未再次变更库存，plan §8.5）
-	Ledger LedgerRef `json:"ledger"` // 本次（或既有）流水
-	LockID int64     `json:"lock_id,omitempty"`
-}
-
-// LedgerRef 流水引用。
-type LedgerRef struct {
-	ID       int64  `json:"id"`
-	LedgerNo string `json:"ledger_no"`
 }
 
 // stockSnapshot 操作日志 before/after 快照（architecture.md §8.1 关键更新必带）。
@@ -173,7 +133,7 @@ func validateQty(q Qty, field string) error {
 	return nil
 }
 
-func (k RowKey) validate(needZoneShelf bool) error {
+func validateRowKey(k RowKey, needZoneShelf bool) error {
 	if k.WarehouseID <= 0 || k.BinID <= 0 || k.SKUID <= 0 {
 		return errParam("row_key", "warehouse_id/bin_id/sku_id 必须为正整数")
 	}
@@ -186,7 +146,7 @@ func (k RowKey) validate(needZoneShelf bool) error {
 	return nil
 }
 
-func (s Source) validate() error {
+func validateSource(s Source) error {
 	if strings.TrimSpace(s.Type) == "" || strings.TrimSpace(s.No) == "" {
 		return response.NewError(ErrSourceRequired, map[string]any{
 			"reason": "库存变更必须携带来源单据类型与单号（inventory-rules §5）",
@@ -332,8 +292,11 @@ func auditStock(tx *gorm.DB, action string, objectID int64, actor Actor, req any
 // buildLedger 构造流水：qty_before/qty_change/qty_after 记录受影响状态列
 // （status_from 所指列）的三态；total 变化型操作 total 同步 ±qty_change
 // （由 applyDelta 的成对增量保证），change_type 表达口径差异。
+// serialNo 为 M2 追溯接入点（backend-m2-plan §8.3 条 1，M1 遗留 F13）：模型字段与
+// insertLedger 的 serial_no 列早已存在，只缺构造赋值——单件操作的原语携带序列号，
+// 批量操作传空串（流水形态不变）。
 func buildLedger(row *Inventory, changeType string, src Source, actor Actor,
-	statusFrom, statusTo StateColumn, before, change Qty, idemKey, remark string) *InventoryLedger {
+	statusFrom, statusTo StateColumn, before, change Qty, idemKey, remark, serialNo string) *InventoryLedger {
 	zoneID, shelfID := row.ZoneID, row.ShelfID
 	l := &InventoryLedger{
 		SKUID:        row.SKUID,
@@ -342,6 +305,7 @@ func buildLedger(row *Inventory, changeType string, src Source, actor Actor,
 		ShelfID:      &shelfID,
 		BinID:        row.BinID,
 		BatchID:      row.BatchID,
+		SerialNo:     serialNo,
 		ChangeType:   changeType,
 		BusinessType: src.Type,
 		BusinessNo:   src.No,
@@ -361,19 +325,25 @@ func buildLedger(row *Inventory, changeType string, src Source, actor Actor,
 	return l
 }
 
-// writeLedger 写流水；流水号随机后缀碰撞（uk_inventory_ledgers_ledger_no）时重生成重试。
+// writeLedger 写流水；单号经 internal/docnum 统一编号引擎发放（business-flow §13.1、
+// plan §4.1/§8.3 条 2——LED 前缀 ResetAll 承接 M1 存量口径），历史遗留同格式单号
+// 撞唯一索引（uk_inventory_ledgers_ledger_no）时取下一号重试。
 // 幂等键冲突不在此重试——上抛给 mutate 兜底重放。
 func writeLedger(tx *gorm.DB, l *InventoryLedger) error {
+	rule, _ := docnum.RuleFor("LED")
 	for range insertRetryLimit {
-		l.LedgerNo = newBusinessNo("LED", time.Now())
-		err := insertLedger(tx, l)
-		if err == nil {
+		no, err := docnum.Next(context.Background(), tx, rule)
+		if err != nil {
+			return err
+		}
+		l.LedgerNo = no
+		if err := insertLedger(tx, l); err == nil {
 			return nil
-		}
-		if pgUniqueViolation(err, "uk_inventory_ledgers_ledger_no") {
+		} else if pgUniqueViolation(err, "uk_inventory_ledgers_ledger_no") {
 			continue
+		} else {
+			return err
 		}
-		return err
 	}
 	return response.NewError(ErrLedgerNumberConflict, nil)
 }
@@ -383,38 +353,20 @@ func guardFailed(err error, key RowKey, reason string) error {
 	if err != nil {
 		return err
 	}
-	return response.NewError(ErrNotEnough, key.details(reason))
+	return response.NewError(ErrNotEnough, rowKeyDetails(key, reason))
 }
 
 // ---- 变更原语（plan §8.2 冻结方法集）----
 
-// PutawayOp 上架增加入参。
-//
-// 语义（plan §8.2"上架增加：pending_inspect→available（或免检直达 available），total 增"
-// 的展开）：本原语负责"增加"——
-//   - RequireInspect=false：免检直达 available（total、available 同增）；
-//   - RequireInspect=true：进入待检（total、pending_inspect 同增，change_type=INBOUND、
-//     status_to=pending_inspect），质检后经 InspectResult 转合格（pending→available）或
-//     不良（pending→defective）——两者组合即完整表达"pending_inspect→available"路径。
-type PutawayOp struct {
-	Key            RowKey `json:"key"`
-	Qty            Qty    `json:"qty"`
-	RequireInspect bool   `json:"require_inspect"`
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // Putaway 上架增加（行不存在则创建；行创建类变更需 SKU/库位存在性校验）。
 func (s *Service) Putaway(ctx context.Context, tx *gorm.DB, op PutawayOp) (MutationResult, error) {
-	if err := op.Key.validate(true); err != nil {
+	if err := validateRowKey(op.Key, true); err != nil {
 		return MutationResult{}, err
 	}
 	if err := validateQty(op.Qty, "qty"); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -442,6 +394,11 @@ func (s *Service) Putaway(ctx context.Context, tx *gorm.DB, op PutawayOp) (Mutat
 		// 流水三态口径：qty_before 为本次变更前的真实状态——新建行变更前为全零。
 		before := StockState{}
 		if !created {
+			// 盘点冻结守卫（ErrRowCountFrozen）：冻结期行 total 必须恒定（business-flow
+			// §10.2"冻结范围"）；新建行不在任何冻结快照内，无需守卫。
+			if err := rejectCountFrozen(tx, op.Key); err != nil {
+				return MutationResult{}, err
+			}
 			before = row.State()
 			// 存量行：增量 UPDATE（成对：total 与状态列同增，恒等式由构造成立）。
 			n, err := applyDelta(tx, row.ID.Int64(), op.Actor.ID, op.Qty,
@@ -455,7 +412,7 @@ func (s *Service) Putaway(ctx context.Context, tx *gorm.DB, op PutawayOp) (Mutat
 			return MutationResult{}, err
 		}
 		led := buildLedger(after, "INBOUND", op.Source, op.Actor, stateCol, stateCol,
-			stateCol.getOf(before), op.Qty, idemKey, op.Remark)
+			stateCol.getOf(before), op.Qty, idemKey, op.Remark, op.SerialNo)
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
@@ -466,22 +423,11 @@ func (s *Service) Putaway(ctx context.Context, tx *gorm.DB, op PutawayOp) (Mutat
 	})
 }
 
-// LockOp 预占/冻结入参（inventory-rules §4 五类锁定）。
-type LockOp struct {
-	Key            RowKey `json:"key"`
-	Qty            Qty    `json:"qty"`
-	LockType       string `json:"lock_type"`
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // Lock 预占/冻结：available → locked（订单占用）或 frozen（盘点/质检/人工/异常冻结），
 // 并落 inventory_locks 记录（来源单据/类型/数量/操作人/时间，inventory-rules §4.1）。
 // 分配与预占只允许使用可用库存；同来源同类型的 ACTIVE 锁存在时幂等返回（不重复预占）。
 func (s *Service) Lock(ctx context.Context, tx *gorm.DB, op LockOp) (MutationResult, error) {
-	if err := op.Key.validate(false); err != nil {
+	if err := validateRowKey(op.Key, false); err != nil {
 		return MutationResult{}, err
 	}
 	if err := validateQty(op.Qty, "qty"); err != nil {
@@ -490,7 +436,7 @@ func (s *Service) Lock(ctx context.Context, tx *gorm.DB, op LockOp) (MutationRes
 	if !lockTypes[op.LockType] {
 		return MutationResult{}, response.NewError(ErrLockTypeInvalid, map[string]any{"lock_type": op.LockType})
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -505,7 +451,7 @@ func (s *Service) Lock(ctx context.Context, tx *gorm.DB, op LockOp) (MutationRes
 			return MutationResult{}, err
 		}
 		if row == nil {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, op.Key.details("库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(op.Key, "库存行不存在"))
 		}
 		// 同来源同类型已存在 ACTIVE 锁 → 幂等返回（plan §6.2 idx(source_type, source_no)
 		// "按来源单据幂等查重"；防止同一单据重复预占导致超卖，inventory-rules §4）。
@@ -556,7 +502,7 @@ func (s *Service) Lock(ctx context.Context, tx *gorm.DB, op LockOp) (MutationRes
 			return MutationResult{}, err
 		}
 		led := buildLedger(after, "LOCK", op.Source, op.Actor, ColAvailable, target,
-			before.Available, op.Qty.Neg(), idemKey, op.Remark)
+			before.Available, op.Qty.Neg(), idemKey, op.Remark, "")
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
@@ -585,20 +531,6 @@ func findLockCreationLedger(tx *gorm.DB, attrs lockSourceAttr) (*InventoryLedger
 	return &row, true, nil
 }
 
-// ReleaseLockOp 释放锁定入参。
-//
-// 签名说明：plan §8.2 草图为 ReleaseLock(ctx, tx, lockID, qty)；为满足 §4.4
-// "inventory Service 全部变更方法写操作日志"与 §8.5 幂等键，收拢为 op 结构
-// （与"op 结构均携带可选 IdempotencyKey"的全局约定一致），lockID/qty 语义不变。
-type ReleaseLockOp struct {
-	LockID         int64  `json:"lock_id"`
-	Qty            Qty    `json:"qty"`
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // ReleaseLock 释放锁定/解冻：locked/frozen → available（inventory-rules §4.2：必须由
 // 明确业务动作触发并生成流水）；锁记录 qty 递减，清零转 RELEASED 并记 released_at/by。
 func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp) (MutationResult, error) {
@@ -608,7 +540,7 @@ func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp
 	if err := validateQty(op.Qty, "qty"); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -631,7 +563,7 @@ func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp
 			return MutationResult{}, err
 		}
 		if row == nil {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, key.details("库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(key, "库存行不存在"))
 		}
 		before := row.State()
 		fromCol, _ := lockTargetState(lock.LockType)
@@ -663,7 +595,7 @@ func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp
 			return MutationResult{}, err
 		}
 		led := buildLedger(after, "RELEASE", op.Source, op.Actor, fromCol, ColAvailable,
-			fromCol.getOf(before), op.Qty.Neg(), idemKey, op.Remark)
+			fromCol.getOf(before), op.Qty.Neg(), idemKey, op.Remark, "")
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
@@ -674,27 +606,16 @@ func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp
 	})
 }
 
-// DeductOp 出库扣减入参。
-type DeductOp struct {
-	Key            RowKey `json:"key"`
-	Qty            Qty    `json:"qty"`
-	LockID         int64  `json:"lock_id"` // 可选：核销指定锁定记录（business-flow §8.5 发货核销）
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // Deduct 出库扣减：核销锁定（locked、total 同减，business-flow §7.2/§8.5——
 // 正式扣减发生在发货完成时）；携带 LockID 时同步核销锁定记录（部分核销保留 ACTIVE）。
 func (s *Service) Deduct(ctx context.Context, tx *gorm.DB, op DeductOp) (MutationResult, error) {
-	if err := op.Key.validate(false); err != nil {
+	if err := validateRowKey(op.Key, false); err != nil {
 		return MutationResult{}, err
 	}
 	if err := validateQty(op.Qty, "qty"); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -707,7 +628,12 @@ func (s *Service) Deduct(ctx context.Context, tx *gorm.DB, op DeductOp) (Mutatio
 			return MutationResult{}, err
 		}
 		if row == nil {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, op.Key.details("库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(op.Key, "库存行不存在"))
+		}
+		// 盘点冻结守卫（ErrRowCountFrozen）：冻结期拒绝出库扣减——total 变化会使
+		// 盘点差异（实盘 - 冻结快照）双重计账（business-flow §10.2"冻结范围"）。
+		if err := rejectCountFrozen(tx, op.Key); err != nil {
+			return MutationResult{}, err
 		}
 		before := row.State()
 		if before.Locked.Sub(op.Qty).IsNegative() {
@@ -729,7 +655,7 @@ func (s *Service) Deduct(ctx context.Context, tx *gorm.DB, op DeductOp) (Mutatio
 			}
 		}
 		led := buildLedger(after, "OUTBOUND", op.Source, op.Actor, ColLocked, ColLocked,
-			before.Locked, op.Qty.Neg(), idemKey, op.Remark)
+			before.Locked, op.Qty.Neg(), idemKey, op.Remark, op.SerialNo)
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
@@ -769,25 +695,13 @@ func (s *Service) consumeLock(tx *gorm.DB, lockID int64, qty Qty, key RowKey, ac
 	return updateLockAfterSplit(tx, lock, actor.ID)
 }
 
-// MoveBinOp 仓内移库入参（同仓同 SKU 同批次跨库位；M1 仅移动可用库存，
-// 锁定/冻结库存的移库随 M2 调拨域的专用原语交付）。
-type MoveBinOp struct {
-	From           RowKey `json:"from"`
-	To             RowKey `json:"to"`
-	Qty            Qty    `json:"qty"`
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // MoveBin 仓内移库：源行 available/total 同减，目标行 available/total 同增；
 // 源/目标各写一条 MOVE 流水（幂等键仅记于首条，见 mutate 注释）。
 func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (MutationResult, error) {
-	if err := op.From.validate(true); err != nil {
+	if err := validateRowKey(op.From, true); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.To.validate(true); err != nil {
+	if err := validateRowKey(op.To, true); err != nil {
 		return MutationResult{}, err
 	}
 	if op.From.WarehouseID != op.To.WarehouseID || op.From.SKUID != op.To.SKUID || op.From.BatchID != op.To.BatchID {
@@ -801,7 +715,7 @@ func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (Mutat
 	if err := validateQty(op.Qty, "qty"); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -815,7 +729,7 @@ func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (Mutat
 			return MutationResult{}, err
 		}
 		if fromID == 0 {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, op.From.details("源库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(op.From, "源库存行不存在"))
 		}
 		toID, err := locateRowID(tx, op.To)
 		if err != nil {
@@ -848,6 +762,14 @@ func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (Mutat
 				return MutationResult{}, err
 			}
 		}
+		// 盘点冻结守卫（ErrRowCountFrozen）：源/目标行任一处于盘点冻结期即拒绝——
+		// 两行 total 都会变化（business-flow §10.2"冻结范围"）。
+		if err := rejectCountFrozen(tx, rowKeyOf(fromRow)); err != nil {
+			return MutationResult{}, err
+		}
+		if err := rejectCountFrozen(tx, rowKeyOf(toRow)); err != nil {
+			return MutationResult{}, err
+		}
 		before := fromRow.State()
 		if before.Available.Sub(op.Qty).IsNegative() {
 			return MutationResult{}, notEnoughErr(op.From, "可用库存不足", op.Qty, before.Available)
@@ -872,12 +794,12 @@ func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (Mutat
 			return MutationResult{}, err
 		}
 		ledFrom := buildLedger(afterFrom, "MOVE", op.Source, op.Actor, ColAvailable, ColAvailable,
-			before.Available, op.Qty.Neg(), idemKey, op.Remark)
+			before.Available, op.Qty.Neg(), idemKey, op.Remark, "")
 		if err := writeLedger(tx, ledFrom); err != nil {
 			return MutationResult{}, err
 		}
 		ledTo := buildLedger(afterTo, "MOVE", op.Source, op.Actor, ColAvailable, ColAvailable,
-			afterTo.AvailableQty.Sub(op.Qty), op.Qty, "", op.Remark)
+			afterTo.AvailableQty.Sub(op.Qty), op.Qty, "", op.Remark, "")
 		if err := writeLedger(tx, ledTo); err != nil {
 			return MutationResult{}, err
 		}
@@ -888,27 +810,16 @@ func (s *Service) MoveBin(ctx context.Context, tx *gorm.DB, op MoveBinOp) (Mutat
 	})
 }
 
-// InspectResultOp 待检处理结果入参。
-type InspectResultOp struct {
-	Key            RowKey `json:"key"`
-	Qty            Qty    `json:"qty"`
-	Pass           bool   `json:"pass"` // true=合格转 available（INSPECT_PASS）；false=不良转 defective
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // InspectResult 待检处理：pending_inspect → available（合格）或 defective（不良，
 // 质检不合格转入，inventory-rules §2）。
 func (s *Service) InspectResult(ctx context.Context, tx *gorm.DB, op InspectResultOp) (MutationResult, error) {
-	if err := op.Key.validate(false); err != nil {
+	if err := validateRowKey(op.Key, false); err != nil {
 		return MutationResult{}, err
 	}
 	if err := validateQty(op.Qty, "qty"); err != nil {
 		return MutationResult{}, err
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -927,7 +838,7 @@ func (s *Service) InspectResult(ctx context.Context, tx *gorm.DB, op InspectResu
 			return MutationResult{}, err
 		}
 		if row == nil {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, op.Key.details("库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(op.Key, "库存行不存在"))
 		}
 		before := row.State()
 		if before.PendingInspect.Sub(op.Qty).IsNegative() {
@@ -944,7 +855,7 @@ func (s *Service) InspectResult(ctx context.Context, tx *gorm.DB, op InspectResu
 			return MutationResult{}, err
 		}
 		led := buildLedger(after, changeType, op.Source, op.Actor, ColPendingInspect, target,
-			before.PendingInspect, op.Qty.Neg(), idemKey, op.Remark)
+			before.PendingInspect, op.Qty.Neg(), idemKey, op.Remark, op.SerialNo)
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
@@ -955,24 +866,11 @@ func (s *Service) InspectResult(ctx context.Context, tx *gorm.DB, op InspectResu
 	})
 }
 
-// AdjustOp 库存调整入参（business-flow §11.1：申请必填原因 → 审核 → 执行 → 生成流水；
-// M1 无审批流，执行即落账 status=EXECUTED 并留 executed_by/at）。
-type AdjustOp struct {
-	Key            RowKey `json:"key"`
-	AdjustType     string `json:"adjust_type"` // 盘盈/盘亏/损耗/报废/其他
-	Qty            Qty    `json:"qty"`         // 恒为正；方向由 AdjustType 决定
-	Reason         string `json:"reason"`      // 必填（business-flow §11.1）
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"`
-	Remark         string `json:"remark"`
-}
-
 // Adjust 调整单执行：盘盈 available/total 同增（目标行可创建），盘亏/损耗/报废/其他
 // available/total 同减（须有足额可用）；写 inventory_adjustments（EXECUTED）+ ADJUST 流水。
 // 盘点差异执行（盘盈/盘亏）亦经本原语落账。
 func (s *Service) Adjust(ctx context.Context, tx *gorm.DB, op AdjustOp) (MutationResult, error) {
-	if err := op.Key.validate(true); err != nil {
+	if err := validateRowKey(op.Key, true); err != nil {
 		return MutationResult{}, err
 	}
 	if !adjustTypes[op.AdjustType] {
@@ -984,7 +882,7 @@ func (s *Service) Adjust(ctx context.Context, tx *gorm.DB, op AdjustOp) (Mutatio
 	if strings.TrimSpace(op.Reason) == "" {
 		return MutationResult{}, response.NewError(ErrAdjustReasonRequired, nil)
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return MutationResult{}, err
 	}
 	idemKey := strings.TrimSpace(op.IdempotencyKey)
@@ -1007,7 +905,12 @@ func (s *Service) Adjust(ctx context.Context, tx *gorm.DB, op AdjustOp) (Mutatio
 			return MutationResult{}, err
 		}
 		if row == nil {
-			return MutationResult{}, response.NewError(ErrRecordNotFound, op.Key.details("库存行不存在"))
+			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(op.Key, "库存行不存在"))
+		}
+		// 盘点冻结守卫（ErrRowCountFrozen）：调整改变行 total，冻结期拒绝
+		// （盘点差异执行在解冻之后，不受影响——CompleteCount 先 ReleaseLock 再 Adjust）。
+		if err := rejectCountFrozen(tx, op.Key); err != nil {
+			return MutationResult{}, err
 		}
 		before := row.State()
 		delta := op.Qty
@@ -1028,40 +931,57 @@ func (s *Service) Adjust(ctx context.Context, tx *gorm.DB, op AdjustOp) (Mutatio
 		if err != nil {
 			return MutationResult{}, err
 		}
-		if err := writeAdjustment(tx, &InventoryAdjustment{
+		// 调整单落账（plan §8.3 条 3）：ExistingAdjustmentID>0 时守卫更新既有
+		// APPROVED 调整单为 EXECUTED（审批流复用）；否则执行即落账（M1 形态）。
+		// 两条路径都经原语返回 adjustment_no（MutationResult.AdjustmentNo），
+		// 调用方（盘点差异执行）不再按 qty+type 精确匹配回查。
+		adjNo, err := writeAdjustment(tx, &InventoryAdjustment{
 			WarehouseID: op.Key.WarehouseID, SKUID: op.Key.SKUID, BinID: op.Key.BinID,
 			BatchID: op.Key.BatchID, AdjustType: op.AdjustType, Qty: op.Qty, Reason: op.Reason,
 			ExecutedBy: op.Actor.ID, ExecutedAt: database.Now(),
 			CreatedBy: op.Actor.ID, UpdatedBy: op.Actor.ID,
-		}); err != nil {
+		}, op.ExistingAdjustmentID, op.Actor.ID)
+		if err != nil {
 			return MutationResult{}, err
 		}
 		led := buildLedger(after, "ADJUST", op.Source, op.Actor, ColAvailable, ColAvailable,
-			before.Available, delta, idemKey, op.Remark)
+			before.Available, delta, idemKey, op.Remark, op.SerialNo)
 		if err := writeLedger(tx, led); err != nil {
 			return MutationResult{}, err
 		}
 		if err := auditStock(tx, "adjust", row.ID.Int64(), op.Actor, op, before, after.State()); err != nil {
 			return MutationResult{}, err
 		}
-		return MutationResult{Ledger: LedgerRef{ID: led.ID.Int64(), LedgerNo: led.LedgerNo}}, nil
+		return MutationResult{
+			Ledger:       LedgerRef{ID: led.ID.Int64(), LedgerNo: led.LedgerNo},
+			AdjustmentNo: adjNo,
+		}, nil
 	})
 }
 
-// ---- 批次与序列号 ----
-
-// BatchOp 批次建立入参（批次台账，inventory-rules §6）。
-type BatchOp struct {
-	SKUID          int64             `json:"sku_id"`
-	BatchNo        string            `json:"batch_no"`
-	SupplierID     int64             `json:"supplier_id"`
-	ProductionDate database.JSONTime `json:"production_date"`
-	InboundDate    database.JSONTime `json:"inbound_date"`
-	ExpiryDate     database.JSONTime `json:"expiry_date"`
-	CostPrice      Qty               `json:"cost_price"`
-	Actor          Actor             `json:"actor"`
-	Remark         string            `json:"remark"`
+// rejectCountFrozen 盘点冻结守卫：行上存在 ACTIVE COUNT_FREEZE 时拒绝改变 total 的
+// 库存变更（business-flow §10.2"冻结范围"、inventory-rules §4"盘点锁定"——冻结期
+// 行总量恒定，盘点差异（实盘 - 冻结快照）才是真实的盘点盈亏；否则冻结期间锁定库存
+// 发货扣减/入库上架造成的 total 变化会被差异调整二次计账）。只读 SELECT，调用方已持
+// 库存行锁（locateRowForUpdate/ensureRow 之后），冻结检查与后续变更同事务串行化。
+func rejectCountFrozen(tx *gorm.DB, key RowKey) error {
+	frozen, err := hasActiveCountFreeze(tx, key)
+	if err != nil {
+		return err
+	}
+	if frozen {
+		return response.NewError(ErrRowCountFrozen, rowKeyDetails(key, "库存行盘点冻结中（COUNT_FREEZE），解冻前不可变更 total"))
+	}
+	return nil
 }
+
+// rowKeyOf 由库存行取五维键（MoveBin 双行守卫用）。
+func rowKeyOf(row *Inventory) RowKey {
+	return RowKey{WarehouseID: row.WarehouseID, ZoneID: row.ZoneID, ShelfID: row.ShelfID,
+		BinID: row.BinID, SKUID: row.SKUID, BatchID: row.BatchID}
+}
+
+// ---- 批次与序列号 ----
 
 // EnsureBatch 建立或返回既有批次（唯一键 sku_id+batch_no，天然幂等、首写为准不覆盖；
 // M2 入库域采集批次时调用——批次表写入口同样仅限本 Service，plan §4.2 判据 3）。
@@ -1115,20 +1035,6 @@ func (s *Service) EnsureBatch(ctx context.Context, tx *gorm.DB, op BatchOp) (bat
 	return batchID, created, err
 }
 
-// SerialOp 序列号状态变化入参（inventory-rules §8：每次变化记录来源单据/位置/操作人/时间）。
-type SerialOp struct {
-	SerialNo       string `json:"serial_no"`
-	SKUID          int64  `json:"sku_id"`
-	BatchID        int64  `json:"batch_id"`
-	WarehouseID    int64  `json:"warehouse_id"` // 0=不在库
-	BinID          int64  `json:"bin_id"`       // 0=不在库
-	Status         string `json:"status"`       // IN_STOCK/LOCKED/OUTBOUND/RETURNED/FROZEN
-	Source         Source `json:"source"`
-	Actor          Actor  `json:"actor"`
-	IdempotencyKey string `json:"idempotency_key"` // 预留：序列号事件经唯一键天然幂等
-	Remark         string `json:"remark"`
-}
-
 // SerialEvent 记录序列号生命周期状态变化：新建（如入库采集）或状态迁移，
 // 每次变化更新 last_source_type/last_source_no/last_event_at 与位置；
 // 完整历史经 operation_logs（同事务写入）与 M2 业务单据追溯。
@@ -1145,7 +1051,7 @@ func (s *Service) SerialEvent(ctx context.Context, tx *gorm.DB, op SerialOp) (se
 	if !serialStatuses[op.Status] {
 		return 0, false, response.NewError(ErrSerialStatusInvalid, map[string]any{"status": op.Status})
 	}
-	if err := op.Source.validate(); err != nil {
+	if err := validateSource(op.Source); err != nil {
 		return 0, false, err
 	}
 	err = withTx(ctx, s.db, tx, func(tx *gorm.DB) error {

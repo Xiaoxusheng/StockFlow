@@ -2,14 +2,13 @@ package inventory
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stockflow/server/internal/docnum"
 	"github.com/stockflow/server/internal/response"
 )
 
@@ -69,21 +68,15 @@ func TestIdempotencyReplayDecision(t *testing.T) {
 	require.False(t, replayed)
 }
 
-func TestBusinessNoFormat(t *testing.T) {
-	// 形如 LED-YYYYMMDD-xxxxxxxx（8 位随机后缀；迁移 uk_inventory_ledgers_ledger_no 唯一兜底）。
-	re := regexp.MustCompile(`^LED-\d{8}-[0-9a-f]{8}$`)
-	no := newBusinessNo("LED", time.Now())
-	require.True(t, re.MatchString(no), no)
-
-	reAdj := regexp.MustCompile(`^ADJ-\d{8}-[0-9a-f]{8}$`)
-	require.True(t, reAdj.MatchString(newBusinessNo("ADJ", time.Now())))
-
-	// 同刻生成不重复（随机后缀空间 2^32，碰撞即由唯一索引重试兜底）。
-	seen := map[string]bool{}
-	for range 100 {
-		no = newBusinessNo("LED", time.Now())
-		require.False(t, seen[no], "随机后缀碰撞: %s", no)
-		seen[no] = true
+func TestBusinessNoDocnumContract(t *testing.T) {
+	// LED/ADJ 单号经 internal/docnum 统一编号引擎发放（business-flow §13.1、
+	// plan §4.1/§8.3 条 2——M1"日期+8位随机后缀"过渡实现已删除，判据 5 收口）：
+	// 规则 = 日期段 + 独立流水、ResetAll 永不重置（M1 存量 LED-*/ADJ-* 承接口径）。
+	for _, prefix := range []string{"LED", "ADJ"} {
+		rule, ok := docnum.RuleFor(prefix)
+		require.True(t, ok, prefix)
+		require.Equal(t, docnum.ResetAll, rule.Reset, prefix)
+		require.True(t, rule.DateSeg, prefix)
 	}
 }
 
@@ -94,23 +87,23 @@ func TestValidateQtyAndRowKey(t *testing.T) {
 	require.NoError(t, validateQty(q(1), "qty"))
 
 	// 五维键：仓库/库位/SKU 必填，批次 >=0。
-	require.NoError(t, RowKey{WarehouseID: 1, BinID: 2, SKUID: 3}.validate(false))
-	require.NoError(t, RowKey{WarehouseID: 1, BinID: 2, SKUID: 3, BatchID: 9}.validate(false))
-	require.Error(t, RowKey{BinID: 2, SKUID: 3}.validate(false), "缺仓库")
-	require.Error(t, RowKey{WarehouseID: 1, SKUID: 3}.validate(false), "缺库位")
-	require.Error(t, RowKey{WarehouseID: 1, BinID: 2}.validate(false), "缺 SKU")
-	require.Error(t, RowKey{WarehouseID: 1, BinID: 2, SKUID: 3, BatchID: -1}.validate(false))
+	require.NoError(t, validateRowKey(RowKey{WarehouseID: 1, BinID: 2, SKUID: 3}, false))
+	require.NoError(t, validateRowKey(RowKey{WarehouseID: 1, BinID: 2, SKUID: 3, BatchID: 9}, false))
+	require.Error(t, validateRowKey(RowKey{BinID: 2, SKUID: 3}, false), "缺仓库")
+	require.Error(t, validateRowKey(RowKey{WarehouseID: 1, SKUID: 3}, false), "缺库位")
+	require.Error(t, validateRowKey(RowKey{WarehouseID: 1, BinID: 2}, false), "缺 SKU")
+	require.Error(t, validateRowKey(RowKey{WarehouseID: 1, BinID: 2, SKUID: 3, BatchID: -1}, false))
 
 	// 行创建类必须携带 zone/shelf（inventory-rules §3 五维）。
-	require.Error(t, RowKey{WarehouseID: 1, BinID: 2, SKUID: 3}.validate(true))
-	require.NoError(t, RowKey{WarehouseID: 1, ZoneID: 4, ShelfID: 5, BinID: 2, SKUID: 3}.validate(true))
+	require.Error(t, validateRowKey(RowKey{WarehouseID: 1, BinID: 2, SKUID: 3}, true))
+	require.NoError(t, validateRowKey(RowKey{WarehouseID: 1, ZoneID: 4, ShelfID: 5, BinID: 2, SKUID: 3}, true))
 }
 
 func TestValidateSourceAndIdempotencyKey(t *testing.T) {
 	// 来源单据必填（inventory-rules §5：流水必须追溯来源）。
-	require.Error(t, Source{}.validate())
-	require.Error(t, Source{Type: "inbound_order"}.validate())
-	require.NoError(t, Source{Type: "inbound_order", No: "IN-20261002-000001"}.validate())
+	require.Error(t, validateSource(Source{}))
+	require.Error(t, validateSource(Source{Type: "inbound_order"}))
+	require.NoError(t, validateSource(Source{Type: "inbound_order", No: "IN-20261002-000001"}))
 
 	// 幂等键长度限制（列 varchar(128)）。
 	require.NoError(t, validateIdempotencyKey(strings.Repeat("k", 128)))
