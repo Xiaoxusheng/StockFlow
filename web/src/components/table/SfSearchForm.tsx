@@ -1,4 +1,4 @@
-import { Button, Col, Flex, Form, Row, Select, Input } from 'antd'
+import { Button, Flex, Form, Select, Input } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 
@@ -50,46 +50,43 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
       initialValues={{ collapsed }}
       style={{ marginBottom: 12 }}
     >
-      <Row gutter={[12, 12]} align="middle">
+      <Flex gap={12} wrap="wrap" align="middle" style={{ marginBottom: 12 }}>
         {visibleFields.map((field) => (
-          <Col key={field.name} xs={24} sm={12} md={8} lg={6} xxl={5}>
-            <Form.Item
-              name={field.name}
-              label={field.label}
-              style={{ marginBottom: 0 }}
-            >
-              {field.control === 'select' ? (
-                <Select
-                  options={field.options}
-                  placeholder={field.placeholder ?? `请选择${field.label}`}
-                  allowClear={field.allowClear ?? true}
-                  style={{ width: '100%' }}
-                />
-              ) : (
-                <Input
-                  placeholder={field.placeholder ?? `请输入${field.label}`}
-                  allowClear={field.allowClear ?? true}
-                />
-              )}
-            </Form.Item>
-          </Col>
-        ))}
-        <Col xs={24} sm={24} md={8} lg={6} xxl={5}>
-          <Flex gap={8} wrap="wrap">
-            <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
-              查询
-            </Button>
-            <Button icon={<ReloadOutlined />} onClick={handleReset}>
-              重置
-            </Button>
-            {collapsible && (
-              <Button type="link" onClick={() => form.setFieldValue('collapsed', !collapsed)}>
-                {collapsed ? '展开' : '收起'}
-              </Button>
+          <Form.Item
+            key={field.name}
+            name={field.name}
+            label={field.label}
+            style={{ marginBottom: 0, flex: '1 1 240px', maxWidth: 360, minWidth: 200 }}
+          >
+            {field.control === 'select' ? (
+              <Select
+                options={field.options}
+                placeholder={field.placeholder ?? `请选择${field.label}`}
+                allowClear={field.allowClear ?? true}
+                style={{ width: '100%' }}
+              />
+            ) : (
+              <Input
+                placeholder={field.placeholder ?? `请输入${field.label}`}
+                allowClear={field.allowClear ?? true}
+              />
             )}
-          </Flex>
-        </Col>
-      </Row>
+          </Form.Item>
+        ))}
+        <Flex gap={8} wrap="wrap" style={{ flex: '0 0 auto' }}>
+          <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
+            查询
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+            重置
+          </Button>
+          {collapsible && (
+            <Button type="link" onClick={() => form.setFieldValue('collapsed', !collapsed)}>
+              {collapsed ? '展开' : '收起'}
+            </Button>
+          )}
+        </Flex>
+      </Flex>
     </Form>
   )
 }
