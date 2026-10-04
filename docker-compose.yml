@@ -93,6 +93,8 @@ services:
       # 首次登录后立即改密，公网放行前确认已改密（deployment.md §7.1）
       SF_ADMIN_INITIAL_PASSWORD: ${SF_ADMIN_INITIAL_PASSWORD:?请在 .env 中设置 SF_ADMIN_INITIAL_PASSWORD}
       SF_AUTH_JWT_SECRET: ${SF_AUTH_JWT_SECRET:?请在 .env 中设置 SF_AUTH_JWT_SECRET}
+      # 设备令牌签名密钥（M3 设备域，与用户 JWT 密钥隔离的另一凭证族；release 缺失启动失败）
+      SF_DEVICES_JWT_SECRET: ${SF_DEVICES_JWT_SECRET:?请在 .env 中设置 SF_DEVICES_JWT_SECRET}
     ports:
       # 默认只绑回环（配合反代）；临时直连验证改 "0.0.0.0:8080:8080"
       - "${APP_BIND:-127.0.0.1}:8080:8080"

@@ -46,6 +46,7 @@ JWT（密钥、有效期）
 | 环境变量 | 作用 | 默认值 | 是否必填 | 生成方式 / 取值说明 |
 |---|---|---|---|---|
 | `SF_AUTH_JWT_SECRET` | Access JWT 的 HS256 签名密钥（internal/auth/config.go，长度 ≥16 字节，过短拒绝启动） | 无——release 模式缺失即启动失败；debug/test 缺失时降级进程内随机密钥（重启全部 Token 失效，仅限本地冒烟） | **release 必填** | `openssl rand -base64 32`；经 Secret 注入，不入仓库；轮换会使全部会话/Token 失效 |
+| `SF_DEVICES_JWT_SECRET` | 设备令牌的 HS256 签名密钥（M3 设备域，internal/devices/token.go，与用户 JWT 密钥隔离的另一凭证族，issuer=stockflow-devices） | 无——release 模式缺失即启动失败（≥16 字节，弱密钥拒绝）；debug/test 降级进程内随机密钥（重启全部设备令牌失效，设备重新激活恢复，仅限本地） | **release 必填** | `openssl rand -base64 32`；与 `SF_AUTH_JWT_SECRET` 分别生成、不得复用；经 Secret 注入，不入仓库；轮换使全部设备令牌失效（设备重新激活恢复） |
 | `SF_ADMIN_INITIAL_PASSWORD` | 空库首次启动时默认管理员（admin）的初始密码（internal/database/seed.go） | 无——需要创建管理员而缺失或弱密码时启动失败；已初始化的库不消费该值 | **空库首启必填** | ≥12 位且至少含 大写字母/小写字母/数字/符号 中三类（2026-10-03 由"≥8 位字母+数字"收紧）；建议随机生成；绝不写入日志/配置文件；首登强制改密（§6） |
 | `SF_SERVER_MODE` | Gin 运行模式 debug/release/test（透传 gin.SetMode） | `release`（2026-10-03 由 debug 收紧；本地开发请显式设 `SF_SERVER_MODE=debug`） | **生产必填 release** | release 下生产校验生效：JWT 密钥缺失 fail-fast、`sslmode=disable` 启动告警等 |
 | `SF_DATABASE_PASSWORD` | PostgreSQL 业务账号密码 | 空 | **生产必填** | DBA 分发的最小权限业务账号密码（禁止用超级用户跑应用，§2.1）；Secret 注入 |
