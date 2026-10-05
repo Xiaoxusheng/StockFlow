@@ -280,7 +280,7 @@ export function SalesReturnCreateDrawer({
     <Drawer
       open={open}
       title="新建销售退货"
-      width={860}
+      size={860}
       onClose={onClose}
       destroyOnHidden
       footer={
@@ -359,11 +359,14 @@ export function SalesReturnCreateDrawer({
                 },
               ]}
             />
+            {/* 动效 #6（frontend.md §31）：重新带出明细时已加载表格压暗 0.8、新数据到达淡入，
+                不再整块闪换；首次加载仍由「带出明细」按钮 loading 表达 */}
             <SfTable<SalesOrderItem>
               variant="nested"
               rowKey="id"
               columns={columns}
               dataSource={returnableItems}
+              loading={sourceLoading}
               scroll={{ x: 880 }}
               emptyText="该销售单没有已发货明细，无可退行"
             />

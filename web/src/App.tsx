@@ -46,12 +46,12 @@ export function App() {
         borderRadius: 6,
         // 控件统一高度下限（任务书 §24：Form 控件 32~36px）
         controlHeight: 32,
-        // 动效三档时长 ↔ --sf-motion-fast/-normal/-slow（120/180/240ms；antd 默认由
+        // 动效三档时长 ↔ --sf-motion-fast/-normal/-slow（120/180/220ms；antd 默认由
         // motionUnit 0.1s 派生 0.1/0.2/0.3s 与 Design Token 不一致，显式对齐——
         // Button/Modal 等组件内部动效经 motionDurationMid 等消费）
         motionDurationFast: '0.12s',
         motionDurationMid: '0.18s',
-        motionDurationSlow: '0.24s',
+        motionDurationSlow: '0.22s',
         fontSize: 14,
         fontFamily:
           "Inter, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif",
@@ -67,9 +67,10 @@ export function App() {
           // 表头文字比正文弱一档（--sf-table-header-text）
           headerColor: dark ? 'rgba(255, 255, 255, 0.72)' : '#334155',
           rowHoverBg: dark ? '#232a33' : '#f8fafc',
-          // 选中行=主题色低透明（任务书 §17 alpha 0.04~0.08，禁止整行深蓝）
-          rowSelectedBg: dark ? 'rgba(76, 126, 240, 0.16)' : 'rgba(37, 99, 235, 0.06)',
-          rowSelectedHoverBg: dark ? 'rgba(76, 126, 240, 0.22)' : 'rgba(37, 99, 235, 0.1)',
+          // 选中行=主题色低透明（任务书 §17 alpha 0.04~0.08，禁止整行深蓝）：
+          // Dark 取区间上限 0.08（0.06 在暗底对比不足），hover 同相 +0.04 与 Light 节奏一致
+          rowSelectedBg: dark ? 'rgba(76, 126, 240, 0.08)' : 'rgba(37, 99, 235, 0.06)',
+          rowSelectedHoverBg: dark ? 'rgba(76, 126, 240, 0.12)' : 'rgba(37, 99, 235, 0.1)',
           cellPaddingBlock: 12,
           // 全站表格统一 13px 密度字号（antd 同步派生 cellFontSize，表头/单元格/汇总行一致）
           fontSize: 13,

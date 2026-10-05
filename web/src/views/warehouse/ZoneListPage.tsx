@@ -17,6 +17,7 @@ import {
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -96,6 +97,8 @@ export default function ZoneListPage() {
 
   const [form] = Form.useForm<ZoneFormValues>()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // 行反馈动效（frontend.md §31 #7）：启停先 API 后反馈，hook 内 480ms 自动回落
+  const fb = useTableRowFeedback()
   const [editing, setEditing] = useState<ZoneItem | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -184,8 +187,10 @@ export default function ZoneListPage() {
     setActionError(null)
     try {
       await zoneApi.setStatus(record.id, next)
+      fb.trigger(record.id, 'success')
       await list.refetch()
     } catch (err) {
+      fb.trigger(record.id, 'error')
       setActionError(err)
     } finally {
       setTogglingId(null)
@@ -256,6 +261,8 @@ export default function ZoneListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="当前筛选条件下没有库区"
           scrollX={860}
         />
@@ -263,7 +270,7 @@ export default function ZoneListPage() {
 
       <Drawer
         title={editing ? '编辑库区' : '新建库区'}
-        width={440}
+        size={440}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         extra={

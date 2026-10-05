@@ -29,6 +29,7 @@ import {
 import { fetchProductOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -128,6 +129,8 @@ export default function SkuListPage() {
   const [form] = Form.useForm<SkuFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7/删除行（frontend.md §31）：行淡色反馈 / 删除行 fade→收缩——仅在 API 成败回调后触发
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<SkuItem, SkuQuery>({
     queryKey: ['masterdata', 'skus'],
@@ -168,17 +171,28 @@ export default function SkuListPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: SkuItem['id']; enabled: boolean }) =>
       masterdataApi.skus.setStatus(id, { enabled }),
-    onSuccess: (data) => {
+    onSuccess: (data, { id }) => {
       messageApi.success(data.is_enabled ? '已启用' : '已停用')
       invalidate()
+      fb.trigger(id, 'success')
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   const removeMutation = useMutation({
     mutationFn: (id: SkuItem['id']) => masterdataApi.skus.remove(id),
-    onSuccess: invalidate,
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onSuccess: (_data, id) => {
+      // 删除行动效：fade→收缩→过滤 DOM（refetch 成功自愈 / 失败 2.5s 兜底恢复显示）
+      fb.triggerRemove(id)
+      invalidate()
+    },
+    onError: (error, id) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   // ---- 二维码快捷入口（qr-code.md §7.2「SKU 列表快捷入口」；载荷构造唯一点 = utils/qrPayload.ts） ----
@@ -456,6 +470,14 @@ export default function SkuListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无 SKU，点击右上角「新建 SKU」创建"
+          emptyAction={
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+              新建 SKU
+            </Button>
+          }
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
+          removingRowKeys={fb.removingRowKeys}
           scrollX={1800}
         />
       </Card>

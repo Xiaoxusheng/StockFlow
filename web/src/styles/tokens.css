@@ -75,8 +75,11 @@
   /* ===== 动效（任务书 §55） ===== */
   --sf-motion-fast: 120ms;
   --sf-motion-normal: 180ms;
-  --sf-motion-slow: 240ms;
+  --sf-motion-slow: 220ms;
   --sf-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+  /* 档位外时长（表格动效体系 frontend.md §31）：主题无关，不进 dark 块；TS 镜像见 styles/motion.ts */
+  --sf-motion-spin: 560ms;
+  --sf-motion-feedback: 480ms;
 
   /* ===== 布局 ===== */
   --sf-header-height: 48px;
@@ -133,10 +136,10 @@
   --sf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
   --sf-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.32);
 
-  /* ===== 表格（与 Light 同相提亮） ===== */
+  /* ===== 表格（与 Light 同相提亮；选中底 alpha 合规任务书 §17 0.04~0.08，Dark 取上限保可见性） ===== */
   --sf-table-header-text: rgba(255, 255, 255, 0.72);
-  --sf-table-selected-bg: rgba(76, 126, 240, 0.16);
-  --sf-table-selected-hover-bg: rgba(76, 126, 240, 0.22);
+  --sf-table-selected-bg: rgba(76, 126, 240, 0.08);
+  --sf-table-selected-hover-bg: rgba(76, 126, 240, 0.12);
 
   /* ===== 图表 ===== */
   --sf-chart-primary: #4c7ef0;

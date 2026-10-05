@@ -8,7 +8,7 @@
 import { useMemo } from 'react'
 import type { LineConfig } from '@ant-design/plots'
 import { SfChart } from './SfChart'
-import { SF_CHART_LINE_WIDTH, type SfChartTheme } from './sfChartTheme'
+import { dayLabel, SF_CHART_LINE_WIDTH, type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
   SF_CHART_DEFAULT_HEIGHT,
@@ -48,7 +48,8 @@ export function buildLineOptions(params: {
   const { data, xField, series, smooth, palette, theme } = params
 
   const axis = {
-    x: { grid: false, title: false },
+    // X 轴按天粒度："2026-10-04 00:00:00" 形态的时间标签收敛为日期（JSONTime 序列化尾巴）
+    x: { grid: false, title: false, labelFormatter: dayLabel },
     y: { grid: true, title: false },
   }
 

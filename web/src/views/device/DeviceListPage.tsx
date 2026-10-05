@@ -195,6 +195,11 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
         total={list.total}
         onPageChange={list.onPageChange}
         emptyText={`暂无${typeLabel}，点击右上角「新建设备」登记`}
+        emptyAction={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/devices/new')}>
+            新建设备
+          </Button>
+        }
         scrollX={1220}
         onRow={(record) => ({
           onClick: () => navigate(`/devices/${encodeURIComponent(String(record.id))}`),

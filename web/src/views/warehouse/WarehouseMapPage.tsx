@@ -307,7 +307,7 @@ export default function WarehouseMapPage() {
       />
       {renderBody()}
 
-      <Drawer title="库位详情" width={380} open={selected !== null} onClose={() => setSelected(null)}>
+      <Drawer title="库位详情" size={380} open={selected !== null} onClose={() => setSelected(null)}>
         {selected && (
           <>
             <Descriptions

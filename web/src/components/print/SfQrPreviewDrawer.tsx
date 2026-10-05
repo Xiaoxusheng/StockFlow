@@ -48,7 +48,7 @@ export function SfQrPreviewDrawer({ open, sku, onClose }: SfQrPreviewDrawerProps
       <Drawer
         title="二维码详情"
         open={open}
-        width={420}
+        size={420}
         onClose={onClose}
         destroyOnHidden
       >

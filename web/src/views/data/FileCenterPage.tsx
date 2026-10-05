@@ -35,6 +35,7 @@ import {
 import { downloadFile, resolveModuleLabel } from '@/api/data'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -71,6 +72,8 @@ export default function FileCenterPage() {
   const { token } = theme.useToken()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7/删除行（frontend.md §31）：行级反馈与删除行动效状态（先 API 后反馈）
+  const fb = useTableRowFeedback()
   const [params, setParams] = useState<FileQuery>({})
   const [uploadOpen, setUploadOpen] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
@@ -108,11 +111,17 @@ export default function FileCenterPage() {
 
   const removeMutation = useMutation({
     mutationFn: (id: FileItem['id']) => fileApi.remove(id),
-    onSuccess: () => {
+    // 删除动效（frontend.md §31）：删除 API 成功后 triggerRemove（fade→收缩→refetch 自愈过滤 DOM），
+    // 失败行级 error 淡色底；均为纯视觉层，不改变删除业务流
+    onSuccess: (_result, id) => {
+      fb.triggerRemove(id)
       messageApi.success('文件已删除')
       invalidate()
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, id) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   // 「更多」菜单内删除的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在 Dropdown
@@ -311,7 +320,15 @@ export default function FileCenterPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
+          removingRowKeys={fb.removingRowKeys}
           emptyText="暂无文件，点击右上角「上传文件」上传"
+          emptyAction={
+            <Button type="primary" icon={<UploadOutlined />} onClick={openUploadModal}>
+              上传文件
+            </Button>
+          }
           scrollX={1160}
         />
       </Card>
@@ -320,7 +337,7 @@ export default function FileCenterPage() {
         title="上传文件"
         open={uploadOpen}
         width={560}
-        maskClosable={false}
+        mask={{ closable: false }}
         confirmLoading={uploadMutation.isPending}
         okText="上传"
         okButtonProps={{ disabled: pendingFiles.length === 0 }}

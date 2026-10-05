@@ -124,9 +124,238 @@ body {
   cursor: default;
 }
 
+/* ===== 表格动效体系（frontend.md §31；任务书 8 类核心动画） =====
+   作用域锚点：.sf-table（SfTable 根）/ .sf-table-toolbar / .sf-search-form__applied——
+   Pad 卡片流不经这些选择器，零影响。时长/缓动一律 var(--sf-motion-*)；
+   禁 transition:all，逐属性声明；颜色一律 Token / antd token，Dark 随变量自动切换。 */
+
+/* SfBatchBar 自带底距（原内联 8px 迁样式类，值不变；迁出内联是为了下方工具栏批量面板语境可归零） */
+.sf-batch-bar {
+  margin-bottom: var(--sf-space-2);
+}
+
+/* #8 空态标题行（SfEmpty title 可选能力） */
+.sf-empty__title {
+  color: var(--sf-text);
+  font-size: var(--sf-font-size-secondary);
+  font-weight: 500;
+  margin-bottom: var(--sf-space-1);
+}
+
+/* 行操作区显式包裹（cells.tsx SfRowActions；「操作」列 td 由 SfTable 自动注入 sf-table-actions-cell） */
+.sf-table .sf-table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+}
+
+/* #2/#3：行底色过渡（hover 浅灰 / 选中主色底共用，仅 background-color；行级禁 transform） */
+.sf-table .ant-table-tbody > tr > td {
+  transition: background-color var(--sf-motion-fast) var(--sf-motion-ease);
+}
+
+/* #3：选中态底色与勾选 pop 同节奏——勾选瞬间行挂 --selected（SfTable composedRowClassName），
+   td 过渡升为 180ms（--sf-motion-normal，与 sf-checkbox-pop 同速同缓动）；取消勾选与普通行
+   hover 仍走上方基础 120ms（规格 #2 的 120~160ms 区间）。 */
+.sf-table .ant-table-tbody > tr.sf-table-row--selected > td {
+  transition-duration: var(--sf-motion-normal);
+}
+
+/* #1/#6：Body 透明度——loading 期间挂 .sf-table-data-loading 压暗 0.8（规格 0.72~0.85），
+   数据到达摘除 → tbody 0.8→1 过渡 180ms；首载骨架与刷新共用同一机制。 */
+.sf-table .ant-table-tbody {
+  transition: opacity var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+.sf-table.sf-table-data-loading .ant-table-tbody {
+  opacity: 0.8;
+}
+
+/* #6：排序图标状态色过渡 120ms（规格 120~160ms；antd 自带 240ms 慢档且 -up/-down 无过渡，
+   以 .sf-table .ant-table-wrapper 三级选择器稳定覆盖 cssinjs 注入样式） */
+.sf-table .ant-table-wrapper .ant-table-column-sorter,
+.sf-table .ant-table-wrapper .ant-table-column-sorter-up,
+.sf-table .ant-table-wrapper .ant-table-column-sorter-down {
+  transition: color var(--sf-motion-fast) var(--sf-motion-ease);
+}
+
+/* #2：操作区默认 0.72 → 行 hover / 键盘 focus-within 渐显 1（120ms，无 translateX）；
+   触摸设备（hover:none）恒 1——不依赖 :hover 作为唯一操作提示。 */
+.sf-table .sf-table-actions-cell > *,
+.sf-table .sf-table-actions > * {
+  opacity: 0.72;
+  transition: opacity var(--sf-motion-fast) var(--sf-motion-ease);
+}
+
+.sf-table .ant-table-row:hover > .sf-table-actions-cell > *,
+.sf-table .sf-table-actions:hover > *,
+.sf-table .sf-table-actions-cell:focus-within > * {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sf-table .sf-table-actions-cell > *,
+  .sf-table .sf-table-actions > * {
+    opacity: 1;
+  }
+}
+
+/* #3：勾选缩放 0.96→1（180ms 一次性，无 1→1.2 弹跳）。antd 6.6.5 checkbox 无 -inner
+   （antd/es/checkbox/style/index.js:56 "Styles moved from inner"），-checked 由 rc 挂在根 span
+   （@rc-component/checkbox/es/index.js:33）——选择器必须挂根元素。根元素自带 antd 内部
+   transition: all motionDurationSlow（antd 样式非本项目所写，本项目自身不写 transition:all），
+   animation 期间 transform 由 keyframe 驱动，两者共存无冲突。 */
+.sf-table .ant-checkbox-checked {
+  animation: sf-checkbox-pop var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+@keyframes sf-checkbox-pop {
+  from {
+    transform: scale(0.96);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+/* #5：仅刷新图标 360° 自旋（linear 循环，绑定 loading 起停 + 450ms 最短保持；整按钮零旋转） */
+.sf-table-refresh__icon--spin {
+  animation: sf-rotate var(--sf-motion-spin) linear infinite;
+}
+
+@keyframes sf-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* #4：工具栏「常规 ⇄ 已选择 N 项」双面板 grid 叠放交叉过渡：两面板恒占 grid-area 1/1，
+   容器高度 = max(两态) 不跳变；进入 180ms（--sf-motion-normal）/ 退出 220ms（--sf-motion-slow，
+   规格约 220ms）；visibility 延迟退场保证键盘焦点不落入隐藏面板；禁 scale/bounce。 */
+.sf-table-toolbar__panes {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.sf-table-toolbar__pane {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition:
+    opacity var(--sf-motion-normal) var(--sf-motion-ease),
+    transform var(--sf-motion-normal) var(--sf-motion-ease),
+    visibility 0s;
+}
+
+.sf-table-toolbar__pane--hidden {
+  opacity: 0;
+  transform: translateY(-4px);
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    opacity var(--sf-motion-slow) var(--sf-motion-ease),
+    transform var(--sf-motion-slow) var(--sf-motion-ease),
+    visibility 0s var(--sf-motion-slow);
+}
+
+/* 面板语境归零 SfBatchBar 自带底距（.sf-batch-bar 声明在前，同特异性此处靠后生效） */
+.sf-table-toolbar__batch {
+  margin-bottom: 0;
+}
+
+/* #7：行反馈（from-only keyframe：淡色底→回落行正常底色；颜色由 --sf-success/--sf-danger
+   color-mix 12% 派生，Dark 随变量自动切换；先 API 后反馈，类经 useTableRowFeedback + SfTable） */
+.sf-table .sf-table-row--feedback-success > td {
+  animation: sf-row-feedback-ok var(--sf-motion-feedback) var(--sf-motion-ease);
+}
+
+.sf-table .sf-table-row--feedback-error > td {
+  animation: sf-row-feedback-err var(--sf-motion-feedback) var(--sf-motion-ease);
+}
+
+@keyframes sf-row-feedback-ok {
+  from {
+    background-color: color-mix(in srgb, var(--sf-success) 12%, transparent);
+  }
+}
+
+@keyframes sf-row-feedback-err {
+  from {
+    background-color: color-mix(in srgb, var(--sf-danger) 12%, transparent);
+  }
+}
+
+/* 删除行（操作反馈）：两段式两条 animation，时序 = 规格「fade→收缩」；各 keyframe 只写 to、
+   从基准值插值，杜绝 fade 与收缩并行；fade 段 opacity 归零连边线一同淡出，shrink 段再收拢
+   padding/行高/边线。260ms 后由 SfTable 过滤 DOM（SF_MOTION_MS.rowRemoveCollapse），
+   服务器 total/分页全程不动；全程禁 translate/scale。 */
+.sf-table .sf-table-row--removing > td {
+  animation:
+    sf-row-fade var(--sf-motion-fast) var(--sf-motion-ease) forwards,
+    sf-row-shrink var(--sf-motion-fast) var(--sf-motion-ease) var(--sf-motion-fast) forwards;
+  pointer-events: none;
+}
+
+@keyframes sf-row-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes sf-row-shrink {
+  to {
+    padding-block: 0;
+    line-height: 0;
+    font-size: 0;
+    border-block-width: 0;
+  }
+}
+
+/* #8：空态进场（图标+标题+说明+操作整体 fade-up；图标再叠 scale 0.98→1；禁 bounce）。
+   fill-mode backwards：结束后回退计算值，不在元素常驻 transform（同 .sf-page 既有结论）。
+   高度由 SfEmpty 既有 padding:24px 0（=--sf-space-6）+ SIMPLE 插图自然撑出，实测纯文案空态
+   仅 166px、低于任务书 180~240px 下限——min-height:180px 兜底，余量由 flex 居中消化。 */
+.sf-table-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  animation: sf-fade-up var(--sf-motion-normal) var(--sf-motion-ease) backwards;
+}
+
+.sf-table-empty .ant-empty-image {
+  animation: sf-empty-icon var(--sf-motion-normal) var(--sf-motion-ease) backwards;
+}
+
+@keyframes sf-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes sf-empty-icon {
+  from {
+    transform: scale(0.98);
+    opacity: 0.6;
+  }
+}
+
+/* SfSearchForm「已筛选 N 项」行进场（同形 fade-up，独立命名不与页面进场耦合） */
+.sf-search-form__applied {
+  animation: sf-fade-up var(--sf-motion-normal) var(--sf-motion-ease) backwards;
+}
+
 /* Reduced Motion（任务书 §59，token 驱动）：系统偏好减少动效时三档动效时长归零，
    所有引用 --sf-motion-* 的 transition/animation 即时完成，业务 css 无需各自处理。
-   选择器 :root 与 tokens.css 同特异性、声明靠后（@import 先于本文件规则），dark 主题下同样生效。 */
+   选择器 :root 与 tokens.css 同特异性、声明靠后（@import 先于本文件规则），dark 主题下同样生效。
+   无限循环动画（0ms×infinite 会高频闪烁）与进场/反馈一次性动画必须在此显式关闭（媒体查询而非 JS）：
+   hover/选中/压暗/操作区渐显走 color/opacity 即时切换保留必要反馈；TS 侧定时器照常运行，
+   类挂上即被此处 animation:none 抹平，无副作用。
+   antd Skeleton 的 active 闪烁（ant-skeleton-loading keyframes，1.4s infinite）时长硬编码于
+   antd 组件内部、不受 --sf-motion-* 与 App.tsx motion:false 控制，须在此显式关闭——
+   静态保留渐变底色（loading 必要反馈），仅去除闪烁。 */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --sf-motion-fast: 0ms;
@@ -135,6 +364,24 @@ body {
   }
 
   .sf-page {
+    animation: none;
+  }
+
+  .sf-table-refresh__icon--spin,
+  .sf-table .ant-checkbox-checked,
+  .sf-table .sf-table-row--feedback-success > td,
+  .sf-table .sf-table-row--feedback-error > td,
+  .sf-table .sf-table-row--removing > td,
+  .sf-table-empty,
+  .sf-table-empty .ant-empty-image,
+  .sf-search-form__applied,
+  .ant-skeleton-active .ant-skeleton-title,
+  .ant-skeleton-active .ant-skeleton-paragraph > li,
+  .ant-skeleton-active .ant-skeleton-avatar,
+  .ant-skeleton-active .ant-skeleton-button,
+  .ant-skeleton-active .ant-skeleton-input,
+  .ant-skeleton-active .ant-skeleton-node,
+  .ant-skeleton-active .ant-skeleton-image {
     animation: none;
   }
 }

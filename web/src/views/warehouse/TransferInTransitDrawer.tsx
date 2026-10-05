@@ -8,7 +8,6 @@ import { buildSkuMaps, buildIdMap, fetchBatchOptions, fetchSkuOptions, fetchWare
 import { SfError } from '@/components/common/SfError'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { SfLoading } from '@/components/common/SfLoading'
 import { usePagedList } from '@/hooks/usePagedList'
 import { formatNumber } from '@/utils/format'
 
@@ -81,7 +80,7 @@ export default function TransferInTransitDrawer({ open, onClose }: TransferInTra
   ]
 
   return (
-    <Drawer title="调拨在途汇总（按 SKU + 批次聚合）" open={open} onClose={onClose} width={720} destroyOnHidden>
+    <Drawer title="调拨在途汇总（按 SKU + 批次聚合）" open={open} onClose={onClose} size={720} destroyOnHidden>
       {skuOptions.error || batchOptions.error ? (
         <SfError
           error={(skuOptions.error ?? batchOptions.error)!}
@@ -112,31 +111,25 @@ export default function TransferInTransitDrawer({ open, onClose }: TransferInTra
           list.resetToFirstPage()
         }}
       />
-      {list.isPending ? (
-        <SfLoading rows={8} />
-      ) : list.error ? (
-        <SfError
-          error={list.error}
-          description="在途汇总（GET /api/transfers/in-transit）加载失败"
-          onRetry={() => void list.refetch()}
-        />
-      ) : (
-        <SfTable<TransferInTransitRow>
-          variant="nested"
-          rowKey={(row) => `${String(row.sku_id)}-${String(row.batch_id)}`}
-          columns={columns}
-          dataSource={list.items}
-          loading={list.isFetching}
-          pagination={{
-            current: list.pagination.current,
-            pageSize: list.pagination.pageSize,
-          }}
-          total={list.total}
-          onPageChange={list.onPageChange}
-          emptyText="当前筛选条件下没有在途数据"
-          scroll={{ x: 670 }}
-        />
-      )}
+      {/* 动效 #1/#6（frontend.md §31）：首载骨架/刷新压暗/错误态统一由 SfTable 承载，
+          移除页面级 SfLoading/错误分支（loading={list.isFetching} 已在下方传入） */}
+      <SfTable<TransferInTransitRow>
+        variant="nested"
+        rowKey={(row) => `${String(row.sku_id)}-${String(row.batch_id)}`}
+        columns={columns}
+        dataSource={list.items}
+        loading={list.isFetching}
+        error={list.error}
+        onRetry={list.refetch}
+        pagination={{
+          current: list.pagination.current,
+          pageSize: list.pagination.pageSize,
+        }}
+        total={list.total}
+        onPageChange={list.onPageChange}
+        emptyText="当前筛选条件下没有在途数据"
+        scroll={{ x: 670 }}
+      />
     </Drawer>
   )
 }

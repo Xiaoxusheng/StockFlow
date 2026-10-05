@@ -15,6 +15,7 @@ import type { PageQuery } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -80,7 +81,7 @@ function RunLogDrawer({ job, onClose }: { job: SystemJobItem | null; onClose: ()
     <Drawer
       title={job ? `执行日志——${job.name}（${job.code}）` : '执行日志'}
       open={job !== null}
-      width={880}
+      size={880}
       destroyOnHidden
       onClose={onClose}
     >
@@ -183,14 +184,21 @@ export default function JobPage() {
     params,
   })
 
+  // 行反馈动效（frontend.md §31 #7）：任务启停先 API 后反馈，对应行淡色底 480ms 自动回落
+  const fb = useTableRowFeedback()
+
   const statusMutation = useMutation({
     mutationFn: ({ id, enabled }: { id: SystemJobId; enabled: boolean }) =>
       systemApi.jobs.setStatus(id, { enabled }),
     onSuccess: (_data, variables) => {
+      fb.trigger(variables.id)
       messageApi.success(variables.enabled ? '已启用' : '已停用')
       void queryClient.invalidateQueries({ queryKey: ['system', 'jobs'] })
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, variables) => {
+      fb.trigger(variables.id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   /** 启停入口：未装配调度（scheduled=false，jobsapi.go:26-28 空实现位任务）时
@@ -329,6 +337,8 @@ export default function JobPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="暂无定时任务"
           scrollX={1460}
         />

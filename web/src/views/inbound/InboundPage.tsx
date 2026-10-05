@@ -202,6 +202,13 @@ export default function InboundPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有入库单"
+          emptyAction={
+            canCreate ? (
+              <Button type="primary" onClick={() => navigate('/inbound/new')}>
+                新建入库单
+              </Button>
+            ) : undefined
+          }
           scrollX={1080}
         />
       </Card>

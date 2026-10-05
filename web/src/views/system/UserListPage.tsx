@@ -30,6 +30,7 @@ import {
   type UserUpdatePayload,
 } from '@/api/user'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -175,7 +176,7 @@ function UserFormModal({
         void form.submit()
       }}
       okText={isEdit ? '保存' : '创建'}
-      maskClosable={false}
+      mask={{ closable: false }}
     >
       <Form
         form={form}
@@ -303,7 +304,7 @@ function AssignRolesModal({ user, roleOptions, submitting, onCancel, onSubmit }:
       onOk={() => onSubmit(roleIds.map(Number))}
       okText="保存"
       okButtonProps={{ disabled: detailQuery.isPending }}
-      maskClosable={false}
+      mask={{ closable: false }}
     >
       <Form layout="vertical">
         <Form.Item
@@ -351,7 +352,7 @@ function ResetPasswordModal({ user, submitting, onCancel, onSubmit }: ResetPassw
         void form.submit()
       }}
       okText="重置"
-      maskClosable={false}
+      mask={{ closable: false }}
     >
       <Form form={form} layout="vertical" onFinish={(values) => onSubmit(values.newPassword)}>
         <Form.Item
@@ -388,6 +389,9 @@ export default function UserListPage() {
     fetch: (q) => userApi.users(q),
     params,
   })
+
+  // 行反馈动效（frontend.md §31 #7）：启停/解锁先 API 后反馈，对应行淡色底 480ms 自动回落
+  const fb = useTableRowFeedback()
 
   // 部门（筛选项 / 表单选择 / 部门列映射）、角色（分配角色 / 角色列映射）与
   // 仓库（数据范围=指定仓库的绑定候选）选项数据——均一次取全，防单页 100 静默截断
@@ -429,19 +433,27 @@ export default function UserListPage() {
     mutationFn: ({ id, status }: { id: string; status: UserStatus }) =>
       userApi.setUserStatus(id, status),
     onSuccess: (_data, variables) => {
+      fb.trigger(variables.id)
       message.success(variables.status === 'ACTIVE' ? '用户已启用' : '用户已停用')
       void invalidate()
     },
-    onError: (error) => message.error(resolveErrorMessage(error)),
+    onError: (error, variables) => {
+      fb.trigger(variables.id, 'error')
+      message.error(resolveErrorMessage(error))
+    },
   })
 
   const unlockMutation = useMutation({
     mutationFn: (id: string) => userApi.unlock(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      fb.trigger(id)
       message.success('账户已解锁')
       void invalidate()
     },
-    onError: (error) => message.error(resolveErrorMessage(error)),
+    onError: (error, id) => {
+      fb.trigger(id, 'error')
+      message.error(resolveErrorMessage(error))
+    },
   })
 
   const assignRolesMutation = useMutation({
@@ -653,6 +665,8 @@ export default function UserListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="暂无用户"
           scrollX={1490}
         />

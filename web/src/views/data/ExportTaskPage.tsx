@@ -39,6 +39,9 @@ import {
   type ExportScope,
 } from '@/api/data'
 import { resolveErrorMessage } from '@/api/client'
+import { OPTIONS_FETCH_PAGE_SIZE } from '@/api/options'
+import { shelfApi, zoneApi, type ShelfItem, type ZoneItem } from '@/api/warehouse'
+import type { PageResult } from '@/types/api'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -70,7 +73,7 @@ function renderCount(value?: number): ReactNode {
   return <span className="sf-num">{formatNumber(value)}</span>
 }
 
-/** 新建导出任务表单值（范围 excel.md §2.2） */
+/** 新建导出任务表单值（范围 excel.md §2.2；zone_id/shelf_id 为 INVENTORY 模块 BY_FILTER 键） */
 interface ExportFormValues {
   module: string
   scope: ExportScope
@@ -78,6 +81,10 @@ interface ExportFormValues {
   page?: number
   pageSize?: number
   keyword?: string
+  /** 库区筛选（仅 INVENTORY 行源白名单键，internal/inventory/datax_export.go:135-139） */
+  zone_id?: string
+  /** 货架筛选（同上，随已选库区联动收敛候选） */
+  shelf_id?: string
   timeRange?: [Dayjs, Dayjs] | null
 }
 
@@ -87,6 +94,46 @@ function splitIdsText(text?: string): string[] {
     .split(/[\n,，;；]+/)
     .map((item) => item.trim())
     .filter(Boolean)
+}
+
+// ---------- BY_FILTER 的 zone/shelf 筛选下拉数据源（INVENTORY 模块白名单键） ----------
+//
+// 后端仅 INVENTORY（实时库存）行源认领 zone_id/shelf_id（internal/inventory/datax_export.go:135-139，
+// 键清单与 StockListPage SfExportButton scopeParams 对齐）；其余模块未知键静默忽略——
+// 筛选项只在 module=INVENTORY 时渲染，提交时也仅在该模块并入 filters。
+
+/** options 防御分页上限（同 api/options.ts fetchAllPages MAX_PAGES 口径，100×50=5000 行封顶） */
+const FILTER_OPTIONS_MAX_PAGES = 50
+
+/** 分页逐页取全（同构 api/options.ts fetchAllPages——该助手未导出，本地同口径实现） */
+async function fetchAllFilterOptions<T>(fetchPage: (page: number) => Promise<PageResult<T>>): Promise<T[]> {
+  const first = await fetchPage(1)
+  const rows = [...first.items]
+  const totalPages = Math.min(Math.ceil(first.total / OPTIONS_FETCH_PAGE_SIZE) || 1, FILTER_OPTIONS_MAX_PAGES)
+  for (let page = 2; page <= totalPages; page += 1) {
+    const next = await fetchPage(page)
+    rows.push(...next.items)
+  }
+  return rows
+}
+
+/** 库区 options（GET /api/zones；warehouseId 为后端绑定形态 handler.go:320——URL 带仓库预置时收敛候选） */
+function fetchZoneFilterOptions(warehouseId?: string): Promise<ZoneItem[]> {
+  return fetchAllFilterOptions((page) =>
+    zoneApi.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE, ...(warehouseId ? { warehouseId } : {}) }),
+  )
+}
+
+/** 货架 options（GET /api/shelves；zoneId 联动已选库区，handler.go:455-459） */
+function fetchShelfFilterOptions(warehouseId?: string, zoneId?: string): Promise<ShelfItem[]> {
+  return fetchAllFilterOptions((page) =>
+    shelfApi.list({
+      page,
+      pageSize: OPTIONS_FETCH_PAGE_SIZE,
+      ...(warehouseId ? { warehouseId } : {}),
+      ...(zoneId ? { zoneId } : {}),
+    }),
+  )
 }
 
 /** 表单值 → 导出创建契约（ExportCreateInput，service_export.go:24-32：
@@ -105,6 +152,11 @@ function toExportPayload(values: ExportFormValues, presetFilters: Record<string,
     // 未知键由后端按各域白名单忽略（contract.go ExportFilter.Filters）
     const filters: Record<string, string> = { ...presetFilters }
     if (values.keyword) filters.keyword = values.keyword
+    // zone/shelf 仅 INVENTORY 行源白名单键：显式表单值优先于 URL 预置（同键覆盖），未填不下发
+    if (values.module === 'INVENTORY') {
+      if (values.zone_id) filters.zone_id = values.zone_id
+      if (values.shelf_id) filters.shelf_id = values.shelf_id
+    }
     if (Object.keys(filters).length > 0) payload.filters = filters
   }
   if (values.scope === 'TIME_RANGE' && values.timeRange?.[0] && values.timeRange?.[1]) {
@@ -140,6 +192,26 @@ export default function ExportTaskPage() {
   const [polledDetails, setPolledDetails] = useState<Record<string, DataTask>>({})
   const [form] = Form.useForm<ExportFormValues>()
   const scope = Form.useWatch('scope', form)
+  const moduleValue = Form.useWatch('module', form)
+  const zoneIdValue = Form.useWatch('zone_id', form)
+
+  // BY_FILTER 的 zone/shelf 筛选候选（仅 INVENTORY 模块白名单键，fetchZoneFilterOptions 注释）：
+  // 库区候选随 URL 仓库预置收敛、货架候选随已选库区联动；弹窗打开且命中模块+范围才拉取，
+  // options 加载失败降级为 disabled+可留空提交（错误如实呈现，不造假候选）
+  const presetWarehouseId =
+    typeof presetFilters.warehouse_id === 'string' && presetFilters.warehouse_id !== ''
+      ? presetFilters.warehouse_id
+      : undefined
+  const zoneOptionsQuery = useQuery({
+    queryKey: ['data', 'exports', 'filter-options', 'zones', presetWarehouseId ?? ''],
+    queryFn: () => fetchZoneFilterOptions(presetWarehouseId),
+    enabled: modalOpen && scope === 'BY_FILTER' && moduleValue === 'INVENTORY',
+  })
+  const shelfOptionsQuery = useQuery({
+    queryKey: ['data', 'exports', 'filter-options', 'shelves', presetWarehouseId ?? '', zoneIdValue ?? ''],
+    queryFn: () => fetchShelfFilterOptions(presetWarehouseId, zoneIdValue),
+    enabled: modalOpen && scope === 'BY_FILTER' && moduleValue === 'INVENTORY',
+  })
 
   const list = usePagedList<DataTask, DataTaskQuery>({
     queryKey: ['data', 'exports'],
@@ -325,6 +397,11 @@ export default function ExportTaskPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无导出任务，点击右上角「新建导出任务」创建"
+          emptyAction={
+            <Button type="primary" icon={<ExportOutlined />} onClick={openCreateModal}>
+              新建导出任务
+            </Button>
+          }
           scrollX={1690}
         />
       </Card>
@@ -400,6 +477,56 @@ export default function ExportTaskPage() {
                     .map(([key, value]) => `${key}=${value}`)
                     .join('，')}
                 />
+              )}
+              {moduleValue === 'INVENTORY' && (
+                // zone/shelf 仅 INVENTORY 行源认领（internal/inventory/datax_export.go:135-139）；
+                // 表单显式值优先于 URL 预置同键（toExportPayload 合并规则）
+                <Row gutter={16}>
+                  <Col span={12}>
+                    <Form.Item
+                      name="zone_id"
+                      label="库区筛选"
+                      extra={zoneOptionsQuery.isError ? '库区列表加载失败，可留空提交' : '按库区过滤库存行（zone_id）'}
+                    >
+                      <Select
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="全部库区"
+                        loading={zoneOptionsQuery.isPending}
+                        disabled={zoneOptionsQuery.isError}
+                        options={(zoneOptionsQuery.data ?? []).map((zone) => ({
+                          value: String(zone.id),
+                          label: `${zone.code}（${zone.name}）`,
+                        }))}
+                        onChange={() => {
+                          // 库区变更后原货架候选已失效，联动清空（未选不下发）
+                          form.setFieldValue('shelf_id', undefined)
+                        }}
+                      />
+                    </Form.Item>
+                  </Col>
+                  <Col span={12}>
+                    <Form.Item
+                      name="shelf_id"
+                      label="货架筛选"
+                      extra={shelfOptionsQuery.isError ? '货架列表加载失败，可留空提交' : '按货架过滤库存行（shelf_id）'}
+                    >
+                      <Select
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder={zoneIdValue ? '全部货架' : '全部货架（选库区可联动收敛候选）'}
+                        loading={shelfOptionsQuery.isPending}
+                        disabled={shelfOptionsQuery.isError}
+                        options={(shelfOptionsQuery.data ?? []).map((shelf) => ({
+                          value: String(shelf.id),
+                          label: shelf.code,
+                        }))}
+                      />
+                    </Form.Item>
+                  </Col>
+                </Row>
               )}
               <Form.Item name="keyword" label="筛选关键词">
                 <Input placeholder="随业务模块的筛选条件（后端按白名单键认领）" />

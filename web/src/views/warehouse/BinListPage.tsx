@@ -34,6 +34,7 @@ import {
 } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -137,6 +138,8 @@ export default function BinListPage() {
 
   const [form] = Form.useForm<BinFormValues>()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // 行反馈/删除行动效（frontend.md §31 #7）：先 API 后反馈，hook 内自动回落/兜底自清
+  const fb = useTableRowFeedback()
   const [editing, setEditing] = useState<BinItem | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -253,8 +256,10 @@ export default function BinListPage() {
     setActionError(null)
     try {
       await binApi.setStatus(record.id, next)
+      fb.trigger(record.id, 'success')
       await list.refetch()
     } catch (err) {
+      fb.trigger(record.id, 'error')
       setActionError(err)
     } finally {
       setTogglingId(null)
@@ -266,8 +271,10 @@ export default function BinListPage() {
     setActionError(null)
     try {
       await binApi.remove(record.id)
+      fb.triggerRemove(record.id)
       await list.refetch()
     } catch (err) {
+      fb.trigger(record.id, 'error')
       setActionError(err)
     } finally {
       setRemovingId(null)
@@ -356,6 +363,9 @@ export default function BinListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
+          removingRowKeys={fb.removingRowKeys}
           emptyText="当前筛选条件下没有库位"
           scrollX={920}
         />
@@ -363,7 +373,7 @@ export default function BinListPage() {
 
       <Drawer
         title={editing ? '编辑库位' : '新建库位'}
-        width={440}
+        size={440}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         extra={

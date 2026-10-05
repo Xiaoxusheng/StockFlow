@@ -158,6 +158,13 @@ export default function PurchaseReturnListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购退货单"
+          emptyAction={
+            canCreate ? (
+              <Button type="primary" onClick={() => setCreateOpen(true)}>
+                新建采购退货
+              </Button>
+            ) : undefined
+          }
           scrollX={760}
         />
       </Card>

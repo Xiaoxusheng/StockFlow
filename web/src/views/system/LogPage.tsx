@@ -99,7 +99,7 @@ function OperationDetailDrawer({
   const data = detail.data
 
   return (
-    <Drawer title="操作日志详情" open={record !== null} width={560} onClose={onClose}>
+    <Drawer title="操作日志详情" open={record !== null} size={560} onClose={onClose}>
       {record !== null && detail.isPending && <Skeleton active paragraph={{ rows: 10 }} />}
       {record !== null && detail.error && (
         <SfError

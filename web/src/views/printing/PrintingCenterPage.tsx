@@ -50,6 +50,7 @@ import {
 } from '@/api/printing'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -139,6 +140,8 @@ function TemplateTab() {
   const [form] = Form.useForm<TemplateFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7（frontend.md §31）：启停为行级状态变更，成功/失败行淡色反馈（先 API 后反馈）
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<PrintTemplateItem, PrintTemplateQuery>({
     queryKey: ['printing', 'templates'],
@@ -177,11 +180,15 @@ function TemplateTab() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: PrintTemplateItem['id']; status: PrintTemplateStatus }) =>
       printingApi.templates.setStatus(id, { status }),
-    onSuccess: () => {
+    onSuccess: (_result, { id }) => {
+      fb.trigger(id, 'success')
       messageApi.success('模板状态已更新')
       invalidate()
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   const openCreate = () => {
@@ -312,12 +319,19 @@ function TemplateTab() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           actions={
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建模板
             </Button>
           }
           emptyText="暂无打印模板，点击「新建模板」创建（printing.md §2：禁止把打印 HTML 写死）"
+          emptyAction={
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建模板
+            </Button>
+          }
           scrollX={1000}
         />
       </Card>
@@ -439,6 +453,8 @@ function TaskTab() {
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  // 动效 #7（frontend.md §31）：执行确认为行级操作，成功/失败行淡色反馈（先 API 后反馈）
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<PrintTaskItem, PrintTaskQuery>({
     queryKey: ['printing', 'tasks'],
@@ -494,6 +510,8 @@ function TaskTab() {
     mutationFn: ({ id, payload }: { id: string; payload: PrintTaskExecutePayload }) =>
       printingApi.tasks.execute(id, payload),
     onSuccess: (task) => {
+      // 回填结果如实着色：确认打印失败 → 行 error 淡色底，成功 → success
+      fb.trigger(task.id, task.result === 'FAILED' ? 'error' : 'success')
       setConfirmTask(null)
       confirmForm.resetFields()
       messageApi.success(
@@ -504,7 +522,10 @@ function TaskTab() {
       invalidate()
       void queryClient.invalidateQueries({ queryKey: ['printing', 'history'] })
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   const openConfirm = (task: PrintTaskItem) => {
@@ -645,12 +666,19 @@ function TaskTab() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           actions={
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
               新建打印任务
             </Button>
           }
           emptyText="暂无打印任务，点击「新建打印任务」创建（printing.md §1.2 打印统一走任务模型）"
+          emptyAction={
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+              新建打印任务
+            </Button>
+          }
           scrollX={1350}
         />
       </Card>
@@ -761,6 +789,9 @@ function HistoryTab() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
+  // 动效 #7（frontend.md §31）：重打为行级操作，失败行 error 淡色反馈（先 API 后反馈；
+  // 成功即跳转预览页，无需行反馈）
+  const fb = useTableRowFeedback()
   // 重打入口 fail-closed（约束 7）：无 printing:task:create 权限不显示按钮（frontend.md §13.2）
   const canCreatePrintTask = canAccess(user, 'printing:task:create')
 
@@ -818,7 +849,10 @@ function HistoryTab() {
           : '该历史记录缺少模板信息，无法自动重打，请到商品二维码中心按 SKU 重选打印',
       )
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, history) => {
+      fb.trigger(history.id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   const columns: ColumnsType<PrintHistoryItem> = [
@@ -905,6 +939,8 @@ function HistoryTab() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="暂无打印历史；打印记录由后端在任务执行确认时写入（printing.md §6 打印记录入操作日志）"
           scrollX={980}
         />

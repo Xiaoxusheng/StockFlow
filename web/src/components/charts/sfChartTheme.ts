@@ -68,8 +68,14 @@ export const SF_CHART_AREA_OPACITY = 0.12
 /** 柱圆角（任务书 §34：3–4px） */
 export const SF_CHART_BAR_RADIUS = 3
 
-/** 折线宽度固定 2px（任务书 §32） */
-export const SF_CHART_LINE_WIDTH = 2
+/** 折线宽度 1.5px（现代细线：低线宽 + 低透明面积，视觉轻；2px 在高密度趋势图上过重） */
+export const SF_CHART_LINE_WIDTH = 1.5
+
+/** 轴标签按天收敛："2026-10-04 00:00:00"/ISO 形态截取日期段，其余原样（趋势图 X 轴日粒度统一口径） */
+export function dayLabel(value: unknown): string {
+  const text = String(value ?? '')
+  return /^\d{4}-\d{2}-\d{2}/.test(text) ? text.slice(0, 10) : text
+}
 
 function readChartVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()

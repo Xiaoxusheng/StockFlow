@@ -7,6 +7,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type DepartmentNode } from '@/api/rbac'
 import type { OnOffStatus } from '@/api/user'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
@@ -77,7 +78,7 @@ function DepartmentFormModal({ editing, parent, treeOptions, submitting, onCance
         void form.submit()
       }}
       okText={isEdit ? '保存' : '创建'}
-      maskClosable={false}
+      mask={{ closable: false }}
     >
       <Form
         form={form}
@@ -176,15 +177,21 @@ export default function DepartmentPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: OnOffStatus }) => rbacApi.setDepartmentStatus(id, status),
     onSuccess: (_data, variables) => {
+      fb.trigger(variables.id)
       message.success(variables.status === 'ENABLED' ? '部门已启用' : '部门已停用')
       void invalidate()
     },
-    onError: (error) => message.error(resolveErrorMessage(error)),
+    onError: (error, variables) => {
+      fb.trigger(variables.id, 'error')
+      message.error(resolveErrorMessage(error))
+    },
   })
 
   // 「更多」菜单内 停用/启用 的二次确认：Popconfirm 形态无法锚定在 Dropdown 菜单项内——
   // 改用同语义声明式 Modal（danger ok + confirmLoading），文案逐字保留
   const [rowConfirm, setRowConfirm] = useState<DepartmentNode | null>(null)
+  // 行反馈动效（frontend.md §31 #7）：部门启停先 API 后反馈，对应行淡色底 480ms 自动回落
+  const fb = useTableRowFeedback()
   const handleRowConfirmOk = () => {
     if (!rowConfirm) return
     statusMutation.mutate(
@@ -265,6 +272,8 @@ export default function DepartmentPage() {
           pagination={{ current: pagination.current, pageSize: pagination.pageSize }}
           total={tree.length}
           onPageChange={(page, pageSize) => setPagination({ current: page, pageSize })}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="暂无部门"
           scrollX={690}
           expandable={{

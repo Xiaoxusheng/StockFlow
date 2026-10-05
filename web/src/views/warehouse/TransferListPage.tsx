@@ -20,6 +20,7 @@ import {
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -123,6 +124,9 @@ export default function TransferListPage() {
     params,
   })
 
+  // 行反馈动效（frontend.md §31 #7）：提交/审核/取消先 API 后反馈，对应行淡色底 480ms 自动回落
+  const fb = useTableRowFeedback()
+
   // 仓库 id → 名称映射（后端视图不联表下发仓库名，api/options.ts 一次取全后本地映射）
   const warehousesQuery = useQuery({
     queryKey: ['options', 'warehouses'],
@@ -140,17 +144,22 @@ export default function TransferListPage() {
   // 提交审核：DRAFT→PENDING_APPROVAL（无库存动作，审核通过才预占）
   const submitMutation = useMutation({
     mutationFn: (id: TransferOrder['id']) => transferApi.submit(id),
-    onSuccess: (detail) => {
+    onSuccess: (detail, id) => {
+      fb.trigger(id)
       messageApi.success(`调拨单 ${detail.order.transfer_no} 已提交审核（草稿 → 待审核）`)
       invalidateOrders()
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, id) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
   // 审核：approve 通过（→APPROVED + 源仓逐行预占）/ reject 驳回（→CANCELLED）
   const approveMutation = useMutation({
     mutationFn: ({ id, payload }: { id: TransferOrder['id']; payload: TransferApprovePayload }) =>
       transferApi.approve(id, payload),
-    onSuccess: (detail, { payload }) => {
+    onSuccess: (detail, { payload, id }) => {
+      fb.trigger(id)
       messageApi.success(
         payload.action === 'approve'
           ? `调拨单 ${detail.order.transfer_no} 审核通过（待审核 → 待出库，源仓已预占）`
@@ -159,18 +168,25 @@ export default function TransferListPage() {
       setApproveTarget(null)
       invalidateOrders()
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
   // 取消：DRAFT/PENDING_APPROVAL/APPROVED→CANCELLED（APPROVED 先释放全部预占锁）
   const cancelMutation = useMutation({
     mutationFn: ({ id, reason }: { id: TransferOrder['id']; reason?: string }) =>
       transferApi.cancel(id, { reason }),
-    onSuccess: (detail) => {
+    onSuccess: (detail, { id }) => {
+      fb.trigger(id)
       messageApi.success(`调拨单 ${detail.order.transfer_no} 已取消（预占已释放）`)
       setCancelTarget(null)
       invalidateOrders()
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      fb.trigger(id, 'error')
+      messageApi.error(resolveErrorMessage(error))
+    },
   })
 
   const handleSearch = (values: Record<string, unknown>) => {
@@ -317,6 +333,8 @@ export default function TransferListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="当前筛选条件下没有调拨单"
           scrollX={1440}
         />

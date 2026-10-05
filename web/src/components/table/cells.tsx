@@ -115,4 +115,17 @@ export function DateCell({ value, withTime = true }: DateCellProps) {
   )
 }
 
+export interface SfRowActionsProps {
+  children: ReactNode
+}
+
+/**
+ * 行操作区显式包裹（frontend.md §31 #2）：hover/focus-within 渐显、触摸端恒显。
+ * 「操作」列 td 已由 SfTable 自动注入 sf-table-actions-cell；本组件供页面在
+ * 非「操作」列名场景或需要显式声明时使用，不包裹时自动注入兜底。
+ */
+export function SfRowActions({ children }: SfRowActionsProps) {
+  return <div className="sf-table-actions">{children}</div>
+}
+
 export { formatMoney, formatNumber, formatQty }

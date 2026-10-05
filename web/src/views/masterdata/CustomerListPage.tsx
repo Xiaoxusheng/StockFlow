@@ -27,6 +27,7 @@ import {
 } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -83,6 +84,8 @@ export default function CustomerListPage() {
   const [form] = Form.useForm<CustomerFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7/删除行（frontend.md §31）：行淡色反馈 / 删除行 fade→收缩——仅在 API 成败回调后触发
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<CustomerItem, CustomerQuery>({
     queryKey: ['masterdata', 'customers'],
@@ -109,17 +112,28 @@ export default function CustomerListPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: CustomerItem['id']; status: EnabledStatus }) =>
       masterdataApi.customers.setStatus(id, { status }),
-    onSuccess: (data) => {
+    onSuccess: (data, { id }) => {
       messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
       invalidate()
+      fb.trigger(id, 'success')
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   const removeMutation = useMutation({
     mutationFn: (id: CustomerItem['id']) => masterdataApi.customers.remove(id),
-    onSuccess: invalidate,
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onSuccess: (_data, id) => {
+      // 删除行动效：fade→收缩→过滤 DOM（refetch 成功自愈 / 失败 2.5s 兜底恢复显示）
+      fb.triggerRemove(id)
+      invalidate()
+    },
+    onError: (error, id) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   // 「更多」菜单内 停用/启用/删除 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在点击后
@@ -285,6 +299,14 @@ export default function CustomerListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无客户，点击右上角「新建客户」创建"
+          emptyAction={
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+              新建客户
+            </Button>
+          }
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
+          removingRowKeys={fb.removingRowKeys}
           scrollX={1510}
         />
       </Card>

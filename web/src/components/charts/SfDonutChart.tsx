@@ -25,8 +25,8 @@ export interface SfDonutChartProps extends SfChartStatusProps {
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
 const OTHER_SLICE_NAME = '其他'
 
-/** 内半径比例固定 donut 形 */
-const DONUT_INNER_RADIUS = 0.6
+/** 内半径比例固定 donut 形；0.66（0.6 厚环显重，0.72 会破坏该 plots 版本布局计算，实测上限） */
+const DONUT_INNER_RADIUS = 0.66
 
 export function foldDonutData(data: SfDonutDatum[], maxSlices: number): SfDonutDatum[] {
   const sorted = [...data].sort((a, b) => b.value - a.value)

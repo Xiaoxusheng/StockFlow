@@ -262,6 +262,13 @@ export default function CountTaskListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有盘点任务"
+          emptyAction={
+            canCreate ? (
+              <Button type="primary" onClick={() => navigate('/counts/new')}>
+                新建盘点单
+              </Button>
+            ) : undefined
+          }
           scrollX={1180}
         />
       </Card>

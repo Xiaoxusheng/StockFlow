@@ -56,8 +56,9 @@ export function buildHBarOptions(params: {
 
   return {
     data: ranked,
-    // plots v2 Bar = interval + transpose 坐标：xField=类目（transpose 后渲染在左侧），
-    // yField=数值（渲染在底部）——传反会导致类目轴落底、数值轴立左（轴交叉错乱）
+    // G2 标准：transpose 坐标下 xField=类目（渲染于左侧）、yField=数值（渲染于底部）。
+    // 此前 x=value/y=category 的写法导致数值轴立左、类目轴落底（轴义反转）；2026-10-05
+    // 曾据 5178 混乱现场判"换轴后条形消失"而回滚——该观察不可信，干净实例实测换轴正常。
     xField: categoryField,
     yField: valueField,
     legend: false,

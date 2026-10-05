@@ -25,6 +25,7 @@ import {
 } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -61,6 +62,8 @@ export default function UnitListPage() {
   const [form] = Form.useForm<UnitFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7（frontend.md §31）：启停成功/失败行淡色反馈——仅在 API 回调后触发
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<UnitItem, UnitQuery>({
     queryKey: ['masterdata', 'units'],
@@ -85,11 +88,15 @@ export default function UnitListPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: UnitItem['id']; status: EnabledStatus }) =>
       masterdataApi.units.setStatus(id, { status }),
-    onSuccess: (data) => {
+    onSuccess: (data, { id }) => {
       messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
       invalidate()
+      fb.trigger(id, 'success')
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   const openCreate = () => {
@@ -207,6 +214,13 @@ export default function UnitListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无计量单位，点击右上角「新建单位」创建"
+          emptyAction={
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+              新建单位
+            </Button>
+          }
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           scrollX={810}
         />
       </Card>

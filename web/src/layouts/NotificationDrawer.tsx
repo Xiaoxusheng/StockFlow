@@ -79,7 +79,7 @@ export function NotificationDrawer({ open, onClose }: NotificationDrawerProps) {
   return (
     <Drawer
       title="通知"
-      width={380}
+      size={380}
       open={open}
       onClose={onClose}
       extra={

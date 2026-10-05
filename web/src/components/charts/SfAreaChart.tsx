@@ -7,7 +7,7 @@
 import { useMemo } from 'react'
 import type { AreaConfig } from '@ant-design/plots'
 import { SfChart } from './SfChart'
-import { SF_CHART_AREA_OPACITY } from './sfChartTheme'
+import { SF_CHART_AREA_OPACITY, SF_CHART_LINE_WIDTH, dayLabel } from './sfChartTheme'
 import { SF_CHART_DEFAULT_HEIGHT, SF_LONG_SERIES, SF_LONG_VALUE, SF_LONG_X, type SfChartSeries, type SfChartStatusProps, SF_CHART_COLOR_KEY_INDEX } from './types'
 import { useSfChartTheme } from './useSfChartTheme'
 import type { SfChartTheme } from './sfChartTheme'
@@ -39,7 +39,8 @@ export function buildAreaOptions(params: {
   const { data, xField, series, smooth, palette, theme } = params
 
   const axis = {
-    x: { grid: false, title: false },
+    // X 轴按天粒度：时间标签收敛为日期（同 SfLineChart，JSONTime 尾巴不进图）
+    x: { grid: false, title: false, labelFormatter: dayLabel },
     y: { grid: true, title: false },
   }
   // 面积透明度固定低值，同色渐隐不使用渐变（§33）
@@ -54,7 +55,7 @@ export function buildAreaOptions(params: {
       shapeField: smooth ? 'smooth' : undefined,
       legend: false,
       axis,
-      style: { lineWidth: 2, stroke: seriesColor(only, 0, palette), ...areaStyle },
+      style: { lineWidth: SF_CHART_LINE_WIDTH, stroke: seriesColor(only, 0, palette), ...areaStyle },
       theme,
     }
   }
@@ -77,7 +78,7 @@ export function buildAreaOptions(params: {
     legend: { color: { position: 'top' } },
     axis,
     scale: { color: { range } },
-    style: { lineWidth: 2, ...areaStyle },
+    style: { lineWidth: SF_CHART_LINE_WIDTH, ...areaStyle },
     theme,
   }
 }

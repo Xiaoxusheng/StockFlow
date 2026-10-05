@@ -98,6 +98,7 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
         <Flex
           align="center"
           gap={4}
+          className="sf-search-form__applied"
           style={{
             marginTop: 'var(--sf-space-2)',
             fontSize: 'var(--sf-font-size-caption)',

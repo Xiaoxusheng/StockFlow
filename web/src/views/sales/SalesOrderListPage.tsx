@@ -193,6 +193,13 @@ export default function SalesOrderListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有销售订单"
+          emptyAction={
+            canCreate ? (
+              <Button type="primary" onClick={() => navigate('/sales/new')}>
+                新建销售订单
+              </Button>
+            ) : undefined
+          }
           scrollX={900}
         />
       </Card>

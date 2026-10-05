@@ -297,7 +297,7 @@ export function PurchaseReturnCreateDrawer({
     <Drawer
       open={open}
       title="新建采购退货"
-      width={860}
+      size={860}
       onClose={onClose}
       destroyOnHidden
       footer={

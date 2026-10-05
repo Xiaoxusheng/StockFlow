@@ -32,6 +32,7 @@ import {
 import { buildUserNameMap, fetchUserOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -141,6 +142,8 @@ export default function WarehouseListPage() {
 
   const [form] = Form.useForm<WarehouseFormValues>()
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // 行反馈/删除行动效（frontend.md §31 #7）：先 API 后反馈，hook 内自动回落/兜底自清
+  const fb = useTableRowFeedback()
   const [editing, setEditing] = useState<WarehouseItem | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -236,8 +239,10 @@ export default function WarehouseListPage() {
     setActionError(null)
     try {
       await warehouseApi.setStatus(record.id, next)
+      fb.trigger(record.id, 'success')
       await list.refetch()
     } catch (err) {
+      fb.trigger(record.id, 'error')
       setActionError(err)
     } finally {
       setTogglingId(null)
@@ -249,8 +254,10 @@ export default function WarehouseListPage() {
     setActionError(null)
     try {
       await warehouseApi.remove(record.id)
+      fb.triggerRemove(record.id)
       await list.refetch()
     } catch (err) {
+      fb.trigger(record.id, 'error')
       setActionError(err)
     } finally {
       setRemovingId(null)
@@ -347,6 +354,9 @@ export default function WarehouseListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
+          removingRowKeys={fb.removingRowKeys}
           emptyText="当前筛选条件下没有仓库"
           scrollX={1490}
         />
@@ -354,7 +364,7 @@ export default function WarehouseListPage() {
 
       <Drawer
         title={editing ? '编辑仓库' : '新建仓库'}
-        width={440}
+        size={440}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         extra={

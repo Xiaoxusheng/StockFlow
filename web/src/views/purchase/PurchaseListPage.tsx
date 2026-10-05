@@ -212,6 +212,13 @@ export default function PurchaseListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购订单"
+          emptyAction={
+            canCreate ? (
+              <Button type="primary" onClick={() => navigate('/purchases/new')}>
+                新建采购订单
+              </Button>
+            ) : undefined
+          }
           scrollX={970}
         />
       </Card>

@@ -3,7 +3,7 @@ import { Button, Card, Tooltip, Typography, message } from 'antd'
 import type { TableProps } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { masterdataApi, type SkuItem, type SkuQuery } from '@/api/masterdata'
 import { fetchProductOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
@@ -11,7 +11,6 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { SfBatchBar } from '@/components/table/SfBatchBar'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { QrCodeView } from '@/components/print/QrCodeView'
 import { SfQrPreviewDrawer, type SfQrSkuInfo } from '@/components/print/SfQrPreviewDrawer'
@@ -56,6 +55,7 @@ function toSfQrSkuInfo(record: SkuItem, productNameById: Map<string, string>): S
  * fail-closed（qr-code.md §10）。
  */
 export default function QrCodeCenterPage() {
+  const navigate = useNavigate()
   const [params, setParams] = useState<SkuQuery>({})
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([])
   const [drawerSku, setDrawerSku] = useState<SkuItem | null>(null)
@@ -134,11 +134,6 @@ export default function QrCodeCenterPage() {
   const disabledCount = selectedSkus.filter((row) => !row.is_enabled).length
   const canPrint = canAccess(user, 'printing:task:create')
 
-  const clearSelection = () => {
-    setSelectedKeys([])
-    selectedRowsRef.current.clear()
-  }
-
   const openDrawer = (record: SkuItem) => {
     setDrawerSku(record)
     setDrawerOpen(true)
@@ -153,6 +148,18 @@ export default function QrCodeCenterPage() {
     if (selectedSkus.length === 0) return
     openPrint(selectedSkus.map((row) => toSfQrSkuInfo(row, productNameById)))
   }
+
+  // 动效 #4 批量工具栏（frontend.md §31）：批量操作交 SfTable bulkActions——选中>0 时工具栏
+  // 左区自动切换「已选择 N 条 + 批量操作」（清空走 rowSelection.onChange 空数组，本页 onChange
+  // 同步重建快照 Map 为空，跨页快照语义不变；页面级 SfBatchBar 条件渲染已被替换）。
+  const bulkActions = (
+    <>
+      {disabledCount > 0 && <Text type="danger">不可打印 {disabledCount} 个（商品已停用）</Text>}
+      <Button type="primary" disabled={selectedSkus.length === 0} onClick={openBatchPrint}>
+        批量打印二维码
+      </Button>
+    </>
+  )
 
   const columns: ColumnsType<SkuItem> = [
     { title: 'SKU 编码', dataIndex: 'code', width: 140, fixed: 'left' },
@@ -266,14 +273,6 @@ export default function QrCodeCenterPage() {
             list.resetToFirstPage()
           }}
         />
-        {selectedKeys.length > 0 && (
-          <SfBatchBar selectedCount={selectedKeys.length} onClear={clearSelection}>
-            {disabledCount > 0 && <Text type="danger">不可打印 {disabledCount} 个（商品已停用）</Text>}
-            <Button type="primary" disabled={selectedSkus.length === 0} onClick={openBatchPrint}>
-              批量打印二维码
-            </Button>
-          </SfBatchBar>
-        )}
         <SfTable<SkuItem>
           storageKey="qr-codes"
           rowKey="id"
@@ -288,6 +287,12 @@ export default function QrCodeCenterPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无 SKU，可先到 SKU 管理页创建"
+          emptyAction={
+            <Button type="primary" size="small" onClick={() => navigate('/skus')}>
+              前往 SKU 管理
+            </Button>
+          }
+          bulkActions={bulkActions}
           scrollX={840}
         />
       </Card>

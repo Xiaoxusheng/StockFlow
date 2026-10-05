@@ -9,6 +9,7 @@ import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type PermissionItem, type RoleItem, type RoleQuery } from '@/api/rbac'
 import type { OnOffStatus } from '@/api/user'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -74,7 +75,7 @@ function RoleFormModal({ editing, submitting, onCancel, onSubmit }: RoleFormModa
         void form.submit()
       }}
       okText={isEdit ? '保存' : '创建'}
-      maskClosable={false}
+      mask={{ closable: false }}
     >
       <Form
         form={form}
@@ -150,7 +151,7 @@ function AssignPermissionsModal({ role, submitting, onCancel, onSubmit }: Assign
       onOk={() => onSubmit(checkedKeys.map(Number))}
       okText="保存"
       okButtonProps={{ disabled: detailQuery.isPending }}
-      maskClosable={false}
+      mask={{ closable: false }}
       width={520}
     >
       {permissionsQuery.isPending ? (
@@ -193,6 +194,9 @@ export default function RoleListPage() {
     params,
   })
 
+  // 行反馈动效（frontend.md §31 #7）：启停先 API 后反馈，对应行淡色底 480ms 自动回落
+  const fb = useTableRowFeedback()
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'roles'] })
 
   const createMutation = useMutation({
@@ -218,10 +222,14 @@ export default function RoleListPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: string; status: OnOffStatus }) => rbacApi.setRoleStatus(id, status),
     onSuccess: (_data, variables) => {
+      fb.trigger(variables.id)
       message.success(variables.status === 'ENABLED' ? '角色已启用' : '角色已停用')
       void invalidate()
     },
-    onError: (error) => message.error(resolveErrorMessage(error)),
+    onError: (error, variables) => {
+      fb.trigger(variables.id, 'error')
+      message.error(resolveErrorMessage(error))
+    },
   })
 
   // 「更多」菜单内 停用/启用 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在
@@ -340,6 +348,8 @@ export default function RoleListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           emptyText="暂无角色"
           scrollX={860}
         />

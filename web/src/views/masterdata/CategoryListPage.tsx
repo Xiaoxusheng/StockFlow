@@ -29,6 +29,7 @@ import {
 import { fetchCategoryOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -77,6 +78,8 @@ export default function CategoryListPage() {
   const [form] = Form.useForm<CategoryFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 动效 #7（frontend.md §31）：启停成功/失败行淡色反馈——仅在 API 回调后触发
+  const fb = useTableRowFeedback()
 
   const list = usePagedList<CategoryItem, CategoryQuery>({
     queryKey: ['masterdata', 'categories'],
@@ -119,11 +122,15 @@ export default function CategoryListPage() {
   const statusMutation = useMutation({
     mutationFn: ({ id, status }: { id: CategoryItem['id']; status: EnabledStatus }) =>
       masterdataApi.categories.setStatus(id, { status }),
-    onSuccess: (data) => {
+    onSuccess: (data, { id }) => {
       messageApi.success(data.status === 'ENABLED' ? '已启用' : '已停用')
       invalidate()
+      fb.trigger(id, 'success')
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, { id }) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(id, 'error')
+    },
   })
 
   const openCreate = () => {
@@ -277,6 +284,13 @@ export default function CategoryListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="暂无商品分类，点击右上角「新建分类」创建"
+          emptyAction={
+            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+              新建分类
+            </Button>
+          }
+          feedbackRowKey={fb.rowKey}
+          feedbackTone={fb.tone}
           scrollX={940}
         />
       </Card>

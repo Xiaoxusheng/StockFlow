@@ -41,6 +41,7 @@ import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfTable } from '@/components/table/SfTable'
@@ -258,6 +259,8 @@ export default function CountDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
+  // 行反馈（动效 #7）：实盘登记 API 成功/失败后对应明细行淡色底自动回落，仅回调内触发（先 API 后反馈）
+  const fb = useTableRowFeedback()
   const [flowForm] = Form.useForm<FlowFormValues>()
   const [registerForm] = Form.useForm<RegisterFormValues>()
   const [flowAction, setFlowAction] = useState<CountFlowAction | null>(null)
@@ -384,15 +387,21 @@ export default function CountDetailPage() {
       })
   }
 
-  // 实盘登记：批量幂等 PUT，单项提交 {items:[{InventoryRowID, SerialNo, Qty}]}（store.go:204-208）
+  // 实盘登记：批量幂等 PUT，单项提交 {items:[{InventoryRowID, SerialNo, Qty}]}（store.go:204-208）。
+  // variables 携带 rowKey 仅供行反馈定位（动效 #7），不进入 API 载荷
   const registerMutation = useMutation({
-    mutationFn: (payload: { items: CountRegistrationInput[] }) => countApi.register(countId, payload),
-    onSuccess: () => {
+    mutationFn: (payload: { items: CountRegistrationInput[]; rowKey: CountId }) =>
+      countApi.register(countId, { items: payload.items }),
+    onSuccess: (_data, variables) => {
       messageApi.success('实盘登记已提交（PUT 幂等：同 行+序列号 覆盖原值）')
       setRegistering(null)
+      fb.trigger(variables.rowKey, 'success')
       void queryClient.invalidateQueries({ queryKey: ['counts', countId] })
     },
-    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+    onError: (error, variables) => {
+      messageApi.error(resolveErrorMessage(error))
+      fb.trigger(variables.rowKey, 'error')
+    },
   })
 
   const registeringIsSerial = registering != null && (registering.serial_no ?? '') !== ''
@@ -440,6 +449,7 @@ export default function CountDetailPage() {
               Qty: qty,
             },
           ],
+          rowKey: registering.id,
         })
       })
       .catch(() => {
@@ -808,6 +818,8 @@ export default function CountDetailPage() {
               pagination={itemCounts.pagination}
               total={items.length}
               onPageChange={itemCounts.onPageChange}
+              feedbackRowKey={fb.rowKey}
+              feedbackTone={fb.tone}
               emptyText={
                 order.status === 'DRAFT'
                   ? '盘点明细在「开始盘点」时按冻结快照生成'
