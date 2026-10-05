@@ -1,18 +1,15 @@
 /**
- * SfBarChart 纵向柱状图（任务书 §34，plots 内核映射 Column）
+ * SfBarChart 纵向柱状图（任务书 §34，ECharts 内核）
  *
- * 柱圆角固定 3px、限宽 maxWidth（barMaxWidth 语义）；多序列 group（dodgeX）。
+ * 柱圆角 3px、barMaxWidth 限宽；多序列并列（echarts 多 series 天然 dodge）。
  */
 import { useMemo } from 'react'
-import type { ColumnConfig } from '@ant-design/plots'
+import type { EChartsCoreOption } from 'echarts/core'
 import { SfChart } from './SfChart'
-import { SF_CHART_BAR_RADIUS, type SfChartTheme } from './sfChartTheme'
+import { dayLabel, SF_CHART_BAR_RADIUS, type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
   SF_CHART_DEFAULT_HEIGHT,
-  SF_LONG_SERIES,
-  SF_LONG_VALUE,
-  SF_LONG_X,
   type SfChartSeries,
   type SfChartStatusProps,
 } from './types'
@@ -24,7 +21,7 @@ export interface SfBarChartProps extends SfChartStatusProps {
   yField: string
   /** 多序列（key 为 data 字段）；缺省单序列直接用 yField */
   series?: SfChartSeries[]
-  /** 柱最大宽度（barMaxWidth 语义），默认 32px */
+  /** 柱最大宽度，默认 32px */
   barMaxWidth?: number
 }
 
@@ -43,52 +40,45 @@ export function buildBarOptions(params: {
   barMaxWidth: number
   palette: string[]
   theme: SfChartTheme
-}): ColumnConfig {
+}): EChartsCoreOption {
   const { data, xField, yField, series, barMaxWidth, palette, theme } = params
+  const categories = data.map((row) => String(row[xField] ?? ''))
+  const activeSeries =
+    !series || series.length === 0
+      ? [{ key: yField, name: yField } as SfChartSeries]
+      : series
 
-  const axis = {
-    x: { grid: false, title: false },
-    y: { grid: true, title: false },
-  }
-  const barStyle = { radius: SF_CHART_BAR_RADIUS, maxWidth: barMaxWidth }
+  const chartSeries = activeSeries.map((s, i) => ({
+    type: 'bar' as const,
+    name: s.name,
+    data: data.map((row) => row[s.key] ?? null),
+    barMaxWidth,
+    itemStyle: {
+      color: seriesColor(s, i, palette),
+      borderRadius: [SF_CHART_BAR_RADIUS, SF_CHART_BAR_RADIUS, 0, 0],
+    },
+  }))
 
-  if (!series || series.length === 0) {
-    return { data, xField, yField, legend: false, axis, style: barStyle, theme }
-  }
-  if (series.length === 1) {
-    const [only] = series
-    return {
-      data,
-      xField,
-      yField: only.key,
-      legend: false,
-      axis,
-      scale: { color: { range: [seriesColor(only, 0, palette)] } },
-      style: barStyle,
-      theme,
-    }
-  }
-
-  const longData = data.flatMap((row) =>
-    series.map((s) => ({
-      [SF_LONG_X]: row[xField],
-      [SF_LONG_SERIES]: s.name,
-      [SF_LONG_VALUE]: row[s.key],
-    })),
-  )
-  const range = series.map((s, i) => seriesColor(s, i, palette))
   return {
-    data: longData,
-    xField: SF_LONG_X,
-    yField: SF_LONG_VALUE,
-    seriesField: SF_LONG_SERIES,
-    colorField: SF_LONG_SERIES,
-    group: true,
-    legend: { color: { position: 'top' } },
-    axis,
-    scale: { color: { range } },
-    style: barStyle,
-    theme,
+    grid: { left: 8, right: 16, top: activeSeries.length > 1 ? 30 : 16, bottom: 4, containLabel: true },
+    legend:
+      activeSeries.length > 1
+        ? { top: 0, left: 0, icon: 'rect', itemWidth: 12, itemHeight: 8, itemGap: 16, textStyle: { color: theme.legendText, fontSize: 12 } }
+        : undefined,
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+      type: 'category',
+      data: categories,
+      axisLine: { lineStyle: { color: theme.axisLine } },
+      axisTick: { show: false },
+      axisLabel: { color: theme.axisText, fontSize: 12, formatter: dayLabel },
+    },
+    yAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: theme.splitLine } },
+      axisLabel: { color: theme.axisText, fontSize: 12 },
+    },
+    series: chartSeries,
   }
 }
 

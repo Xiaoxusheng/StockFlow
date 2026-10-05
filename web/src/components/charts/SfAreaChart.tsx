@@ -1,17 +1,14 @@
 /**
- * SfAreaChart 面积图（任务书 §33）
+ * SfAreaChart 面积图（任务书 §33，ECharts 内核；SfLineChart 的 area 默认开启形态）
  *
- * 与折线同构（plots Area 内核），面积透明度固定 0.12（0.08~0.15 区间内），
- * 同色纯色低透明填充——禁高饱和渐变（§33/§64）。
+ * 面积透明度固定 0.12（0.08~0.15 区间内），同色纯色低透明填充——禁高饱和渐变（§33/§64）。
  */
 import { useMemo } from 'react'
-import type { AreaConfig } from '@ant-design/plots'
 import { SfChart } from './SfChart'
-import { SF_CHART_AREA_OPACITY, SF_CHART_LINE_WIDTH, dayLabel } from './sfChartTheme'
-import { SF_CHART_DEFAULT_HEIGHT, SF_LONG_SERIES, SF_LONG_VALUE, SF_LONG_X, type SfChartSeries, type SfChartStatusProps, SF_CHART_COLOR_KEY_INDEX } from './types'
+import { SF_CHART_AREA_OPACITY, type SfChartTheme } from './sfChartTheme'
+import { SF_CHART_DEFAULT_HEIGHT, type SfChartSeries, type SfChartStatusProps } from './types'
 import { useSfChartTheme } from './useSfChartTheme'
-import type { SfChartTheme } from './sfChartTheme'
-import type { SfLineChartProps } from './SfLineChart'
+import { buildLineOptions, type SfLineChartProps } from './SfLineChart'
 
 export interface SfAreaChartProps extends SfChartStatusProps {
   data: Array<Record<string, unknown>>
@@ -23,11 +20,6 @@ export interface SfAreaChartProps extends SfChartStatusProps {
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
 
-function seriesColor(series: SfChartSeries, index: number, palette: string[]): string {
-  if (!series.color) return palette[index % palette.length]
-  return palette[SF_CHART_COLOR_KEY_INDEX[series.color] % palette.length]
-}
-
 export function buildAreaOptions(params: {
   data: SfLineChartProps['data']
   xField: string
@@ -35,52 +27,13 @@ export function buildAreaOptions(params: {
   smooth: boolean
   palette: string[]
   theme: SfChartTheme
-}): AreaConfig {
-  const { data, xField, series, smooth, palette, theme } = params
-
-  const axis = {
-    // X 轴按天粒度：时间标签收敛为日期（同 SfLineChart，JSONTime 尾巴不进图）
-    x: { grid: false, title: false, labelFormatter: dayLabel },
-    y: { grid: true, title: false },
+}): Record<string, unknown> {
+  const base = buildLineOptions({ ...params, area: true }) as Record<string, unknown>
+  const series = base.series as Array<{ areaStyle?: Record<string, unknown> }>
+  for (const s of series) {
+    s.areaStyle = { opacity: SF_CHART_AREA_OPACITY }
   }
-  // 面积透明度固定低值，同色渐隐不使用渐变（§33）
-  const areaStyle = { fillOpacity: SF_CHART_AREA_OPACITY }
-
-  if (series.length === 1) {
-    const [only] = series
-    return {
-      data,
-      xField,
-      yField: only.key,
-      shapeField: smooth ? 'smooth' : undefined,
-      legend: false,
-      axis,
-      style: { lineWidth: SF_CHART_LINE_WIDTH, stroke: seriesColor(only, 0, palette), ...areaStyle },
-      theme,
-    }
-  }
-
-  const longData = data.flatMap((row) =>
-    series.map((s) => ({
-      [SF_LONG_X]: row[xField],
-      [SF_LONG_SERIES]: s.name,
-      [SF_LONG_VALUE]: row[s.key],
-    })),
-  )
-  const range = series.map((s, i) => seriesColor(s, i, palette))
-  return {
-    data: longData,
-    xField: SF_LONG_X,
-    yField: SF_LONG_VALUE,
-    seriesField: SF_LONG_SERIES,
-    colorField: SF_LONG_SERIES,
-    shapeField: smooth ? 'smooth' : undefined,
-    legend: { color: { position: 'top' } },
-    axis,
-    scale: { color: { range } },
-    style: { lineWidth: SF_CHART_LINE_WIDTH, ...areaStyle },
-    theme,
-  }
+  return base
 }
 
 export function SfAreaChart({
@@ -104,7 +57,7 @@ export function SfAreaChart({
   return (
     <SfChart
       type="Area"
-      options={options}
+      options={options as never}
       height={height}
       loading={loading}
       error={error}

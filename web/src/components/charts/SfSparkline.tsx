@@ -1,13 +1,12 @@
 /**
- * SfSparkline 迷你趋势线（任务书 §38）
+ * SfSparkline 迷你趋势线（任务书 §38，ECharts 内核）
  *
  * 无轴/无网格/无图例/无 tooltip；仅限 KPI 卡内嵌使用。
  * 空数据返回空占位（高度保持，不画 0 也不放 SfEmpty——32px 高度容不下空态插图）。
  */
 import { useMemo } from 'react'
-import type { LineConfig } from '@ant-design/plots'
+import type { EChartsCoreOption } from 'echarts/core'
 import { SfChart } from './SfChart'
-import type { SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
   type SfChartColorKey,
@@ -29,21 +28,23 @@ const SPARKLINE_LINE_WIDTH = 1.5
 export function buildSparklineOptions(params: {
   data: number[]
   color: string
-  theme: SfChartTheme
-}): LineConfig {
-  const { data, color, theme } = params
+}): EChartsCoreOption {
+  const { data, color } = params
   return {
-    data: data.map((value, index) => ({ x: index, y: value })),
-    xField: 'x',
-    yField: 'y',
-    axis: false,
-    legend: false,
-    tooltip: false,
-    interaction: { tooltip: false },
-    padding: 0,
-    scale: { color: { range: [color] } },
-    style: { lineWidth: SPARKLINE_LINE_WIDTH, stroke: color },
-    theme,
+    grid: { left: 0, right: 0, top: 2, bottom: 2 },
+    xAxis: { type: 'category', show: false, data: data.map((_, i) => i) },
+    yAxis: { type: 'value', show: false },
+    tooltip: { show: false },
+    series: [
+      {
+        type: 'line',
+        data,
+        smooth: true,
+        showSymbol: false,
+        lineStyle: { width: SPARKLINE_LINE_WIDTH, color },
+        itemStyle: { color },
+      },
+    ],
   }
 }
 
@@ -56,7 +57,7 @@ export function SfSparkline({
   onRetry,
   className,
 }: SfSparklineProps) {
-  const { theme, palette } = useSfChartTheme()
+  const { palette } = useSfChartTheme()
   const values = useMemo(
     () => (Array.isArray(data) ? data.filter((v) => Number.isFinite(v)) : []),
     [data],
@@ -72,8 +73,8 @@ export function SfSparkline({
   )
 
   const options = useMemo(
-    () => buildSparklineOptions({ data: values, color: resolvedColor, theme }),
-    [values, resolvedColor, theme],
+    () => buildSparklineOptions({ data: values, color: resolvedColor }),
+    [values, resolvedColor],
   )
 
   // 空数据：保持高度占位（KPI 卡内嵌不放空态插图，也不画 0 线）

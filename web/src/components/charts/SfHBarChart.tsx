@@ -1,11 +1,11 @@
 /**
- * SfHBarChart 横向排行图（任务书 §35，plots Bar = interval + coordinate transpose，
- * 已实测 node_modules/@ant-design/plots/es/core/plots/bar/index.js）
+ * SfHBarChart 横向排行图（任务书 §35，ECharts 内核）
  *
  * 内置按值降序 + topN 截断；长类目名自动省略（§35）。
+ * echarts：yAxis 类目（反转让最大值在顶）、xAxis 数值——横向排行天然直白。
  */
 import { useMemo } from 'react'
-import type { BarConfig } from '@ant-design/plots'
+import type { EChartsCoreOption } from 'echarts/core'
 import { SfChart } from './SfChart'
 import { SF_CHART_BAR_RADIUS, type SfChartTheme } from './sfChartTheme'
 import {
@@ -43,7 +43,7 @@ export function buildHBarOptions(params: {
   color: SfChartColorKey | undefined
   palette: string[]
   theme: SfChartTheme
-}): BarConfig {
+}): EChartsCoreOption {
   const { data, categoryField, valueField, topN, color, palette, theme } = params
 
   const ranked = [...data]
@@ -54,25 +54,34 @@ export function buildHBarOptions(params: {
     ? palette[SF_CHART_COLOR_KEY_INDEX[color] % palette.length]
     : palette[0]
 
+  // echarts 类目轴自下而上：反转让最大值在顶部
+  const ascending = [...ranked].reverse()
+  const categories = ascending.map((row) => truncateLabel(row[categoryField]))
+  const values = ascending.map((row) => Number(row[valueField] ?? 0))
+
   return {
-    data: ranked,
-    // G2 标准：transpose 坐标下 xField=类目（渲染于左侧）、yField=数值（渲染于底部）。
-    // 此前 x=value/y=category 的写法导致数值轴立左、类目轴落底（轴义反转）；2026-10-05
-    // 曾据 5178 混乱现场判"换轴后条形消失"而回滚——该观察不可信，干净实例实测换轴正常。
-    xField: categoryField,
-    yField: valueField,
-    legend: false,
-    axis: {
-      x: {
-        grid: false,
-        title: false,
-        labelFormatter: (value: unknown) => truncateLabel(value),
-      },
-      y: { grid: true, title: false },
+    grid: { left: 8, right: 24, top: 12, bottom: 4, containLabel: true },
+    tooltip: { trigger: 'axis' },
+    xAxis: {
+      type: 'value',
+      splitLine: { lineStyle: { color: theme.splitLine } },
+      axisLabel: { color: theme.axisText, fontSize: 12 },
     },
-    scale: { color: { range: [resolvedColor] } },
-    style: { radius: SF_CHART_BAR_RADIUS, maxWidth: 28 },
-    theme,
+    yAxis: {
+      type: 'category',
+      data: categories,
+      axisLine: { show: false },
+      axisTick: { show: false },
+      axisLabel: { color: theme.axisText, fontSize: 12, width: 88, overflow: 'truncate' },
+    },
+    series: [
+      {
+        type: 'bar',
+        data: values,
+        barMaxWidth: 22,
+        itemStyle: { color: resolvedColor, borderRadius: [0, SF_CHART_BAR_RADIUS, SF_CHART_BAR_RADIUS, 0] },
+      },
+    ],
   }
 }
 

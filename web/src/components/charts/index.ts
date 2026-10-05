@@ -11,7 +11,6 @@ export { SfAreaChart, type SfAreaChartProps } from './SfAreaChart'
 export { SfBarChart, type SfBarChartProps } from './SfBarChart'
 export { SfHBarChart, type SfHBarChartProps } from './SfHBarChart'
 export { SfDonutChart, type SfDonutChartProps, type SfDonutDatum } from './SfDonutChart'
-export { SfGaugeChart, type SfGaugeChartProps, type SfGaugeThreshold } from './SfGaugeChart'
 export { SfSparkline, type SfSparklineProps } from './SfSparkline'
 export { SfChartCard, type SfChartCardProps } from './SfChartCard'
 export {
