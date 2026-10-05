@@ -204,3 +204,98 @@
 **做到哪（终局）**：全部交付并按 feat(server)/feat(web)/chore(dev)/docs 四提交落库。终局门禁全绿——`go build ./... && go vet ./... && go test ./...` 退出码 0（22 包 ok）、`cd web && npm run build`（tsc -b && vite build）退出码 0；独立复测 5/5 通过。过程未过项均已收敛：收口轮 npm run build 曾 9 报错（并行簇在途文件）终局归零；5173/5174 端口被外部进程占用为环境项（vite 落 5174 走 127.0.0.1 验证）。
 
 **遗留什么**：阶段 16 真机验收与阶段 21 性能优化（待环境，见 2026-10-04 收尾轮节）；main 领先 origin/main 未推送、CI Actions 首跑验证待 push；本地便携环境仅限开发库（trust 认证 + 固定开发密钥，严禁用于部署环境，dev-environment.md §4 有红线标注）；上轮同属联调工作的前端认证改动（stores/auth.ts is_super 归一、LoginPage 先落 token 再调 me 死循环修复、PcLayout 全局搜索/通知接线）已随本轮 feat(web) 提交收口。
+
+## 2026-10-05 构建收口：基建阶段共享改动落实（styles/docs）
+
+- **global.css `.sf-page` 页面进入动画**：opacity 0→1 + translateY(4px)→0，时长 `--sf-motion-normal`（180ms）+ `--sf-motion-ease`（frontend.md §25 允许「页面进入」；任务书 §56/§59）；`@media (prefers-reduced-motion: reduce)` 整段关闭兜底。fill-mode 用 backwards——动画结束回退计算值、不在元素常驻 transform，避免劫持 fixed/sticky 子孙包含块。
+- **docs/frontend.md 文档收口**：§2.1 `--sf-chart-*` 清单 11→13 枚（补 `-tooltip-text`/`-legend-text`）、Border 类目补 `--sf-border-width`（1px，主题无关；chart.css:33 已在消费）；§24 补记 App.tsx ConfigProvider `controlHeight: 32`（App.tsx:39 已实现）与状态色经 `color-mix(var(--sf-*))` 自动跟随的约定。
+- **阶段 4 图表 themeContract（两位并行图表工程师逐字遵守）**：① 主题信号唯一——`useThemeStore((s)=>s.mode)` 订阅驱动重渲（stores/theme.ts）；② 图表取值唯一——`getComputedStyle(document.documentElement).getPropertyValue('--sf-chart-*')`，13 枚 token Light/Dark 双块已就位（本轮 awk 断言 light=13 dark=13 集合相等）；③ 禁止读 `localStorage('sf.theme')`/matchMedia/`dataset.theme`/传 theme prop/写色值字面量——时序保证 theme.ts `setMode` 先 localStorage→applyToDocument→再 `set({mode})`，订阅者重渲时 DOM 属性与 CSS 变量必已就位。
+- **App.tsx ConfigProvider 无需改动的评估结论（已核实）**：antd 6.6.5 `es/config-provider/hooks/useTheme.js:27-32` mergedComponents 按组件 key 合并，PcLayout/SfTable 嵌套主题继承算法与暗色；后续 `--sf-warning`/`--sf-primary` 等 Token 调值时 SfStatusTag（SfStatusTag.tsx:44-45）与侧边栏选中态（PcLayout.tsx:48）经 color-mix 自动跟随，无需回调。
+- 验证：`cd web && npm run build` 退出码 0（门禁实测见下）。
+
+## 2026-10-05 商品二维码闭环（SFQR 协议）——全栈实施收尾完成（docs → backend → fe-foundation → fe-center → fe-integration 五阶段交付完毕，门禁全绿）
+
+**做什么**：为 SKU 建立协议化二维码身份并形成「生成 → 预览 → 批量打印 → 扫码识别 → 直达」闭环。协议定案 `SFQR|1|SKU|<sku_code>` 管道式 4 段（含黄金向量表、错误码、版本策略、barcodes 命名空间保留、纸张布局、data_ids 通道纪律），唯一契约 **docs/qr-code.md 已落盘（本轮 docs 阶段交付）**；printing/scanner/api/requirements/frontend/changelog 六文档增量已回写（见 changelog 同日「文档先行」条目）。**本节记录实施蓝图要点供中断恢复；协议/行为细节一律以 qr-code.md 为准，禁止重新设计。**
+
+**不做什么（已裁决，勿翻案）**：SKU 独立详情路由页（/skus/:id，详情快捷入口由二维码抽屉承载，待 SKU 详情页立项时复用组件）；type=BIN/BOX/PALLET 落地（解析显式 SFQR_TYPE_UNSUPPORTED，待各域立项）；打印历史日期范围筛选（SfSearchForm 无 daterange 控件，单独小任务）；物理份数 DOM 倍乘（份数沿用 PrintTask 语义）；模板新增字段预设（fields.go 冻结顺序与迁移边界）；api.md 打印域全量契约补账（单独文档轮）；BARCODE 二维码 PNG 服务端预生成内容对齐 SFQR（无消费者，不改）；print_task_rows.data_id 存量回填（旧任务 fail-closed 不可自动重打，设计如此非缺陷）；BIN_LABEL 等其他标签类 SFQR 化；存量 `SFQR|` 前缀条码清洗（仅新注册被拒）；Scan/Pad 端扫码业务流程与扫码组件族（F15–F16 待环境/待立项）；引入 vitest（qrPayload.ts 约 30 行纯函数，tsc strict + 文档向量对照 + 扫码往返实测兜底，避免无必要依赖）。
+
+**阶段归属（✅ 全部完成；各阶段开工前 git status 比对，用户未提交改动零触碰）**：
+
+| 阶段 | 范围 | 关键产出 | 状态 |
+|---|---|---|---|
+| ① docs | qr-code.md 新建 + printing/scanner/api/requirements/frontend/changelog/current 增量 | 协议冻结、蓝图实施依据 | ✅ |
+| ② backend | internal/devices sfqr.go 唯一解析点 / 三错误码 / ports.go SfqrSkuReader + WithSfqrSkus / handler.go nil panic fail-fast / service_device.go sfqrSkus 接线 / routes_test FailFast 同步、service_scan.go 管线第 0 段（失败不落回）、masterdata FindBySkuCode / buildBarcodes 拒 `SFQR|` / printing_content 停用拒绝 + sku_code 恒产出、printing PRINT_SKU_DISABLED 409 / PrintTaskRow.data_id / ListTasks TemplateID、迁移 000019 成对、router.go 装配 | 后端全链路 + sfqr_test.go 黄金向量表驱动测试（14+3 边界） | ✅ |
+| ③ fe-foundation | web/src/utils/qrPayload.ts（构造唯一点 + parseSfqrPayload/isSfqrPayload 纯格式辅助）、QrCodeView margin 0→4 + variant='print'、PrintContentRenderer 标签 mm 布局与 PrintLabelGrid 网格组件、labelSheet.ts 网格分片（与 qr-code.md §7.3 同文）、SfQrPreviewDrawer/SfQrPrintModal、PrintPreviewPage A4/A5 分片渲染 | 协议构造与标签渲染 | ✅ |
+| ④ fe-center | QrCodeCenterPage /qr-codes + 路由注册 + config/menu.tsx「商品二维码」（sku:view）+ ScanDirectCard type==='sku' 直达 /qr-codes?code= | 闭环页面与扫码直达入口 | ✅ |
+| ⑤ fe-integration | api/printing.ts 类型增量（template_id/data_id）、SkuListPage「二维码」入口（操作列 [编辑][二维码][更多▾]）、PrintingCenterPage 历史模板筛选 + 重打 fail-closed（任一行缺 data_id 即中止不发请求，全部有 data_id 方 all-or-nothing 创建新任务） | 集成收口 | ✅ |
+
+**门禁结果（实施收尾脚本两轮，全绿）**：web-build=PASS ｜ web-lint=PASS ｜ go-build=PASS ｜ go-vet=PASS ｜ go-test=PASS。文档收尾会话抽验复跑：`go test ./internal/devices -run TestParseSfqr -count=1` 黄金向量 14 条 + 3 边界全 PASS、`go test ./internal/masterdata ./internal/printing ./internal/router -count=1` 三包 ok（本会话实测）。零新增端点（swag 269 路由不变）、零新增权限码、零新增 npm 依赖。逐项细节见 docs/changelog.md 同日「商品二维码闭环（SFQR 协议）全栈实施收尾」条目。
+
+**待环境验收项（非本轮可完成，如实挂账）**：000019 up/down 真库验证需 SF_TEST_PG_* 集成环境（默认 skip）；40×30/60×40 实纸扫码往返、A4 网格分页不截断、中文字体渲染（testing.md §6/§9 口径，阶段 16 真机项同口径）；旧任务重打 fail-closed 网络面板核验待真环境。本轮实施中的既有缺陷修复与行为变化点（gorm SKUID→sk_uid 列映射修复使主条码装配回归、停用 SKU 打印 409、QrCodeView margin 0→4）均已在 changelog 同日条目注明。
+
+## 2026-10-05 六域图表轮收口：路由/菜单/状态注册表落实 + 图表挂账立项
+
+**落实（六域并行图表改造的共享文件改动，收口位逐条核验后落盘）**：
+- **router/index.tsx**：三域分析页接入——lazy 登记 WarehouseAnalyticsPage/OutboundAnalyticsPage/InboundAnalyticsPage（目标文件实存：views/warehouse|outbound|inbound/ *AnalyticsPage.tsx）+ 静态路由 `warehouses/analytics`（warehouses 后，无 warehouses/:id 动态段、静态嵌套无冲突）、`inbound/analytics`（inbound/new 与 inbound/:id 之间）、`outbound/analytics`（outbound 与 outbound/:id 之间，静态优先压过动态段）+ IMPLEMENTED_PATHS 增 `/inbound/analytics`、`/outbound/analytics`、`/warehouses/analytics` 三条（漏加则 placeholderRoutes 按菜单路径生成同路径占位路由永久遮蔽真页）。
+- **config/menu.tsx**：① 库存分析菜单码 `inventory:analytics:view`→`inventory:stock:view`（原码资源段 analytics 后端冻结码零命中——`grep -rn "analytics:view|inventory:analytics" internal/ db/` 零输出，matchBackendPermission 按末两段永不命中→非超管恒隐身 fail-closed；数据端点挂 inventory:inventory:list，与实时库存/库存预警同码同源，注释随码入册）；② 仓储中心组新增「入库分析」「出库分析」，菜单码 `reports:report:view`（数据端点 inbound-stats/outbound-stats 挂 reports:report:read；末两段 report:view 命中冻结码 reports:report:list/read——permissions.go:343-344，全库 :report: 仅此两码——可见 ⟺ 数据可达；域码会 403、analytics 假码恒隐身）；③ 仓库中心组新增「仓库分析」，码 `inventory:stock:view`（端点 warehouse-stock 挂 inventory:inventory:list，routes.go:60）。
+- **types/status.ts 补键（收口裁决：统一销售域多数派口径）**：`partial_shipped{部分发货,processing}`、`shipped_all{全部发货,success}`、`in_qc{质检中,processing}`（值域出处 internal/sales/models.go:265-276 出库单十态、internal/returns/models.go:27-36 退货八态，本会话实读核实）。销售域 salesStatusMeta 与采购退货 RETURN_STATUS_TAG 既有兜底与新键逐键同值→行为零变化；**出库域 OutboundPage 随注册表切换：PARTIAL_SHIPPED warning→processing、SHIPPED_ALL『已发货』→『全部发货』**（多数派裁决依据：采购 PARTIAL_RECEIVED、销售订单、退货映射均为 processing）。收敛随件：OutboundPage 本地兜底表两键对齐注册表防漂移、状态筛选文案『已发货』→『全部发货』与标签一致；OutboundPage/salesStatusMeta/PurchaseReturnListPage 三处「未注册」过时注释更新。
+- 销售域 6 页注册表优先改造由该域自行交付（其报告：node 脚本校验 22 共享键 label/semantic 全 SAME、4 未注册键走兜底 PARITY_OK——域内自验，收口位未复跑该脚本；收口位验证以补键前后值一致性实读 + 全局构建为准）。销售域确认零路由/菜单改动：/outbound/:no 详情路由已注册（router/index.tsx OutboundDetailPage lazy + 动态段）、/sales/outbounds 菜单归属销售组未动，本轮核验属实。
+
+**【图表挂账·库存域】两聚合端点缺（2026-10-05 库存域图表轮提出，立项后销项）**：
+① SKU 库存 TOP10 排序聚合参数/专用端点；② 库存周转时序端点（现有 GET /api/reports/inventory-turnover 为快照行集，非时序）。未来立项口径参照 /inventory/analytics 先例（internal/reports/routes.go——reports 实现 + inventory 前缀挂载 + inventory:inventory:list 域列表读权限）。
+
+**【图表挂账·采购域】三聚合端点全缺（2026-10-05 采购域图表轮核验：internal/purchase/purchase.go:40-72 全部为单据操作型端点，无聚合；internal/reports/routes.go 全部 15 端点中无采购口径——inbound-stats 为 INBOUND 流水口径非采购单口径不可挪用冒充，无按供应商分组端点，dashboard 五端点无采购状态维度）**：
+① 采购金额按日聚合 ② 供应商采购排行聚合 ③ 采购订单状态占比聚合。未建 web/src/api/analytics-purchase.ts 空壳（§54）、未建分析页（§64）。未来立项口径：按 /inventory/analytics 先例（internal/reports/routes.go——reports 实现+数据域前缀挂载+域列表读权限）建 /api/purchases/analytics* 挂 purchase:purchase:list 同资源段；前端同构参照 web/src/views/inventory/AnalyticsPage.tsx 构建（蓝图原文「InboundAnalyticsPage」在采购域核验时点不存在，六域图表轮收口后 views/inbound/InboundAnalyticsPage.tsx 已落盘，同构基准仍以 inventory/AnalyticsPage.tsx 为准）；菜单挂采购中心分组（menu.tsx /purchase-center children，建议 `{ path: '/purchases/analytics', label: '采购分析', permission: 'purchase:view' }`，与组内既有条目权限码同规则）。
+
+**门禁证据（收口位本会话实测）**：① node 程序化路由一致性检查 17 断言——PC 静态子路由无重复、三新路径菜单/IMPLEMENTED_PATHS/静态路由三处在位（9 断言）、inbound|outbound analytics 静态先于 :id 动态段（2）、placeholderRoutes 展开殿后（1）、已实现菜单路径均有静态真路由（1）、IMPLEMENTED_PATHS 均有静态路由（1）=14 PASS；lazy 声明与目标文件存在 6 断言因检查脚本拼串缺陷两次误报 FAIL，改以 `grep -n "AnalyticsPage = lazy"` 实锤（router/index.tsx:37/50/87 三行原文）+ ls 文件存在补证，脚本缺陷非代码缺陷；② `cd web && npm run build`（tsc -b && vite build）npm 自身退出码 0（built in 39.55s）。后端零改动，Go 门禁未涉及。改动未提交（无提交指令，留提交阶段）。
+
+## 2026-10-05 P2 轮收口：零新增共享改动核实 + antd 动效接入 Token/减少动效开关（App.tsx）
+
+- **P2 五域零新增共享改动（核实成立，收口位零动作）**：MonitorPage 复用既有 /system/monitor（menu.tsx:197 system:monitor:view + router/index.tsx:236 IMPLEMENTED_PATHS、:638 静态路由）；ReportFlowStats 为 ReportsPage 页内子视图（ReportsPage.tsx:21,75,77 经 ?report=<key> 挂载、:122 视图模式），未新增路由/菜单/资源段码；sharedChanges 三项（router/index.tsx、IMPLEMENTED_PATHS、config/menu.tsx 含库存分析菜单码修正）维持六域轮收口原状。
+- **SfChart reduced-motion/Resize 完成态核实（与 P2 报告一致，零动作）**：useSfChartTheme.ts matchMedia('(prefers-reduced-motion: reduce)') 读取与 reducedMotion 出参、SfChart.tsx finalOptions reducedMotion→animate:false、ResizeObserver+forceFit 兜底、chart.css .sf-chart width:100% 全部实读吻合。
+- **可选增强采纳（收口裁定，App.tsx 落实）**：antd 组件内部动效此前不经 --sf-motion-* token、reduced-motion 归零只覆盖 token 驱动层（global.css:85-98 :root 三档归零 + .sf-page；dashboard.css:20-23 KPI 卡 hover）——本收口在 ConfigProvider 映射层补齐：① `token.motionDurationFast/Mid/Slow = 0.12/0.18/0.24s` 显式对齐 --sf-motion-fast/-normal/-slow（antd 默认由 motionUnit 0.1s 派生 0.1/0.2/0.3s 与 Token 不一致；genCommonMapToken.js:11-13 派生关系、Button/Modal style 消费 motionDurationMid 均实读核实）；② `motion: !reducedMotion`（seed.motion 官方开关，seeds.d.ts:229-234「为 false 时则关闭动画」；alias.js:34-42 motion:false → 三档时长覆写 0s 且优先于显式时长）——Modal/Drawer/Menu/Tabs/Splitter 等组件内部动效在系统减少动效偏好下全站归零。reducedMotion 挂载时 matchMedia 读一次不做监听（OS 偏好极少会话中途切换，中途变更刷新生效；图表侧 useSfChartTheme 独立实时读取不受影响）；已知边界：组件内硬编码时长的关键帧（如 Spin/Skeleton 自转/闪烁）不经三档 token，不在本次覆盖面。useMemo deps 增 reducedMotion。
+- 门禁：`npx eslint src/App.tsx` EXIT=0；`cd web && npm run build`（tsc -b && vite build）npm 自身退出码 0（built in 36.20s，本会话实测）。改动未提交（留提交阶段）。
+- 影响范围：web/src/App.tsx、docs/tasks/current.md、docs/changelog.md。
+
+## 2026-10-05 终局门禁修复：Math.random 红线归零 + SFQR 后端独立成 commit 落库
+
+- **Math.random 检查（views/components 真实数据红线）**：终局报告三处命中为陈旧快照——修复时点前域内已自行改毕（DashboardPage.tsx:73/InboundAnalyticsPage.tsx:50 注释改「禁止随机数伪造」措辞、PadReceivePage.tsx newIdempotencyKey 幂等键改 crypto.randomUUID→crypto.getRandomValues→时间戳+会话内计数器三级回退）。收口位复跑门禁同款检查：`grep -rn "Math.random" web/src/views web/src/components` 零命中、全 `web/src` 亦零命中。
+- **后端未提交改动（26 文件：23 M + 6 未跟踪）**：逐项核实纯 SFQR 交付——diff 内 SFQR/data_id/PRINT_SKU_DISABLED/WithSfqrSkus 标记 108 处、UI 轮标记（dashboard/theme/sf-page/analytics）0 处，零回退；提交前实测后端门禁三连 `go build ./... && go vet ./... && go test ./...` 全绿（24 包 ok、零 FAIL）。按既有裁决独立成 commit：**50b56ad** `feat(server): SFQR 二维码闭环后端全链路——协议解析/打印停用拒绝/000019 data_id/路由装配`（29 文件，+765/−47；git-commit-standard 规范、仅暂存 internal/ + db/migrations/，docs/web 未混入）。提交后 `git status` 后端全净（internal/ db/ 零残留）。web/ 与 docs/ 在途改动属 UI 升级交付，未在本 ask 范围、保持未提交留待其归属阶段。
+
+## 2026-10-05 进行中：全局表格设计系统统一（docs/plans/2026-10-05-table-design-system.md）
+
+- 任务：全站表格 UI/UX 系统级统一（完善 SfTable 体系，不换栈不改业务）。
+- 状态：T1 Token 层 → T2 SfTable（nested variant + 首载骨架）→ T3 SfSearchForm 筛选提示 → T4 cells.tsx + 时间格式统一 → T5 十个裸 Table 迁 nested → T6 操作列收敛（并行）→ T7 lint/build/浏览器四宽度 → T8 文档与报告。
+- 注意：web/ 与 docs/ 在途未提交改动（二维码前端轮 + 主题轮）只增量编辑、禁止回退；后端 SFQR 已以 50b56ad 落库与本任务无关。
+- 收口位复核（T5 迁移期间）：typecheck 门禁曾瞬态红——OutboundDetailPage（8 错：SfTable 未导入 + Table/SfEmpty 残留）→ ImportWizardPage → FileCenterPage/RoleListPage/WarehouseListPage/BinListPage 逐文件在途，错误集随迁移单调推进；收口位未触碰任何在途文件（两轮重试循环跟踪），随迁移收敛终局双绿：`npm run typecheck`（tsc -b）退出码 0、`npm run build` 退出码 0（built in 52.59s）。OutboundDetailPage 8 错由迁移位自行接线修复（收口首探后 45s 内消失），非收口位改动。
+
+## 2026-10-05 设计规范检查员五项修复：logo Token 化收敛 + 通知/视图标签去 antd 预设色 + 页面背景回归任务书 §6
+
+- **①② logo 三拷贝收敛（SfLogo 新组件，components/common/SfLogo.tsx）**：LoginPage/PcLayout/ModulePlaceholder 三份同款 SVG 收敛为一份实现（frontend.md §26.1），primary 变体底 `var(--sf-primary)` + 描边 **新增 token `--sf-on-primary: #ffffff`**（tokens.css Light/Dark 两块同声明，AGENTS.md 规则 3 硬编码 stroke="#fff" 清零）；muted 变体保留 ModulePlaceholder 原有 `--sf-border`/`--sf-text-muted` 占位写法。
+- **③ NotificationDrawer 通知类型色**：antd 预设色表（blue/orange/gold/red/cyan/default）改为 `NOTIFICATION_TYPE_SEMANTIC` 语义映射（APPROVAL/TASK=processing、STOCK_ALERT/EXPIRY_ALERT=warning、EXCEPTION=danger、SYSTEM=neutral、未知=neutral），裸 `<Tag>` 改经 **SfStatusTag**（label 直传 item.title，语义色经 --sf-* Token color-mix 派生，AGENTS.md 规则 5）。
+- **④ DashboardPage 视图徽标**：`geekblue`/`green` 预设色改 Token 派生——`viewAccent`（管理层=`var(--sf-primary)`/仓库人员=`var(--sf-success)`）+ SfStatusTag 同款 color-mix 12%/24% 公式；非业务状态不经 SfStatusTag 语义集（其无 primary 语义），色值仍全走 Token。
+- **⑤ 页面背景回归任务书 §6**：`--sf-bg` 由 UI 升级轮引入的 `#ffffff` 恢复 **`#f6f7f9`**（页面/Surface 两级分层），App.tsx `colorBgLayout` 映射副本同 commit 同步；Dark 侧 #101418 不动。pad.css 等引用 `var(--sf-bg)` 自动跟随。
+- 门禁（收口位实测）：`npx eslint`（7 个触及文件）EXIT=0；`npm run build` npm 自身退出码 **0**（built in 41.52s）；复扫 `stroke="#` 全 src 零命中、antd 预设色词零命中。过程备注：全量构建曾三次被并行 masterdata 域在途文件阻塞（ProductListPage→SupplierListPage 的 SfConfirm 接线），坚持不触碰他人在途文件、以「错误文件清单单调收敛」+ 行号两轮不变后再变为其完成信号，终局随其接线完成转绿——设计修复文件本身从未出现在错误清单。改动未提交（留提交阶段）。
+- 影响范围：web/src/components/common/SfLogo.tsx（新增）、web/src/views/login/LoginPage.tsx、web/src/layouts/PcLayout.tsx、web/src/views/placeholder/ModulePlaceholder.tsx、web/src/layouts/NotificationDrawer.tsx、web/src/views/dashboard/DashboardPage.tsx、web/src/styles/tokens.css、web/src/App.tsx、docs/tasks/current.md、docs/changelog.md。
+
+## 2026-10-05 已完成：全局表格设计系统统一（changelog 同日条目）
+
+- T1–T8 全部落地：表格 Token（--sf-table-*，Light/Dark）、SfTable nested variant + 首载骨架、SfSearchForm 筛选状态提示、统一 Cell（NumberCell/CodeCell/ProductCell/DateCell）、formatDateTime 分钟精度、10 文件 13 表裸 antd Table 清零、操作列收敛（文件中心/角色/部门/仓库/库位 + masterdata 4 页；删除一律入「更多」声明式 Modal 确认）。
+- 门禁：typecheck/lint(0 错误)/build 全绿；浏览器实测 Light 1680 / Dark / 1024×768（商品管理/文件中心/仓库管理）。
+- 遗留（如实挂账）：① 库存/销售/采购/系统等其余列表页的 Cell 级换装（CodeCell/DateCell 替换手写 render）未逐页做完——契约已由组件层统一兜底，逐页精修留下一轮；② 列设置拖拽排序维持既有裁定不做（显示/隐藏已覆盖任务书 §27）；③ 实机 Pad 触控验收待环境。
+- 并行会话注意：同期另一会话完成「设计规范检查员五项」（SfLogo/通知色/背景色回归 #F6F7F9），两轮改动在同工作区叠加，提交时按归属拆分。
+
+## 2026-10-05 独立设计复审两项处置：§18 对齐兜底进 SfTable + 采购/销售分析范围差如实挂账
+
+- **② §18 对齐规则未落地（已修复，组件层中央兜底）**：复审实证 29 文件操作列（title「操作」）±4 行窗口 align 0 命中、状态列普遍左对齐，而数字列 align:'right' 已 142 处——契约缺口在「SfTable 注释自称由页面声明」与页面实际行为之间。修复：SfTable.tsx 新增 `applyAlignDefaults`（visibleColumns 链路内生效）——**未显式声明 align 时**按列语义补默认：操作列（title「操作」或 dataIndex 'operation'）→ right；状态列（title 以「状态」结尾或 dataIndex 以 status 结尾，如 status/occupancy_status/qc_status）→ center；**页面显式 align 永不覆盖**。T5 迁移已把裸 Table 清零（views 全域 `<Table` 计数 0），故中央兜底覆盖全部列表页，无需 29 文件逐页改。抽查命中实证：SkuListPage.tsx:384-387 操作列、ProductListPage.tsx:330-334 状态列均无显式 align、均落兜底。浏览器渲染实测未执行（无浏览器自动化工具链，与既往口径一致）。
+- **① 采购分析/销售分析页面缺失（范围差，如实上报挂账，不建假页）**：复核属实——`find web/src/views -name '*Analytics*'` 仅 4 页（inbound/inventory/outbound/warehouse），menu.tsx 采购/销售中心组无 analytics 项，router 仅 4 条分析路由；frontend.md §27 交付清单亦不含二者。**不做假页**（采购三聚合端点已挂账缺位、销售口径端点经 grep 复核 internal/reports/routes.go 零命中——建页即整页错误态或假数据，违 requirements.md §10）。挂账口径：待任务书 §42/§43 立项后按 /inventory/analytics 先例（reports 实现 + 数据域前缀挂载 + 域列表读权限）补端点，前端同构 AnalyticsPage、菜单挂采购/销售中心组（权限码立项时按入库/出库分析先例裁决）；销售域需先补后端销售口径聚合端点（sales/orders/returns 维度）。
+- 门禁：`npx eslint src/components/table/SfTable.tsx` EXIT=0；`npm run typecheck`（tsc -b）退出码 0；`npm run build` 退出码 0（built in 45.39s）。改动未提交（留提交阶段）。
+- 影响范围：web/src/components/table/SfTable.tsx、docs/tasks/current.md、docs/changelog.md。
+
+## 2026-10-05 终局提交轮：全站 UI/UX/ECharts 升级交付落库（feat(web)×4 + docs×1，门禁全绿）
+
+- **范围**：同工作区叠加的多股前端交付按归属拆分落库——① Token/主题基座（tokens.css 扩容含 --sf-chart-* 13 枚/--sf-motion-*/--sf-on-primary/--sf-table-*、主色 #2563eb、背景回归 #f6f7f9、index.html 防 FOUC 首帧预置、App.tsx ConfigProvider 全量映射 + motion:!reducedMotion）；② SfChart 家族基建（components/charts/ 13 文件 + chart.css，themeContract 三红线）；③ Dashboard 范式重做与六域分析图（MetricStrip→KpiCards/Movements、warehouse/inbound/outbound 三新分析页、ReportFlowStats/MonitorPage 图表化、菜单码归一、status.ts 补键）；④ 全局表格设计系统（SfTable nested/骨架/applyAlignDefaults、统一 Cell、formatDateTime 分钟精度、23 页换装、操作列收敛）；⑤ SFQR 前端闭环（配套 50b56ad 后端：qrPayload/标签网格打印/二维码中心/扫码直达/重打 fail-closed + qr-code.md 等契约文档）；⑥ 设计规范五项（SfLogo 收敛/通知与视图标签去预设色/背景回归）与 P2 收口（App.tsx 动效 Token、PadReceivePage 幂等键 crypto 化红线修复）。
+- **提交拆分（5 枚，git-commit-standard 规范；共享文件 router/menu/SkuListPage/frontend.md 为多轮叠加改动，随主导意图落库并在提交体注明）**：feat(web) 设计系统基座（Token/主题/SfChart 家族/统一表格组件）→ feat(web) SFQR 前端闭环（+ 契约文档四件）→ feat(web) Dashboard 范式与六域分析图（router/menu/status 随此提交，含 /qr-codes 登记）→ feat(web) 表格设计系统全站落地 → docs(changelog+tasks+frontend) 本轮终局记录。后端 internal/db/cmd 零未提交改动（SFQR 后端已以 50b56ad 独立落库），web/ 与 docs/ 之外无触及。
+- **门禁（交付提交工程师本会话实测，工作区终态含并行会话收尾的 SfInventorySummary/StockListPage）**：后端 `go build ./... && go vet ./... && go vet -tags integration ./... && go test -count=1 ./...` 退出码 0（24 包 ok 零 FAIL）；前端 `npm run lint` 0 错误（1 条 PadReceivePage.tsx:349 exhaustive-deps 存量警告）、`npm run build`（tsc -b && vite build）退出码 0（built in 37.92s）；复扫 `grep -rn "Math.random" web/src` 零命中。终局门禁全绿。
+- **真实空态清单（随 changelog 同日终局条目入册）**：库存分析 TOP10 与周转趋势、仓库分析作业量、入/出库分析待端点位、出库分析完成率与商品排行、ReportFlowStats 超限降级、MonitorPage 队列未注入、Dashboard 预警空态、SfChart 内核空数据统一 SfEmpty（Sparkline 等高占位）——零假数据零随机数。
+- **遗留（非本轮可完成，维持既有挂账）**：采购/销售分析页与库存 TOP10/周转时序、采购三聚合端点（见「六域图表轮收口」挂账节）；其余列表页 Cell 级换装逐页精修、列设置拖拽维持不做、实机 Pad 触控验收待环境（见表格轮遗留）；浏览器渲染实测本轮未新增自动化截图（沿用既有记录点位）；main 领先 origin/main 未推送（本 ask 明确不推送）。

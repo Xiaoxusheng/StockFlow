@@ -57,8 +57,8 @@ AI 风格 Dashboard、大量渐变、玻璃拟态、大面积彩色卡片
 
 ### 1.5 全局格式规范
 
-- 时间：`YYYY-MM-DD HH:mm:ss`；金额：`¥ 1,234.56`；数量：千分位。
-- 封装统一格式化函数，禁止各页面自己拼格式。
+- 时间：`YYYY-MM-DD HH:mm`（分钟精度，全站统一）；金额：`¥ 1,234.56`；数量：千分位（库存数量最多 4 位小数不补零）。
+- 封装统一格式化函数（web/src/utils/format.ts），禁止各页面自己拼格式。
 
 ### 1.6 开工前检查（强制）
 
@@ -78,22 +78,31 @@ AI 风格 Dashboard、大量渐变、玻璃拟态、大面积彩色卡片
 
 ### 2.1 Token 清单
 
-先建立统一 Design Token（业务层 `--sf-*` 变量，通过 ConfigProvider theme 与 antd Token 映射；禁止页面绕过 Token 直接写死样式值）：
+统一 Design Token（业务层 `--sf-*` 变量，唯一定义于 `web/src/styles/tokens.css`；通过 ConfigProvider theme 与 antd Token 映射（`App.tsx`，映射改动必须与 tokens.css 同 commit 同步）；禁止页面绕过 Token 直接写死样式值）：
 
 ```text
 --sf-bg                页面背景
 --sf-surface           卡片/面板表面
 --sf-surface-elevated  浮层表面
+--sf-surface-hover     hover 表面档（表格行 / 侧边栏菜单 hover）
+--sf-border-width      边框宽度（1px，主题无关，Light/Dark 块同声明）
 --sf-border            边框
 --sf-border-subtle     弱边框
 --sf-text              主文字
 --sf-text-secondary    次要文字
---sf-text-muted        弱文字
+--sf-text-muted        弱文字（即文字第三档 tertiary）
+--sf-text-disabled     禁用文字
 --sf-primary           主色
---sf-success / --sf-warning / --sf-danger   状态色
---sf-radius-sm / -md / -lg   圆角
---sf-shadow-sm / -md         阴影
---sf-space-1 ~ --sf-space-6  间距
+--sf-primary-hover / --sf-primary-active    主色交互态
+--sf-success / --sf-warning / --sf-danger / --sf-info   状态色
+--sf-font-family       字体栈（Inter + 系统中文字体回退，不引外部字体文件）
+--sf-font-size-caption / -secondary / -body / -section-title / -page-title / -kpi   字号层级（12/13/14/16/20/26px）
+--sf-radius-sm / -md / -lg   圆角（6 / 8 / 10px；Card=8、Modal=10）
+--sf-shadow-sm / -md         阴影（Light 克制轻阴影；Dark 减淡，以边框+分层替代）
+--sf-space-1 ~ --sf-space-7  间距（4/8/12/16/20/24/32px）
+--sf-motion-fast / -normal / -slow / -ease   动效（120/180/240ms + cubic-bezier(0.2, 0, 0, 1)）
+--sf-chart-primary / -secondary / -success / -warning / -danger / -info / -muted / -axis / -grid / -tooltip-bg / -tooltip-border / -tooltip-text / -legend-text   图表配色（SfChart 主题唯一取值来源，Light/Dark 各一套，共 13 枚同名同集合）
+--sf-header-height / --sf-sider-width / --sf-sider-collapsed-width   布局尺寸
 ```
 
 统一：圆角、边框、阴影、字体、间距、状态色、按钮高度、表格密度、输入框高度。**禁止每个页面自己写一套。**
@@ -175,7 +184,7 @@ Dashboard
 盘点中心
 
 基础资料
-├── 商品 ├── SKU ├── 分类 ├── 单位 ├── 供应商 └── 客户
+├── 商品 ├── SKU ├── 商品二维码 ├── 分类 ├── 单位 ├── 供应商 └── 客户
 
 报表中心
 
@@ -223,6 +232,11 @@ Dashboard
 
 **不要让每个页面自行造表格。**
 
+`SfTable` 两种形态（variant）：
+
+- `page`（默认）：独立列表页，含工具栏/三档密度（默认紧凑）/列显示隐藏/全屏/刷新/统一分页（`共 x 条` + 条/页 + 快跳）。
+- `nested`：详情页/抽屉内嵌表——无工具栏无分页（除非显式传 pagination），仍统一密度、空态、错误态与首载骨架（loading 且无数据时以骨架条占位保持表头结构；刷新走 Spin 覆盖层）。
+
 ### 6.2 表格视觉
 
 ```text
@@ -230,6 +244,11 @@ Dashboard
 ```
 
 库存、数量、金额、重量、体积等数字类字段使用统一数字格式（§1.5），文字不要全部靠左堆在一起。默认使用紧凑/中等密度，符合仓库高信息量场景。
+
+- 主题映射（App.tsx Table 组件 token，值源 tokens.css `--sf-table-*`）：表头文字 `--sf-table-header-text`（比正文弱一档）、hover 行 `--sf-surface-hover`、选中行=主题色低透明（alpha 0.04~0.08，禁止整行深蓝）。
+- 统一单元格（web/src/components/table/cells.tsx）：`NumberCell`（数字+tabular-nums，配合列 align:'right'）、`CodeCell`（编码 ellipsis+Tooltip+hover 显复制，Toast「已复制 xx」）、`ProductCell`（主名 500 字重+弱化编码双行）、`DateCell`（统一时间次要色）。
+- 操作列形态：高频动作 ≤2 个 link 按钮 + 「更多 ▾」Dropdown；删除永远在更多内且 danger；整列可见按钮（含更多）≤3 个；fixed:'right'（有横向滚动时）+ nowrap。参照 SkuListPage buildRowMenu 先例。
+- 筛选状态提示：SfSearchForm 提交后显示「已筛选 N 项 · 清除全部」（弱化行，重置归零）。
 
 ### 6.3 列表工具栏
 
@@ -413,6 +432,34 @@ B仓
 **模板页面**：模板名称、业务类型（SKU 标签/库位标签/箱码标签/托盘标签/入库单/出库单/拣货单/盘点单/发货单）、纸张、状态、修改时间。
 
 **打印预览**：必须有独立 Preview，支持缩放、上一页/下一页、打印、下载 PDF。**禁止**点击打印直接打印当前网页。
+
+**打印组件清单（SFQR 闭环新增，2026-10-05）**：
+
+```text
+utils/qrPayload.ts           SFQR 全站唯一前端构造点（buildSfqrSku / tryBuildSfqrSku；
+                             另导出 parseSfqrPayload / isSfqrPayload 纯格式辅助——预览核对
+                             展示段含义与前缀探测，非业务解析。实现逐字对照 docs/qr-code.md
+                             黄金向量表；前端不做业务解析，扫码识别唯一入口 =
+                             POST /api/scanner/resolve）
+SfQrPreviewDrawer            二维码详情抽屉（SKU 列表/二维码中心共用「详情快捷入口」）
+SfQrPrintModal               标签打印配置弹窗（单打/批打共用）
+```
+
+**QR 内容口径**：模板 SKU_LABEL 且 qrcode_enabled 时标签 QR = SFQR 载荷（`SFQR|1|SKU|<sku_code>`，由 values.sku_code 构造）；旧任务快照无 sku_code 值时维持主条码原文（扫码走条码匹配器，行为不变）。协议格式、黄金向量、纸张布局唯一依据见 [qr-code.md](qr-code.md)；打印规则见 printing.md。
+
+### 13.1 二维码中心（/qr-codes，F12 扩展，基础资料组菜单）
+
+- 页面骨架：SfPageHeader + SfSearchForm（keyword / enabled）+ SfTable；数据源复用 SKU 列表接口（列表已批量装配条码），数据缺失走统一 Loading/Empty/Error，**不造假数据**。
+- 列定义：SKU 编码、商品名、主条码、状态（SfStatusTag）、二维码预览（QrCodeView 48px，值 = SFQR 载荷）、操作（详情抽屉 + 打印标签）。
+- 行选择批量打印：rowSelection 经 SfTable 透传 + 批量栏（已选 N · 不可打印 K · 批量打印）。
+- 详情抽屉（SfQrPreviewDrawer）：QrCodeView 预览（约 180px）+ 载荷明文 + 复制 + SKU 编码/商品名/主条码/状态；「打印标签」按钮经 canAccess('printing:task:create') fail-closed，触发 SfQrPrintModal。
+- 支持 URL `?code=` 直达自动开抽屉（承接扫码识别后跳转）；Pad 触控目标 ≥44px。
+
+### 13.2 标签打印配置弹窗与历史重打（F12 扩展）
+
+- SfQrPrintModal：模板下拉（SKU_LABEL + 启用，空态如实引导去打印中心建模板）；不可打印清单 Alert 逐条「{code}：商品已停用」+「仅打印可用」降级按钮；份数 1~100；总张数 = 可用数 × 份数加粗明示；可打印 >500 禁用（后端上限）；提交 loading 防重复；成功跳转打印预览页。data_ids 恒传 SKU 数字 ID 十进制文本（qr-code.md §8 通道纪律）。
+- 打印历史「重打」（SKU_LABEL 行、有权限时）：重打 = 新任务不碰历史；重打前校验任务行快照——任一行缺 data_id 即 fail-closed 中止并如实提示「该任务创建于身份快照能力之前，无法自动重打，请到商品二维码中心按 SKU 重选打印」，不发创建请求；全部行有 data_id 方可创建新任务（all-or-nothing，禁止部分行静默重打）。
+- 预览页 A4/A5 网格分片渲染（每片一张纸、分页不截断标签），热敏纸一码一页；头部明示总张数（qr-code.md §7.3）。
 
 业务规则见 printing.md。
 
@@ -701,6 +748,8 @@ SfInventorySummary / SfInventoryTable   库存汇总/表格
 ## 24. 视觉状态规范
 
 状态颜色全局统一：正常、成功、处理中、待处理、警告、危险、禁用、异常。**不要每个页面自己决定颜色**（通过 SfStatusTag + Token 状态色）。
+
+控件高度统一走 ConfigProvider `token.controlHeight: 32` 下限（App.tsx 映射，任务书 §24 Form 控件 32~36px）；状态色取值仅维护于 tokens.css 的 `--sf-*`，SfStatusTag 与侧边栏选中态经 `color-mix(var(--sf-*))` 派生、改 Token 值自动跟随，组件无需回调。
 
 ---
 
