@@ -2,6 +2,7 @@ import { useState } from 'react'
 import {
   Button,
   Card,
+  Dropdown,
   Flex,
   Form,
   Image,
@@ -12,7 +13,13 @@ import {
   Typography,
   message,
 } from 'antd'
-import { DownloadOutlined, EyeOutlined, FileOutlined, UploadOutlined } from '@ant-design/icons'
+import {
+  DownloadOutlined,
+  EyeOutlined,
+  FileOutlined,
+  MoreOutlined,
+  UploadOutlined,
+} from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -31,7 +38,6 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   SfAttachment,
   isImageAttachment,
@@ -108,6 +114,14 @@ export default function FileCenterPage() {
     },
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
+
+  // 「更多」菜单内删除的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在 Dropdown
+  // 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading），文案逐字保留
+  const [rowConfirm, setRowConfirm] = useState<FileItem | null>(null)
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    removeMutation.mutate(rowConfirm.id, { onSuccess: () => setRowConfirm(null) })
+  }
 
   /** 下载：认证流经 downloadFile（GET /api/files/{id}/download，Blob 落地触发保存），
    * 失败呈可读错误态，不生成假文件 */
@@ -221,7 +235,7 @@ export default function FileCenterPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 170,
+      width: 150,
       render: (_: unknown, record: FileItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
           {isImageFile(record) && (
@@ -244,17 +258,18 @@ export default function FileCenterPage() {
           >
             下载
           </Button>
-          <SfConfirm
-            title="确认删除该文件？"
-            description="删除后文件不可恢复，业务侧引用将失效。"
-            okText="删除"
-            confirming={removeMutation.isPending}
-            onConfirm={() => removeMutation.mutate(record.id)}
+          {/* 任务书 §58：删除收进「更多」菜单，操作列只留高频动作（预览/下载） */}
+          <Dropdown
+            menu={{
+              items: [{ key: 'remove', label: '删除', danger: true }],
+              onClick: () => setRowConfirm(record),
+            }}
+            trigger={['click']}
           >
-            <Button type="link" size="small" danger>
-              删除
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
             </Button>
-          </SfConfirm>
+          </Dropdown>
         </span>
       ),
     },
@@ -353,6 +368,20 @@ export default function FileCenterPage() {
             />
           </div>
         )}
+      </Modal>
+
+      {/* 「更多 → 删除」的二次确认（文案与原行内 SfConfirm 逐字一致） */}
+      <Modal
+        title="确认删除该文件？"
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={removeMutation.isPending}
+        okText="删除"
+        okButtonProps={{ danger: true }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Text type="secondary">删除后文件不可恢复，业务侧引用将失效。</Text>
       </Modal>
 
       <Image

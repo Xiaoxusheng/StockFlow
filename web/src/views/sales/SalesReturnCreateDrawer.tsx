@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Table, Typography, message } from 'antd'
+import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useMutation } from '@tanstack/react-query'
+import { SfTable } from '@/components/table/SfTable'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   SALES_RETURN_CREATE_PERMISSION,
   salesApi,
@@ -11,13 +12,25 @@ import {
   type SalesReturnCreatePayload,
   type SalesReturnLineInput,
 } from '@/api/sales'
+import { toStatusKey } from '@/api/masterdata'
+import {
+  buildCustomerMaps,
+  buildSkuMaps,
+  buildWarehouseMaps,
+  fetchCustomerOptions,
+  fetchSkuOptions,
+  fetchWarehouseOptions,
+  idKey,
+} from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
-import { formatNumber } from '@/utils/format'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
+import { EMPTY_TEXT, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -40,6 +53,8 @@ function shipQtyOf(item: SalesOrderItem): number {
  * → 带出订单与已发货明细（qty_shipped>0 的行可退）→ 填退货数量 + 原因（必填）
  * → 提交 SalesReturnCreateInput（service_sales.go:44-50：so_no/customer_id/warehouse_id
  * 由来源单带出，退货仓必须与原单发货仓一致由后端强校验 service_sales.go:183-187）。
+ * 来源单出参为裸 ID（sku_id/customer_id/warehouse_id 无联表名称），经基础资料 options
+ * 本地映射补充，映射失败降级 #ID /「-」，不造假数据；单据状态走 SfStatusTag（§24）。
  * 不支持的行如实显示为不可退，不造假数据。
  */
 export function SalesReturnCreateDrawer({
@@ -59,6 +74,30 @@ export function SalesReturnCreateDrawer({
   const [sourceLoading, setSourceLoading] = useState(false)
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, SALES_RETURN_CREATE_PERMISSION)
+
+  // 来源单裸 ID → SKU 编码/名称、客户/仓库名称映射（options 一次取全，失败降级不阻塞抽屉；
+  // queryKey 与列表/详情页共享缓存，打开抽屉不重复请求）
+  const customersQuery = useQuery({
+    queryKey: ['options', 'customers'],
+    queryFn: fetchCustomerOptions,
+  })
+  const warehousesQuery = useQuery({
+    queryKey: ['options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const skusQuery = useQuery({
+    queryKey: ['options', 'skus'],
+    queryFn: fetchSkuOptions,
+  })
+  const customerNames = useMemo(
+    () => buildCustomerMaps(customersQuery.data ?? []).name,
+    [customersQuery.data],
+  )
+  const warehouseMaps = useMemo(
+    () => buildWarehouseMaps(warehousesQuery.data ?? []),
+    [warehousesQuery.data],
+  )
+  const skuMaps = useMemo(() => buildSkuMaps(skusQuery.data ?? []), [skusQuery.data])
 
   useEffect(() => {
     if (open) {
@@ -155,8 +194,29 @@ export function SalesReturnCreateDrawer({
 
   const columns: ColumnsType<SalesOrderItem> = [
     { title: '行号', dataIndex: 'line_no', width: 60 },
-    { title: 'SKU', dataIndex: 'sku_id', width: 90, render: (v: number) => `#${String(v)}` },
-    { title: '已发货', dataIndex: 'qty_shipped', width: 90, align: 'right', render: (v: number) => formatNumber(v) },
+    {
+      title: 'SKU 编码',
+      dataIndex: 'sku_id',
+      width: 130,
+      ellipsis: true,
+      render: (v: number) => skuMaps.code.get(idKey(v)) ?? `#${String(v)}`,
+    },
+    {
+      title: '商品名称',
+      dataIndex: 'sku_id',
+      key: 'sku_name',
+      width: 160,
+      ellipsis: true,
+      render: (_: unknown, record: SalesOrderItem) =>
+        skuMaps.name.get(idKey(record.sku_id)) ?? EMPTY_TEXT,
+    },
+    {
+      title: '已发货',
+      dataIndex: 'qty_shipped',
+      width: 90,
+      align: 'right',
+      render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    },
     {
       title: '退货数量',
       key: 'qty_return',
@@ -204,6 +264,17 @@ export function SalesReturnCreateDrawer({
       ),
     },
   ]
+
+  const sourceOrderStatusMeta = source ? SALES_ORDER_STATUS_TAG[source.order.status] : undefined
+  const sourceWarehouseName = source
+    ? warehouseMaps.name.get(idKey(source.order.warehouse_id))
+    : undefined
+  const sourceWarehouseCode = source
+    ? warehouseMaps.code.get(idKey(source.order.warehouse_id))
+    : undefined
+  const sourceCustomerName = source
+    ? customerNames.get(idKey(source.order.customer_id))
+    : undefined
 
   return (
     <Drawer
@@ -263,19 +334,38 @@ export function SalesReturnCreateDrawer({
               column={2}
               items={[
                 { key: 'soNo', label: '销售单号', children: source.order.so_no },
-                { key: 'warehouse', label: '发货仓库', children: `#${String(source.order.warehouse_id)}（退货仓必须一致）` },
-                { key: 'customer', label: '客户', children: `#${String(source.order.customer_id)}` },
-                { key: 'status', label: '单据状态', children: source.order.status },
+                {
+                  key: 'warehouse',
+                  label: '发货仓库',
+                  children: sourceWarehouseName
+                    ? `${sourceWarehouseName}（${sourceWarehouseCode}）（退货仓必须一致）`
+                    : `#${String(source.order.warehouse_id)}（退货仓必须一致）`,
+                },
+                {
+                  key: 'customer',
+                  label: '客户',
+                  children: sourceCustomerName ?? `#${String(source.order.customer_id)}`,
+                },
+                {
+                  key: 'status',
+                  label: '单据状态',
+                  children: (
+                    <SfStatusTag
+                      status={toStatusKey(source.order.status)}
+                      label={sourceOrderStatusMeta?.label}
+                      semantic={sourceOrderStatusMeta?.semantic}
+                    />
+                  ),
+                },
               ]}
             />
-            <Table<SalesOrderItem>
-              size="small"
+            <SfTable<SalesOrderItem>
+              variant="nested"
               rowKey="id"
               columns={columns}
               dataSource={returnableItems}
-              pagination={false}
-              scroll={{ x: 760 }}
-              locale={{ emptyText: () => <SfEmpty description="该销售单没有已发货明细，无可退行" /> }}
+              scroll={{ x: 880 }}
+              emptyText="该销售单没有已发货明细，无可退行"
             />
             <Text type="secondary">
               退货数量为 numeric(18,4)，提交后端将强校验「退量 ≤ 已发货量 − 已退量」（plan §3.1）；

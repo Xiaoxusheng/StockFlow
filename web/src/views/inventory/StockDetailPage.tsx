@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Alert, Breadcrumb, Card, Descriptions, Flex, Skeleton, Table, Tabs, Typography } from 'antd'
+import { Alert, Breadcrumb, Card, Descriptions, Flex, Skeleton, Tabs, Typography } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
@@ -600,14 +600,13 @@ function TraceTab({ skuId }: { skuId?: InventoryId }) {
           message={`追溯链已达上限，仅展示最近 ${result.chain.length} 条（时间正序）`}
         />
       )}
-      <Table<TraceLedgerItem>
-        size="small"
+      <SfTable<TraceLedgerItem>
+        variant="nested"
         rowKey="id"
         columns={TRACE_COLUMNS}
         dataSource={result.chain}
-        pagination={false}
         scroll={{ x: 1420 }}
-        locale={{ emptyText: () => <SfEmpty description="该 SKU 暂无追溯记录" /> }}
+        emptyText="该 SKU 暂无追溯记录"
       />
     </Flex>
   )

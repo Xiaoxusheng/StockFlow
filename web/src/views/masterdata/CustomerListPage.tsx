@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Dropdown,
   Form,
   Input,
   Modal,
@@ -11,10 +12,11 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
-import { SfConfirm } from '@/components/common/SfConfirm'
+import type { MenuProps } from 'antd'
+import { CodeCell, DateCell } from '@/components/table/cells'
 import {
   masterdataApi,
   toStatusKey,
@@ -29,9 +31,8 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime } from '@/utils/format'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
 const STATUS_OPTIONS = [
   { label: '已启用', value: 'ENABLED' },
@@ -121,6 +122,39 @@ export default function CustomerListPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
+  // 「更多」菜单内 停用/启用/删除 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在点击后
+  // 即关闭的 Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading）
+  const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: CustomerItem } | null>(null)
+
+  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多 */
+  const buildRowMenu = (record: CustomerItem): MenuProps => {
+    const disabling = record.status === 'ENABLED'
+    return {
+      items: [
+        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
+        { type: 'divider' },
+        { key: 'remove', label: '删除', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'toggle') setRowConfirm({ kind: 'toggle', record })
+        if (key === 'remove') setRowConfirm({ kind: 'remove', record })
+      },
+    }
+  }
+
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    const { kind, record } = rowConfirm
+    if (kind === 'toggle') {
+      statusMutation.mutate(
+        { id: record.id, status: record.status === 'ENABLED' ? 'DISABLED' : 'ENABLED' },
+        { onSuccess: () => setRowConfirm(null) },
+      )
+    } else {
+      removeMutation.mutate(record.id, { onSuccess: () => setRowConfirm(null) })
+    }
+  }
+
   const openCreate = () => {
     saveMutation.reset()
     setEditing(null)
@@ -145,7 +179,13 @@ export default function CustomerListPage() {
   }
 
   const columns: ColumnsType<CustomerItem> = [
-    { title: '客户编码', dataIndex: 'code', width: 130, fixed: 'left' },
+    {
+      title: '客户编码',
+      dataIndex: 'code',
+      width: 130,
+      fixed: 'left',
+      render: (v: string) => <CodeCell value={v} label="客户编码" />,
+    },
     {
       title: '客户名称',
       dataIndex: 'name',
@@ -187,51 +227,25 @@ export default function CustomerListPage() {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
       width: 150,
-      render: (_: unknown, record: CustomerItem) => {
-        const disabling = record.status === 'ENABLED'
-        return (
-          <span style={{ whiteSpace: 'nowrap' }}>
-            <Button type="link" size="small" onClick={() => openEdit(record)}>
-              编辑
+      render: (_: unknown, record: CustomerItem) => (
+        <span style={{ whiteSpace: 'nowrap' }}>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
             </Button>
-            <SfConfirm
-              title={disabling ? '确认停用该客户？' : '确认启用该客户？'}
-              description={
-                disabling
-                  ? '停用后不可再被新销售业务引用，已有业务记录不受影响。'
-                  : '启用后客户可重新参与销售业务。'
-              }
-              okText={disabling ? '停用' : '启用'}
-              confirming={statusMutation.isPending}
-              onConfirm={() =>
-                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
-              }
-            >
-              <Button type="link" size="small" danger={disabling}>
-                {disabling ? '停用' : '启用'}
-              </Button>
-            </SfConfirm>
-            <SfConfirm
-              title="确认删除该客户？"
-              description="删除为软删除，后端当前不校验业务引用（引用校验随后续版本交付）：已产生销售业务的客户删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。"
-              okText="删除"
-              confirming={removeMutation.isPending}
-              onConfirm={() => removeMutation.mutate(record.id)}
-            >
-              <Button type="link" size="small" danger>
-                删除
-              </Button>
-            </SfConfirm>
-          </span>
-        )
-      },
+          </Dropdown>
+        </span>
+      ),
     },
   ]
 
@@ -341,6 +355,37 @@ export default function CustomerListPage() {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* 「更多」菜单 停用/启用/删除 的二次确认（文案与原行内 SfConfirm 逐字一致；
+          危险动作 danger ok + confirmLoading 防重复） */}
+      <Modal
+        title={
+          rowConfirm?.kind === 'remove'
+            ? '确认删除该客户？'
+            : rowConfirm?.record.status === 'ENABLED'
+              ? '确认停用该客户？'
+              : '确认启用该客户？'
+        }
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={rowConfirm?.kind === 'remove' ? removeMutation.isPending : statusMutation.isPending}
+        okText={
+          rowConfirm?.kind === 'remove' ? '删除' : rowConfirm?.record.status === 'ENABLED' ? '停用' : '启用'
+        }
+        okButtonProps={{
+          danger: rowConfirm?.kind === 'remove' || rowConfirm?.record.status === 'ENABLED',
+        }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {rowConfirm?.kind === 'remove'
+            ? '删除为软删除，后端当前不校验业务引用（引用校验随后续版本交付）：已产生销售业务的客户删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。'
+            : rowConfirm?.record.status === 'ENABLED'
+              ? '停用后不可再被新销售业务引用，已有业务记录不受影响。'
+              : '启用后客户可重新参与销售业务。'}
+        </Paragraph>
       </Modal>
     </div>
   )

@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
-import { Button, Descriptions, Flex, Table } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { Descriptions, Flex } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
@@ -10,6 +9,7 @@ import {
   type SalesOrderItem,
   type SalesOrderStatus,
 } from '@/api/sales'
+import { toStatusKey } from '@/api/masterdata'
 import {
   buildCustomerMaps,
   buildSkuMaps,
@@ -21,28 +21,13 @@ import {
 } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
-import { SfEmpty } from '@/components/common/SfEmpty'
+import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
 import type { StatusSemantic } from '@/types/status'
 import { EMPTY_TEXT, formatDateTime, formatMoney, formatNumber } from '@/utils/format'
-
-/**
- * 销售订单状态 → SfStatusTag 兜底映射（8 态值域 internal/sales/models.go:240-248，
- * 迁移 CHECK 同源；与 SalesOrderListPage 同口径：大写原始值不命中 types/status.ts
- * 注册表（resolveStatus 精确匹配小写键），label/semantic 兜底接管；不改注册表）。
- */
-const SALES_ORDER_STATUS_TAG: Record<SalesOrderStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  REJECTED: { label: '已驳回', semantic: 'danger' },
-  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'processing' },
-  SHIPPED_ALL: { label: '全部发货', semantic: 'success' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
+import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
 
 /** 单据状态 → Timeline 当前环节（soTransitions 状态机 models.go:250-260；
  * APPROVED=已审核待出库，COMPLETED 经差额关闭达成 service.go:648-706） */
@@ -235,9 +220,11 @@ export default function SalesOrderDetailPage() {
     <div className="sf-page">
       <SfDetailHeader
         code={order.so_no}
-        status={order.status}
+        // 大写枚举经 toStatusKey 归一后注册表优先，未注册键以域内映射兜底（salesStatusMeta.ts）
+        status={toStatusKey(order.status)}
         statusLabel={statusMeta?.label}
         statusSemantic={statusMeta?.semantic}
+        onBack={() => navigate('/sales')}
         summary={
           <SfSummaryBar
             items={[
@@ -247,11 +234,6 @@ export default function SalesOrderDetailPage() {
               { label: '金额', value: formatMoney(order.total_amount) },
             ]}
           />
-        }
-        actions={
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/sales')}>
-            返回列表
-          </Button>
         }
       />
       <Flex vertical gap={16}>
@@ -289,14 +271,13 @@ export default function SalesOrderDetailPage() {
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">
-          <Table<SalesOrderItem>
-            size="small"
+          <SfTable<SalesOrderItem>
+            variant="nested"
             rowKey="id"
             columns={columns}
             dataSource={items}
-            pagination={false}
             scroll={{ x: 1070 }}
-            locale={{ emptyText: () => <SfEmpty description="该销售订单暂无商品明细" /> }}
+            emptyText="该销售订单暂无商品明细"
           />
         </SfDetailSection>
         <SfDetailSection title="业务流程">

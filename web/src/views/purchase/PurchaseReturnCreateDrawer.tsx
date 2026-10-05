@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Table, Typography, message } from 'antd'
+import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Typography, message } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
-import { useMutation } from '@tanstack/react-query'
+import { SfTable } from '@/components/table/SfTable'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   PURCHASE_RETURN_CREATE_PERMISSION,
   purchaseApi,
@@ -11,16 +12,43 @@ import {
   type PurchaseOrderItem,
   type PurchaseReturnCreatePayload,
   type PurchaseReturnLineInput,
+  type PurchaseStatus,
 } from '@/api/purchase'
+import { toStatusKey } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
+import {
+  buildIdItemMap,
+  fetchSkuOptions,
+  fetchSupplierOptions,
+  fetchWarehouseOptions,
+} from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import type { StatusSemantic } from '@/types/status'
 import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
+
+/**
+ * 采购订单状态 → SfStatusTag（internal/purchase/models.go:17-23 七态）。
+ * types/status.ts 注册表已收录 draft/pending_approval/approved/completed/cancelled；
+ * PARTIAL_RECEIVED/RECEIVED_ALL 为采购语境专有键未注册，经 SfStatusTag 的
+ * label/semantic 兜底——与 PurchaseListPage/PurchaseOrderDetailPage 同一本地映射惯例，
+ * 禁止在抽屉里显示英文裸枚举（AGENTS.md 规则 5：业务状态一律经 SfStatusTag）。
+ */
+const PO_STATUS_TAG: Record<PurchaseStatus, { label: string; semantic: StatusSemantic }> = {
+  DRAFT: { label: '草稿', semantic: 'neutral' },
+  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
+  APPROVED: { label: '已审核', semantic: 'success' },
+  PARTIAL_RECEIVED: { label: '部分到货', semantic: 'processing' },
+  RECEIVED_ALL: { label: '到货完成', semantic: 'success' },
+  COMPLETED: { label: '已完成', semantic: 'success' },
+  CANCELLED: { label: '已取消', semantic: 'neutral' },
+}
 
 /** 行编辑态：qty_return 为 numeric(18,4) 文本契约的数值输入，提交时转字符串 */
 interface LineEditState {
@@ -56,6 +84,33 @@ export function PurchaseReturnCreateDrawer({
   const [sourceLoading, setSourceLoading] = useState(false)
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, PURCHASE_RETURN_CREATE_PERMISSION)
+
+  // 供应商/仓库/SKU options 一次取全（api/options.ts 头注释：映射失败由调用方降级，
+  // 不阻塞抽屉；queryKey 与同域列表/详情页共享，react-query 去重命中缓存）
+  const supplierOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'suppliers'],
+    queryFn: fetchSupplierOptions,
+  })
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+  })
+  const skuOptionsQuery = useQuery({
+    queryKey: ['purchase', 'options', 'skus'],
+    queryFn: fetchSkuOptions,
+  })
+  const supplierItems = useMemo(
+    () => buildIdItemMap(supplierOptionsQuery.data ?? [], (s) => s.id),
+    [supplierOptionsQuery.data],
+  )
+  const warehouseItems = useMemo(
+    () => buildIdItemMap(warehouseOptionsQuery.data ?? [], (w) => w.id),
+    [warehouseOptionsQuery.data],
+  )
+  const skuItems = useMemo(
+    () => buildIdItemMap(skuOptionsQuery.data ?? [], (s) => s.id),
+    [skuOptionsQuery.data],
+  )
 
   useEffect(() => {
     if (open) {
@@ -152,9 +207,28 @@ export function PurchaseReturnCreateDrawer({
   }
 
   const columns: ColumnsType<PurchaseOrderItem> = [
-    { title: '行号', dataIndex: 'line_no', width: 60 },
-    { title: 'SKU', dataIndex: 'sku_id', width: 90, render: (v: number) => `#${String(v)}` },
-    { title: '已收货', dataIndex: 'qty_received', width: 90, align: 'right', render: (v: number) => formatNumber(v) },
+    {
+      title: '行号',
+      dataIndex: 'line_no',
+      width: 60,
+      align: 'right',
+      render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    },
+    {
+      title: 'SKU',
+      dataIndex: 'sku_id',
+      width: 140,
+      ellipsis: true,
+      render: (_: unknown, record: PurchaseOrderItem) =>
+        skuItems.get(String(record.sku_id))?.code ?? `SKU #${record.sku_id}`,
+    },
+    {
+      title: '已收货',
+      dataIndex: 'qty_received',
+      width: 90,
+      align: 'right',
+      render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+    },
     {
       title: '退货数量',
       key: 'qty_return',
@@ -202,6 +276,22 @@ export function PurchaseReturnCreateDrawer({
       ),
     },
   ]
+
+  // 来源单摘要展示值：供应商/仓库经 options 本地映射（同域列表/详情惯例），
+  // 映射失败降级为裸 ID，不造假数据；状态经 SfStatusTag 出中文标签
+  const supplierItem = source ? supplierItems.get(String(source.order.supplier_id)) : undefined
+  const warehouseItem = source ? warehouseItems.get(String(source.order.warehouse_id)) : undefined
+  const supplierText = supplierItem
+    ? `${supplierItem.name}（${supplierItem.code}）`
+    : source
+      ? `供应商 #${source.order.supplier_id}`
+      : '-'
+  const warehouseText = warehouseItem
+    ? `${warehouseItem.name}（${warehouseItem.code}）`
+    : source
+      ? `仓库 #${source.order.warehouse_id}`
+      : '-'
+  const statusTag = source ? PO_STATUS_TAG[source.order.status] : undefined
 
   return (
     <Drawer
@@ -261,19 +351,32 @@ export function PurchaseReturnCreateDrawer({
               column={2}
               items={[
                 { key: 'poNo', label: '采购单号', children: source.order.po_no },
-                { key: 'warehouse', label: '收货仓库', children: `#${String(source.order.warehouse_id)}（退货仓必须一致）` },
-                { key: 'supplier', label: '供应商', children: `#${String(source.order.supplier_id)}` },
-                { key: 'status', label: '单据状态', children: source.order.status },
+                {
+                  key: 'warehouse',
+                  label: '收货仓库',
+                  children: `${warehouseText}（退货仓必须一致）`,
+                },
+                { key: 'supplier', label: '供应商', children: supplierText },
+                {
+                  key: 'status',
+                  label: '单据状态',
+                  children: (
+                    <SfStatusTag
+                      status={toStatusKey(source.order.status)}
+                      label={statusTag?.label}
+                      semantic={statusTag?.semantic}
+                    />
+                  ),
+                },
               ]}
             />
-            <Table<PurchaseOrderItem>
-              size="small"
+            <SfTable<PurchaseOrderItem>
+              variant="nested"
               rowKey="id"
               columns={columns}
               dataSource={returnableItems}
-              pagination={false}
               scroll={{ x: 760 }}
-              locale={{ emptyText: () => <SfEmpty description="该采购单没有已收货明细，无可退行" /> }}
+              emptyText="该采购单没有已收货明细，无可退行"
             />
             <Text type="secondary">
               退货数量为 numeric(18,4)，提交后端将强校验「退量 ≤ 已收货量 − 已退量」（plan §3.1）；

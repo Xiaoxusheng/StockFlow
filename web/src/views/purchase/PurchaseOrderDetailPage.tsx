@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Descriptions, Flex, Table, Typography } from 'antd'
+import { Descriptions, Flex, Typography } from 'antd'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate, useParams } from 'react-router'
@@ -18,7 +18,7 @@ import {
 } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
-import { SfEmpty } from '@/components/common/SfEmpty'
+import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
@@ -284,14 +284,13 @@ export default function PurchaseOrderDetailPage() {
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">
-          <Table<PurchaseOrderItem>
-            size="small"
+          <SfTable<PurchaseOrderItem>
+            variant="nested"
             rowKey="id"
             columns={itemColumns}
             dataSource={items}
-            pagination={false}
             scroll={{ x: 1130 }}
-            locale={{ emptyText: () => <SfEmpty description="该采购订单暂无商品明细" /> }}
+            emptyText="该采购订单暂无商品明细"
           />
         </SfDetailSection>
         <SfDetailSection title="业务流程">

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Drawer, Table } from 'antd'
+import { Drawer } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
 import type { TransferInTransitQuery, TransferInTransitRow } from '@/api/transfer'
@@ -7,6 +7,7 @@ import { transferApi } from '@/api/transfer'
 import { buildSkuMaps, buildIdMap, fetchBatchOptions, fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
 import { SfError } from '@/components/common/SfError'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfTable } from '@/components/table/SfTable'
 import { SfLoading } from '@/components/common/SfLoading'
 import { usePagedList } from '@/hooks/usePagedList'
 import { formatNumber } from '@/utils/format'
@@ -120,21 +121,19 @@ export default function TransferInTransitDrawer({ open, onClose }: TransferInTra
           onRetry={() => void list.refetch()}
         />
       ) : (
-        <Table<TransferInTransitRow>
+        <SfTable<TransferInTransitRow>
+          variant="nested"
           rowKey={(row) => `${String(row.sku_id)}-${String(row.batch_id)}`}
           columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
-          size="small"
           pagination={{
             current: list.pagination.current,
             pageSize: list.pagination.pageSize,
-            total: list.total,
-            showSizeChanger: false,
-            onChange: list.onPageChange,
-            showTotal: (total) => `共 ${total} 条`,
           }}
-          locale={{ emptyText: '当前筛选条件下没有在途数据' }}
+          total={list.total}
+          onPageChange={list.onPageChange}
+          emptyText="当前筛选条件下没有在途数据"
           scroll={{ x: 670 }}
         />
       )}

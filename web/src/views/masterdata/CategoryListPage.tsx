@@ -16,6 +16,7 @@ import {
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { CodeCell, DateCell } from '@/components/table/cells'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import {
   masterdataApi,
@@ -32,7 +33,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -155,7 +156,13 @@ export default function CategoryListPage() {
   }
 
   const columns: ColumnsType<CategoryItem> = [
-    { title: '分类编码', dataIndex: 'code', width: 130, fixed: 'left' },
+    {
+      title: '分类编码',
+      dataIndex: 'code',
+      width: 130,
+      fixed: 'left',
+      render: (v: string) => <CodeCell value={v} label="分类编码" />,
+    },
     {
       title: '分类名称',
       dataIndex: 'name',
@@ -197,7 +204,7 @@ export default function CategoryListPage() {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '操作',

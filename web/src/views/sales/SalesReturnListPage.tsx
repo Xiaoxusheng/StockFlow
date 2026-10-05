@@ -10,34 +10,18 @@ import {
   type SalesReturnQuery,
   type SalesReturnStatus,
 } from '@/api/sales'
+import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
-import type { StatusSemantic } from '@/types/status'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SalesReturnCreateDrawer } from './SalesReturnCreateDrawer'
+import { SALES_RETURN_STATUS_TAG } from './salesStatusMeta'
 import { formatDateTime } from '@/utils/format'
-
-/**
- * 退货单状态 → SfStatusTag 兜底映射（8 态值域 internal/returns/models.go:27-36，
- * 迁移 chk_return_orders_status 同源；大写原始值不命中 types/status.ts 注册表
- * （resolveStatus 精确匹配小写键），label/semantic 兜底接管，TRANSFER_STATUS_TAG 同口径）。
- * SHIPPED 为采购退货出库完成态（models.go:32），销售退货流程不产出。
- */
-const SALES_RETURN_STATUS_TAG: Record<SalesReturnStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  RECEIVING: { label: '收货中', semantic: 'processing' },
-  IN_QC: { label: '质检中', semantic: 'processing' },
-  SHIPPED: { label: '已发货', semantic: 'processing' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
 
 /** 状态筛选选项与列内标签同源（值为后端大写枚举，returns/handler.go 直接入参） */
 const STATUS_OPTIONS = (
@@ -46,9 +30,10 @@ const STATUS_OPTIONS = (
   >
 ).map(([value, meta]) => ({ label: meta.label, value }))
 
+/** 状态标签：大写枚举经 toStatusKey 归一后注册表优先，未注册键以域内映射兜底（salesStatusMeta.ts） */
 function SalesReturnStatusTag({ status }: { status: SalesReturnStatus }) {
   const meta = SALES_RETURN_STATUS_TAG[status]
-  return <SfStatusTag status={status} label={meta?.label} semantic={meta?.semantic} />
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
 }
 
 /** 销售退货列表（/sales/returns；GET /api/returns，后端退货域已交付 internal/returns/routes.go:117）。

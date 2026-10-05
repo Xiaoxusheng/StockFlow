@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Button, Descriptions, Flex, Table, Typography, message } from 'antd'
+import { Button, Descriptions, Flex, Typography, message } from 'antd'
 import { RetweetOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -36,7 +36,7 @@ import { canAccess } from '@/types/permission'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
-import { SfEmpty } from '@/components/common/SfEmpty'
+import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
@@ -479,14 +479,13 @@ export default function OutboundDetailPage() {
           />
         </SfDetailSection>
         <SfDetailSection title="出库明细">
-          <Table<OutboundOrderItem>
-            size="small"
+          <SfTable<OutboundOrderItem>
+            variant="nested"
             rowKey="id"
             columns={itemColumns}
             dataSource={items}
-            pagination={false}
             scroll={{ x: 1180 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无明细行" /> }}
+            emptyText="该出库单暂无明细行"
           />
         </SfDetailSection>
         <SfDetailSection
@@ -509,58 +508,53 @@ export default function OutboundDetailPage() {
             ) : undefined
           }
         >
-          <Table<OutboundAllocationRecord>
-            size="small"
+          <SfTable<OutboundAllocationRecord>
+            variant="nested"
             rowKey="id"
             columns={allocationColumns}
             dataSource={allocations}
-            pagination={false}
             scroll={{ x: 1060 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无分配记录（审核预占后生成）" /> }}
+            emptyText="该出库单暂无分配记录（审核预占后生成）"
           />
         </SfDetailSection>
         <SfDetailSection title="拣货任务">
-          <Table<PickTask>
-            size="small"
+          <SfTable<PickTask>
+            variant="nested"
             rowKey="id"
             columns={pickColumns}
             dataSource={picks}
-            pagination={false}
             scroll={{ x: 1050 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无拣货任务（分配生成后展示）" /> }}
+            emptyText="该出库单暂无拣货任务（分配生成后展示）"
           />
         </SfDetailSection>
         <SfDetailSection title="复核记录">
-          <Table<CheckTask>
-            size="small"
+          <SfTable<CheckTask>
+            variant="nested"
             rowKey="id"
             columns={checkColumns}
             dataSource={checks}
-            pagination={false}
             scroll={{ x: 1010 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无复核任务（拣货确认后生成）" /> }}
+            emptyText="该出库单暂无复核任务（拣货确认后生成）"
           />
         </SfDetailSection>
         <SfDetailSection title="包裹记录">
-          <Table<PackingRecord>
-            size="small"
+          <SfTable<PackingRecord>
+            variant="nested"
             rowKey="id"
             columns={packageColumns}
             dataSource={packages}
-            pagination={false}
             scroll={{ x: 1170 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无打包记录" /> }}
+            emptyText="该出库单暂无打包记录"
           />
         </SfDetailSection>
         <SfDetailSection title="发货记录">
-          <Table<Shipment>
-            size="small"
+          <SfTable<Shipment>
+            variant="nested"
             rowKey="id"
             columns={shipmentColumns}
             dataSource={shipments}
-            pagination={false}
             scroll={{ x: 1060 }}
-            locale={{ emptyText: () => <SfEmpty description="该出库单暂无发货单" /> }}
+            emptyText="该出库单暂无发货单"
           />
         </SfDetailSection>
         <SfDetailSection title="业务流程">

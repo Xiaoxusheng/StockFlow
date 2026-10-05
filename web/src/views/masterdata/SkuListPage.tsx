@@ -5,6 +5,7 @@ import {
   Card,
   Checkbox,
   Col,
+  Dropdown,
   Form,
   Input,
   InputNumber,
@@ -15,10 +16,10 @@ import {
   Typography,
   message,
 } from 'antd'
-import { MinusCircleOutlined, PlusOutlined } from '@ant-design/icons'
+import { MinusCircleOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
-import { SfConfirm } from '@/components/common/SfConfirm'
+import type { MenuProps } from 'antd'
 import {
   masterdataApi,
   type SkuItem,
@@ -32,9 +33,14 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SfQrPreviewDrawer, type SfQrSkuInfo } from '@/components/print/SfQrPreviewDrawer'
+import { SfQrPrintModal } from '@/components/print/SfQrPrintModal'
+import { buildSfqrSku } from '@/utils/qrPayload'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { formatDateTime, formatMoney, formatNumber } from '@/utils/format'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
 const ENABLED_FILTER_OPTIONS = [
   { label: '已启用', value: 'true' },
@@ -175,6 +181,82 @@ export default function SkuListPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
+  // ---- 二维码快捷入口（qr-code.md §7.2「SKU 列表快捷入口」；载荷构造唯一点 = utils/qrPayload.ts） ----
+  const user = useAuthStore((s) => s.user)
+  // 「打印二维码」fail-closed（约束 7）：无 printing:task:create 权限时菜单项不渲染
+  const canCreatePrintTask = canAccess(user, 'printing:task:create')
+  const [qrOpen, setQrOpen] = useState(false)
+  const [qrSku, setQrSku] = useState<SfQrSkuInfo | null>(null)
+  const [printOpen, setPrintOpen] = useState(false)
+  const [printTarget, setPrintTarget] = useState<SfQrSkuInfo | null>(null)
+  // 「更多」菜单内 停用/启用/删除 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在点击后
+  // 即关闭的 Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading）
+  const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: SkuItem } | null>(null)
+
+  /** SKU 行 → 二维码抽屉/打印弹窗共用对象（商品名经 options map 兜底；主条码 is_primary 优先） */
+  const toQrSku = (record: SkuItem): SfQrSkuInfo => ({
+    id: record.id,
+    code: record.code,
+    productName: record.product_name ?? productNameById.get(String(record.product_id)),
+    primaryBarcode: record.barcodes.find((b) => b.is_primary)?.barcode ?? record.barcodes[0]?.barcode,
+    enabled: record.is_enabled,
+  })
+
+  /** 复制二维码内容 = SFQR 载荷明文（交互场景用 buildSfqrSku 显式构造，非法输入抛错可见） */
+  const copyQrPayload = (record: SkuItem) => {
+    let payload: string
+    try {
+      payload = buildSfqrSku(record.code)
+    } catch (error) {
+      messageApi.error(error instanceof Error ? error.message : '二维码内容构造失败')
+      return
+    }
+    if (!navigator.clipboard) {
+      messageApi.error('当前浏览器剪贴板不可用，请在二维码详情抽屉中手动复制')
+      return
+    }
+    navigator.clipboard
+      .writeText(payload)
+      .then(() => messageApi.success('二维码内容已复制'))
+      .catch(() => messageApi.error('复制失败，请到二维码详情抽屉手动复制'))
+  }
+
+  /** 行内「更多」菜单（UserListPage buildRowMenu 同构；打印项经权限 fail-closed 收敛） */
+  const buildRowMenu = (record: SkuItem): MenuProps => {
+    const disabling = record.is_enabled
+    return {
+      items: [
+        ...(canCreatePrintTask ? [{ key: 'print', label: '打印二维码' }] : []),
+        { key: 'copy', label: '复制二维码内容' },
+        { type: 'divider' },
+        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
+        { key: 'remove', label: '删除', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'print') {
+          setPrintTarget(toQrSku(record))
+          setPrintOpen(true)
+        }
+        if (key === 'copy') copyQrPayload(record)
+        if (key === 'toggle') setRowConfirm({ kind: 'toggle', record })
+        if (key === 'remove') setRowConfirm({ kind: 'remove', record })
+      },
+    }
+  }
+
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    const { kind, record } = rowConfirm
+    if (kind === 'toggle') {
+      statusMutation.mutate(
+        { id: record.id, enabled: !record.is_enabled },
+        { onSuccess: () => setRowConfirm(null) },
+      )
+    } else {
+      removeMutation.mutate(record.id, { onSuccess: () => setRowConfirm(null) })
+    }
+  }
+
   const openCreate = () => {
     saveMutation.reset()
     setEditing(null)
@@ -302,43 +384,31 @@ export default function SkuListPage() {
       title: '操作',
       key: 'actions',
       fixed: 'right',
-      width: 150,
-      render: (_: unknown, record: SkuItem) => {
-        const disabling = record.is_enabled
-        return (
-          <span style={{ whiteSpace: 'nowrap' }}>
-            <Button type="link" size="small" onClick={() => openEdit(record)}>
-              编辑
+      width: 170,
+      render: (_: unknown, record: SkuItem) => (
+        <span style={{ whiteSpace: 'nowrap' }}>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          {/* 二维码 = 详情快捷入口（qr-code.md §7.2：打开 SfQrPreviewDrawer，
+              内含 QR 预览 + SKU 编码/商品名/主条码/状态 + 复制载荷 + 打印标签） */}
+          <Button
+            type="link"
+            size="small"
+            onClick={() => {
+              setQrSku(toQrSku(record))
+              setQrOpen(true)
+            }}
+          >
+            二维码
+          </Button>
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
             </Button>
-            <SfConfirm
-              title={disabling ? '确认停用该 SKU？' : '确认启用该 SKU？'}
-              description={
-                disabling
-                  ? '停用后 SKU 不可被出库分配；启用后恢复正常参与业务。'
-                  : '启用后 SKU 恢复参与入库/出库业务。'
-              }
-              okText={disabling ? '停用' : '启用'}
-              confirming={statusMutation.isPending}
-              onConfirm={() => statusMutation.mutate({ id: record.id, enabled: !disabling })}
-            >
-              <Button type="link" size="small" danger={disabling}>
-                {disabling ? '停用' : '启用'}
-              </Button>
-            </SfConfirm>
-            <SfConfirm
-              title="确认删除该 SKU？"
-              description="删除为软删除，后端当前不校验库存/单据引用（引用校验随后续版本交付）：已产生业务数据的 SKU 删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。"
-              okText="删除"
-              confirming={removeMutation.isPending}
-              onConfirm={() => removeMutation.mutate(record.id)}
-            >
-              <Button type="link" size="small" danger>
-                删除
-              </Button>
-            </SfConfirm>
-          </span>
-        )
-      },
+          </Dropdown>
+        </span>
+      ),
     },
   ]
 
@@ -545,6 +615,49 @@ export default function SkuListPage() {
           </Row>
         </Form>
       </Modal>
+
+      {/* 「更多」菜单 停用/启用/删除 的二次确认（文案与原行内 SfConfirm 逐字一致；
+          危险动作 danger ok + confirmLoading 防重复，约束 6/8） */}
+      <Modal
+        title={
+          rowConfirm?.kind === 'remove'
+            ? '确认删除该 SKU？'
+            : rowConfirm?.record.is_enabled
+              ? '确认停用该 SKU？'
+              : '确认启用该 SKU？'
+        }
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={rowConfirm?.kind === 'remove' ? removeMutation.isPending : statusMutation.isPending}
+        okText={
+          rowConfirm?.kind === 'remove' ? '删除' : rowConfirm?.record.is_enabled ? '停用' : '启用'
+        }
+        okButtonProps={{
+          danger: rowConfirm?.kind === 'remove' || rowConfirm?.record.is_enabled === true,
+        }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {rowConfirm?.kind === 'remove'
+            ? '删除为软删除，后端当前不校验库存/单据引用（引用校验随后续版本交付）：已产生业务数据的 SKU 删除后将从列表与下拉消失，历史单据中将按 ID 显示，建议改用停用。'
+            : rowConfirm?.record.is_enabled
+              ? '停用后 SKU 不可被出库分配；启用后恢复正常参与业务。'
+              : '启用后 SKU 恢复参与入库/出库业务。'}
+        </Paragraph>
+      </Modal>
+
+      {/* 二维码详情抽屉（frontend.md §13.1 冻结链路；SKU 编码/商品名/主条码/状态 + 复制载荷 + 打印标签）。
+          open 与数据分离：关闭动画期间保留内容，避免抽屉骤空 */}
+      <SfQrPreviewDrawer open={qrOpen} sku={qrSku} onClose={() => setQrOpen(false)} />
+
+      {/* 「更多 → 打印二维码」直达的单打配置弹窗（权限已在菜单项 fail-closed 收敛；
+          data_ids 通道纪律见 SfQrPrintModal——恒传 String(sku.id)） */}
+      <SfQrPrintModal
+        open={printOpen}
+        skus={printTarget ? [printTarget] : []}
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   )
 }

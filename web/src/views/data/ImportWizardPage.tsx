@@ -10,7 +10,6 @@ import {
   Select,
   Space,
   Steps,
-  Table,
   Typography,
   Upload,
   message,
@@ -450,12 +449,13 @@ export default function ImportWizardPage() {
                     ]}
                   />
                   {validateResult.errors.length > 0 && (
-                    <Table<ImportValidationError>
-                      size="small"
+                    <SfTable<ImportValidationError>
+                      variant="nested"
                       rowKey={(record) => `${record.row}-${record.column ?? ''}-${record.message}`}
                       columns={ERROR_COLUMNS}
                       dataSource={validateResult.errors}
-                      pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+                      pagination={{ pageSize: 10 }}
+                      total={validateResult.errors.length}
                     />
                   )}
                   {validateResult.error_rows > 0 && (
@@ -497,13 +497,14 @@ export default function ImportWizardPage() {
                       { label: '列数', value: formatNumber(previewQuery.data.columns.length) },
                     ]}
                   />
-                  <Table<Record<string, unknown>>
-                    size="small"
+                  <SfTable<Record<string, unknown>>
+                    variant="nested"
                     rowKey={(_record, index) => `row-${index ?? 0}`}
                     columns={previewColumns}
                     dataSource={previewQuery.data.rows}
                     scroll={{ x: previewScrollX }}
-                    pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+                    pagination={{ pageSize: 10 }}
+                    total={previewQuery.data.rows.length}
                   />
                 </>
               ) : (
@@ -594,12 +595,13 @@ export default function ImportWizardPage() {
                       message="部分数据导入失败，失败明细如下"
                       description="批量写入采用分批事务：单批失败不影响已完成批次，失败明细进入导入结果（excel.md §6.2）。"
                     />
-                    <Table<ImportValidationError>
-                      size="small"
+                    <SfTable<ImportValidationError>
+                      variant="nested"
                       rowKey={(record) => `${record.row}-${record.column ?? ''}-${record.message}`}
                       columns={ERROR_COLUMNS}
                       dataSource={confirmResult.errors}
-                      pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 条` }}
+                      pagination={{ pageSize: 10 }}
+                      total={confirmResult.errors.length}
                     />
                   </>
                 )}

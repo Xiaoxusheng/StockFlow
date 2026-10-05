@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Card, Form, Input, Modal, Popconfirm, TreeSelect, message } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { Button, Card, Dropdown, Form, Input, Modal, TreeSelect, Typography, message } from 'antd'
+import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { resolveErrorMessage } from '@/api/client'
@@ -181,6 +182,17 @@ export default function DepartmentPage() {
     onError: (error) => message.error(resolveErrorMessage(error)),
   })
 
+  // 「更多」菜单内 停用/启用 的二次确认：Popconfirm 形态无法锚定在 Dropdown 菜单项内——
+  // 改用同语义声明式 Modal（danger ok + confirmLoading），文案逐字保留
+  const [rowConfirm, setRowConfirm] = useState<DepartmentNode | null>(null)
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    statusMutation.mutate(
+      { id: rowConfirm.id, status: rowConfirm.status === 'ENABLED' ? 'DISABLED' : 'ENABLED' },
+      { onSuccess: () => setRowConfirm(null) },
+    )
+  }
+
   const parentKeys = useMemo(() => collectParentKeys(tree), [tree])
   useEffect(() => {
     setExpandedKeys(parentKeys)
@@ -203,7 +215,13 @@ export default function DepartmentPage() {
       width: 220,
       fixed: 'right',
       render: (_, record) => {
-        const id = record.id
+        const disabling = record.status === 'ENABLED'
+        const rowMenu: MenuProps = {
+          items: [{ key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling }],
+          onClick: ({ key }) => {
+            if (key === 'toggle') setRowConfirm(record)
+          },
+        }
         return (
           <>
             <Button type="link" size="small" onClick={() => setModal({ kind: 'create', parent: record })}>
@@ -212,21 +230,11 @@ export default function DepartmentPage() {
             <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', dept: record })}>
               编辑
             </Button>
-            {record.status === 'ENABLED' ? (
-              <Popconfirm
-                title="确认停用该部门？"
-                description="停用后该部门不可再被新用户选择"
-                onConfirm={() => statusMutation.mutate({ id, status: 'DISABLED' })}
-              >
-                <Button type="link" size="small" danger>
-                  停用
-                </Button>
-              </Popconfirm>
-            ) : (
-              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ENABLED' })}>
-                启用
+            <Dropdown menu={rowMenu} trigger={['click']}>
+              <Button type="link" size="small" aria-label="更多操作">
+                更多<MoreOutlined style={{ marginLeft: 2 }} />
               </Button>
-            )}
+            </Dropdown>
           </>
         )
       },
@@ -282,6 +290,22 @@ export default function DepartmentPage() {
           }}
         />
       )}
+
+      {/* 「更多 → 停用/启用」的二次确认（文案与原行内 Popconfirm 逐字一致） */}
+      <Modal
+        title={rowConfirm?.status === 'ENABLED' ? '确认停用该部门？' : '确认启用该部门？'}
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={statusMutation.isPending}
+        okText={rowConfirm?.status === 'ENABLED' ? '停用' : '启用'}
+        okButtonProps={{ danger: rowConfirm?.status === 'ENABLED' }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Typography.Text type="secondary">
+          {rowConfirm?.status === 'ENABLED' ? '停用后该部门不可再被新用户选择' : '启用后该部门恢复可选。'}
+        </Typography.Text>
+      </Modal>
     </div>
   )
 }

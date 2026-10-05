@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Button, Descriptions, Flex, Table, Typography } from 'antd'
+import { Button, Descriptions, Flex, Typography } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -14,7 +14,7 @@ import {
 import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
-import { SfEmpty } from '@/components/common/SfEmpty'
+import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
@@ -265,14 +265,13 @@ export default function InboundDetailPage() {
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">
-          <Table<InboundOrderItem>
-            size="small"
+          <SfTable<InboundOrderItem>
+            variant="nested"
             rowKey="id"
             columns={ITEM_COLUMNS}
             dataSource={lines}
-            pagination={false}
             scroll={{ x: 970 }}
-            locale={{ emptyText: () => <SfEmpty description="该入库单暂无商品明细" /> }}
+            emptyText="该入库单暂无商品明细"
           />
         </SfDetailSection>
         <SfDetailSection title="业务流程">

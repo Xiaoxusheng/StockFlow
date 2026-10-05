@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Alert, Card, Descriptions, Skeleton, Table, Typography } from 'antd'
+import { Alert, Card, Descriptions, Skeleton, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -25,6 +25,7 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfTable } from '@/components/table/SfTable'
 import { formatDateTime, formatQty } from '@/utils/format'
 
 const { Text } = Typography
@@ -114,14 +115,13 @@ function StockRowsTable({ rows, maps }: { rows: TraceStockRow[]; maps: TraceName
     },
   ]
   return (
-    <Table<TraceStockRow>
-      size="small"
+    <SfTable<TraceStockRow>
+      variant="nested"
       rowKey={(row) => `${row.warehouse_id}/${row.bin_id}/${row.batch_id}`}
       columns={columns}
       dataSource={rows}
-      pagination={false}
       scroll={{ x: 1210 }}
-      locale={{ emptyText: () => <SfEmpty description="该 SKU 当前无在库库存行" /> }}
+      emptyText="该 SKU 当前无在库库存行"
     />
   )
 }
@@ -197,14 +197,13 @@ function ChainTable({ chain, maps }: { chain: TraceLedgerItem[]; maps: TraceName
     },
   ]
   return (
-    <Table<TraceLedgerItem>
-      size="small"
+    <SfTable<TraceLedgerItem>
+      variant="nested"
       rowKey="id"
       columns={columns}
       dataSource={chain}
-      pagination={false}
       scroll={{ x: 1690 }}
-      locale={{ emptyText: () => <SfEmpty description="该 SKU / 序列号暂无库存流水" /> }}
+      emptyText="该 SKU / 序列号暂无库存流水"
     />
   )
 }
@@ -379,11 +378,10 @@ export default function TracePage() {
               <Text strong style={{ display: 'block', marginBottom: 8 }}>
                 关联来源单据
               </Text>
-              <Table<NonNullable<TraceResult['documents']>[number]>
-                size="small"
+              <SfTable<NonNullable<TraceResult['documents']>[number]>
+                variant="nested"
                 rowKey={(doc) => `${doc.type}/${doc.no}`}
-                pagination={false}
-                locale={{ emptyText: () => <SfEmpty description="追溯链未命中可富化的来源单据" /> }}
+                emptyText="追溯链未命中可富化的来源单据"
                 columns={[
                   { title: '单据类型', dataIndex: 'type', width: 160 },
                   { title: '单据号', dataIndex: 'no', width: 180 },
@@ -414,11 +412,10 @@ export default function TracePage() {
               <Text strong style={{ display: 'block', marginBottom: 8 }}>
                 关联操作日志（经流水 request_id 关联）
               </Text>
-              <Table<NonNullable<TraceResult['operations']>[number]>
-                size="small"
+              <SfTable<NonNullable<TraceResult['operations']>[number]>
+                variant="nested"
                 rowKey="id"
-                pagination={false}
-                locale={{ emptyText: () => <SfEmpty description="追溯链未关联到操作日志" /> }}
+                emptyText="追溯链未关联到操作日志"
                 columns={[
                   {
                     title: '时间',

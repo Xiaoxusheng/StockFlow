@@ -11,44 +11,29 @@ import {
   type SalesOrderQuery,
   type SalesOrderStatus,
 } from '@/api/sales'
+import { toStatusKey } from '@/api/masterdata'
 import { buildCustomerMaps, buildWarehouseMaps, fetchCustomerOptions, fetchWarehouseOptions, idKey } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
-import type { StatusSemantic } from '@/types/status'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
 import { formatDateTime, formatMoney } from '@/utils/format'
 
 const { Link, Text } = Typography
-
-/**
- * 销售订单状态 → SfStatusTag 兜底映射（8 态值域 internal/sales/models.go:240-248，
- * 迁移 CHECK 同源；business-flow.md §6.2 订单 → 审核 → 库存预占 → 出库）。
- * 大写原始值不命中 types/status.ts 注册表（resolveStatus 精确匹配小写键），
- * label/semantic 兜底接管（api/transfer.ts TRANSFER_STATUS_TAG 同口径）。
- */
-const SALES_ORDER_STATUS_TAG: Record<SalesOrderStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  REJECTED: { label: '已驳回', semantic: 'danger' },
-  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'processing' },
-  SHIPPED_ALL: { label: '全部发货', semantic: 'success' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
 
 /** 状态筛选选项与列内标签同源（值为后端大写枚举，handler.go:106 直接入参） */
 const STATUS_OPTIONS = (
   Object.entries(SALES_ORDER_STATUS_TAG) as Array<[SalesOrderStatus, (typeof SALES_ORDER_STATUS_TAG)[SalesOrderStatus]]>
 ).map(([value, meta]) => ({ label: meta.label, value }))
 
+/** 状态标签：大写枚举经 toStatusKey 归一后注册表优先，未注册键以域内映射兜底（salesStatusMeta.ts） */
 function SalesOrderStatusTag({ status }: { status: SalesOrderStatus }) {
   const meta = SALES_ORDER_STATUS_TAG[status]
-  return <SfStatusTag status={status} label={meta?.label} semantic={meta?.semantic} />
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
 }
 
 /** 销售订单列表（/sales；GET /api/sales，后端 M2 已交付 internal/sales/routes.go:73-80）。
@@ -64,6 +49,8 @@ export default function SalesOrderListPage() {
     queryKey: ['sales', 'orders'],
     fetch: (q) => salesApi.orders.list(q),
     params,
+    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
+    persistKey: 'sales-orders',
   })
 
   // 客户/仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
@@ -141,9 +128,9 @@ export default function SalesOrderListPage() {
       fixed: 'right',
       width: 80,
       render: (_: unknown, record: SalesOrder) => (
-        <Link onClick={() => navigate(`/sales/${record.id}`)} style={{ whiteSpace: 'nowrap' }}>
+        <Button type="link" size="small" onClick={() => navigate(`/sales/${record.id}`)}>
           详情
-        </Link>
+        </Button>
       ),
     },
   ]

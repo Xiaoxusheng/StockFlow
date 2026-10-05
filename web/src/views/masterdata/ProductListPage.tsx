@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  Dropdown,
   Form,
   Input,
   InputNumber,
@@ -13,10 +14,11 @@ import {
   Typography,
   message,
 } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
-import { SfConfirm } from '@/components/common/SfConfirm'
+import type { MenuProps } from 'antd'
+import { CodeCell, DateCell } from '@/components/table/cells'
 import {
   masterdataApi,
   toStatusKey,
@@ -32,9 +34,9 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
 const STATUS_OPTIONS = [
   { label: '已启用', value: 'ENABLED' },
@@ -190,6 +192,39 @@ export default function ProductListPage() {
     onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
+  // 「更多」菜单内 停用/启用/删除 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在点击后
+  // 即关闭的 Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading）
+  const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: ProductItem } | null>(null)
+
+  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多 */
+  const buildRowMenu = (record: ProductItem): MenuProps => {
+    const disabling = record.status === 'ENABLED'
+    return {
+      items: [
+        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
+        { type: 'divider' },
+        { key: 'remove', label: '删除', danger: true },
+      ],
+      onClick: ({ key }) => {
+        if (key === 'toggle') setRowConfirm({ kind: 'toggle', record })
+        if (key === 'remove') setRowConfirm({ kind: 'remove', record })
+      },
+    }
+  }
+
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    const { kind, record } = rowConfirm
+    if (kind === 'toggle') {
+      statusMutation.mutate(
+        { id: record.id, status: record.status === 'ENABLED' ? 'DISABLED' : 'ENABLED' },
+        { onSuccess: () => setRowConfirm(null) },
+      )
+    } else {
+      removeMutation.mutate(record.id, { onSuccess: () => setRowConfirm(null) })
+    }
+  }
+
   const openCreate = () => {
     saveMutation.reset()
     setEditing(null)
@@ -214,7 +249,13 @@ export default function ProductListPage() {
   }
 
   const columns: ColumnsType<ProductItem> = [
-    { title: '商品编码', dataIndex: 'code', width: 130, fixed: 'left' },
+    {
+      title: '商品编码',
+      dataIndex: 'code',
+      width: 130,
+      fixed: 'left',
+      render: (v: string) => <CodeCell value={v} label="商品编码" />,
+    },
     {
       title: '商品名称',
       dataIndex: 'name',
@@ -234,7 +275,13 @@ export default function ProductListPage() {
     },
     { title: '品牌', dataIndex: 'brand', width: 100, render: (v?: string) => v ?? '-' },
     { title: '型号', dataIndex: 'model', width: 100, render: (v?: string) => v ?? '-' },
-    { title: '规格', dataIndex: 'spec', width: 100, render: (v?: string) => v ?? '-' },
+    {
+      title: '规格',
+      dataIndex: 'spec',
+      width: 100,
+      ellipsis: true,
+      render: (v?: string) => v ?? '-',
+    },
     {
       title: '单位',
       key: 'unit_name',
@@ -290,54 +337,25 @@ export default function ProductListPage() {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
       key: 'actions',
       fixed: 'right',
       width: 150,
-      render: (_: unknown, record: ProductItem) => {
-        const disabling = record.status === 'ENABLED'
-        return (
-          <span style={{ whiteSpace: 'nowrap' }}>
-            <Button type="link" size="small" onClick={() => openEdit(record)}>
-              编辑
+      render: (_: unknown, record: ProductItem) => (
+        <span style={{ whiteSpace: 'nowrap' }}>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
             </Button>
-            <SfConfirm
-              title={disabling ? '确认停用该商品？' : '确认启用该商品？'}
-              description={
-                disabling
-                  ? '停用将级联停用其启用中的 SKU；启用不自动反启 SKU。'
-                  : '启用后商品可重新挂 SKU 与参与业务。'
-              }
-              okText={disabling ? '停用' : '启用'}
-              confirming={statusMutation.isPending}
-              onConfirm={() =>
-                statusMutation.mutate({
-                  id: record.id,
-                  status: disabling ? 'DISABLED' : 'ENABLED',
-                })
-              }
-            >
-              <Button type="link" size="small" danger={disabling}>
-                {disabling ? '停用' : '启用'}
-              </Button>
-            </SfConfirm>
-            <SfConfirm
-              title="确认删除该商品？"
-              description="已产生业务数据的商品后端将拒绝删除，建议改用停用。"
-              okText="删除"
-              confirming={removeMutation.isPending}
-              onConfirm={() => removeMutation.mutate(record.id)}
-            >
-              <Button type="link" size="small" danger>
-                删除
-              </Button>
-            </SfConfirm>
-          </span>
-        )
-      },
+          </Dropdown>
+        </span>
+      ),
     },
   ]
 
@@ -481,6 +499,37 @@ export default function ProductListPage() {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* 「更多」菜单 停用/启用/删除 的二次确认（文案与原行内 SfConfirm 逐字一致；
+          危险动作 danger ok + confirmLoading 防重复） */}
+      <Modal
+        title={
+          rowConfirm?.kind === 'remove'
+            ? '确认删除该商品？'
+            : rowConfirm?.record.status === 'ENABLED'
+              ? '确认停用该商品？'
+              : '确认启用该商品？'
+        }
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={rowConfirm?.kind === 'remove' ? removeMutation.isPending : statusMutation.isPending}
+        okText={
+          rowConfirm?.kind === 'remove' ? '删除' : rowConfirm?.record.status === 'ENABLED' ? '停用' : '启用'
+        }
+        okButtonProps={{
+          danger: rowConfirm?.kind === 'remove' || rowConfirm?.record.status === 'ENABLED',
+        }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Paragraph type="secondary" style={{ marginBottom: 0 }}>
+          {rowConfirm?.kind === 'remove'
+            ? '已产生业务数据的商品后端将拒绝删除，建议改用停用。'
+            : rowConfirm?.record.status === 'ENABLED'
+              ? '停用将级联停用其启用中的 SKU；启用不自动反启 SKU。'
+              : '启用后商品可重新挂 SKU 与参与业务。'}
+        </Paragraph>
       </Modal>
     </div>
   )

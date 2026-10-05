@@ -4,15 +4,18 @@ import {
   Button,
   Card,
   Drawer,
+  Dropdown,
   Form,
   Input,
   InputNumber,
-  Popconfirm,
+  Modal,
   Select,
   Space,
   Spin,
+  Typography,
 } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -271,6 +274,18 @@ export default function BinListPage() {
     }
   }
 
+  // 「更多」菜单内 停用/启用/删除 的二次确认：Popconfirm 形态无法锚定在 Dropdown 菜单项内——
+  // 改用同语义声明式 Modal（danger ok），文案逐字保留
+  const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: BinItem } | null>(null)
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    if (rowConfirm.kind === 'toggle') {
+      void handleToggleStatus(rowConfirm.record).then(() => setRowConfirm(null))
+    } else {
+      void handleRemove(rowConfirm.record).then(() => setRowConfirm(null))
+    }
+  }
+
   const columns: ColumnsType<BinItem> = [
     ...COLUMNS,
     {
@@ -280,29 +295,26 @@ export default function BinListPage() {
       fixed: 'right',
       render: (_, record) => {
         const enabled = record.status?.toUpperCase() === 'ENABLED'
+        const rowMenu: MenuProps = {
+          items: [
+            { key: 'toggle', label: enabled ? '停用' : '启用', danger: enabled },
+            { type: 'divider' },
+            { key: 'remove', label: '删除', danger: true },
+          ],
+          onClick: ({ key }) => {
+            if (key === 'toggle' || key === 'remove') setRowConfirm({ kind: key, record })
+          },
+        }
         return (
           <Space size={0}>
             <Button type="link" size="small" style={{ paddingInline: 4 }} onClick={() => openEdit(record)}>
               编辑
             </Button>
-            <Popconfirm
-              title={enabled ? '确认停用该库位？' : '确认启用该库位？'}
-              onConfirm={() => void handleToggleStatus(record)}
-            >
-              <Button type="link" size="small" style={{ paddingInline: 4 }} loading={togglingId === record.id}>
-                {enabled ? '停用' : '启用'}
+            <Dropdown menu={rowMenu} trigger={['click']}>
+              <Button type="link" size="small" style={{ paddingInline: 4 }} aria-label="更多操作">
+                更多<MoreOutlined style={{ marginLeft: 2 }} />
               </Button>
-            </Popconfirm>
-            <Popconfirm
-              title="确认删除该库位？"
-              description="已有库存数据时后端将拒绝删除（级联校验）"
-              okButtonProps={{ danger: true }}
-              onConfirm={() => void handleRemove(record)}
-            >
-              <Button type="link" size="small" danger style={{ paddingInline: 4 }} loading={removingId === record.id}>
-                删除
-              </Button>
-            </Popconfirm>
+            </Dropdown>
           </Space>
         )
       },
@@ -441,6 +453,30 @@ export default function BinListPage() {
           </Form>
         </Spin>
       </Drawer>
+
+      {/* 「更多 → 停用/启用/删除」的二次确认（文案与原行内 Popconfirm 逐字一致） */}
+      <Modal
+        title={
+          rowConfirm?.kind === 'remove'
+            ? '确认删除该库位？'
+            : rowConfirm?.record.status?.toUpperCase() === 'ENABLED'
+              ? '确认停用该库位？'
+              : '确认启用该库位？'
+        }
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={rowConfirm?.kind === 'remove' ? removingId !== null : togglingId !== null}
+        okText={
+          rowConfirm?.kind === 'remove' ? '删除' : rowConfirm?.record.status?.toUpperCase() === 'ENABLED' ? '停用' : '启用'
+        }
+        okButtonProps={{ danger: true }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Typography.Text type="secondary">
+          {rowConfirm?.kind === 'remove' ? '已有库存数据时后端将拒绝删除（级联校验）' : undefined}
+        </Typography.Text>
+      </Modal>
     </div>
   )
 }

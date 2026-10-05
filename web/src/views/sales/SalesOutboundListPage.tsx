@@ -1,39 +1,25 @@
 import { useMemo, useState } from 'react'
-import { Card } from 'antd'
+import { Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import {
   outboundApi,
   type OutboundOrder,
   type OutboundOrderQuery,
   type OutboundOrderStatus,
 } from '@/api/outbound'
+import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
-import type { StatusSemantic } from '@/types/status'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { OUTBOUND_STATUS_TAG } from './salesStatusMeta'
 import { formatDateTime } from '@/utils/format'
 
-/**
- * 出库单状态 → SfStatusTag 兜底映射（10 态值域 internal/sales/models.go:265-276，
- * 迁移 CHECK 同源；大写原始值不命中 types/status.ts 注册表（resolveStatus 精确匹配
- * 小写键），label/semantic 兜底接管，api/transfer.ts TRANSFER_STATUS_TAG 同口径）。
- */
-const OUTBOUND_STATUS_TAG: Record<OutboundOrderStatus, { label: string; semantic: StatusSemantic }> = {
-  PENDING_ALLOCATE: { label: '待分配', semantic: 'pending' },
-  ALLOCATED: { label: '已分配', semantic: 'processing' },
-  PICKING: { label: '拣货中', semantic: 'processing' },
-  PICKED: { label: '已拣货', semantic: 'success' },
-  CHECKED: { label: '已复核', semantic: 'success' },
-  PACKED: { label: '已打包', semantic: 'success' },
-  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'processing' },
-  SHIPPED_ALL: { label: '全部发货', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-  CLOSED: { label: '已关闭', semantic: 'neutral' },
-}
+const { Link } = Typography
 
 /** 状态筛选选项与列内标签同源（值为后端大写枚举，handler.go:257 直接入参） */
 const STATUS_OPTIONS = (
@@ -42,9 +28,10 @@ const STATUS_OPTIONS = (
   >
 ).map(([value, meta]) => ({ label: meta.label, value }))
 
+/** 状态标签：大写枚举经 toStatusKey 归一后注册表优先，未注册键以域内映射兜底（salesStatusMeta.ts） */
 function OutboundStatusTag({ status }: { status: OutboundOrderStatus }) {
   const meta = OUTBOUND_STATUS_TAG[status]
-  return <SfStatusTag status={status} label={meta?.label} semantic={meta?.semantic} />
+  return <SfStatusTag status={toStatusKey(status)} label={meta?.label} semantic={meta?.semantic} />
 }
 
 /** 出库单列表（/sales/outbounds；GET /api/outbounds，后端 M2 已交付 internal/sales/routes.go:82-87）。
@@ -52,13 +39,17 @@ function OutboundStatusTag({ status }: { status: OutboundOrderStatus }) {
  * 本版切换 outboundApi.list。搜索参数 outbound_no/so_no/status/warehouse_id（handler.go:253-272
  * 实测入参，单号均精确匹配）；仓库出参为裸 ID，经 options 端点映射，失败降级 ID。
  * 出库单由销售订单审核后的下游流程（库存分配 → 拣货 → 复核 → 打包 → 发货）生成，
- * 页面不提供手工新建入口。 */
+ * 页面不提供手工新建入口。详情跳转与出库域 OutboundPage 同径：/outbound/{outbound_no}
+ * （后端 GET /api/outbounds/:no 按单号查询）；本页仍在销售菜单组，菜单归属不动。 */
 export default function SalesOutboundListPage() {
   const [params, setParams] = useState<OutboundOrderQuery>({})
+  const navigate = useNavigate()
   const list = usePagedList<OutboundOrder, OutboundOrderQuery>({
     queryKey: ['outbound', 'orders'],
     fetch: (q) => outboundApi.list(q),
     params,
+    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
+    persistKey: 'sales-outbounds',
   })
 
   // 仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
@@ -77,7 +68,15 @@ export default function SalesOutboundListPage() {
   }
 
   const columns: ColumnsType<OutboundOrder> = [
-    { title: '出库单号', dataIndex: 'outbound_no', width: 170, fixed: 'left' },
+    {
+      title: '出库单号',
+      dataIndex: 'outbound_no',
+      width: 170,
+      fixed: 'left',
+      render: (v: string, record: OutboundOrder) => (
+        <Link onClick={() => navigate(`/outbound/${record.outbound_no}`)}>{v}</Link>
+      ),
+    },
     {
       title: '销售单号',
       dataIndex: 'so_no',
@@ -108,6 +107,17 @@ export default function SalesOutboundListPage() {
       dataIndex: 'created_at',
       width: 170,
       render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 80,
+      render: (_: unknown, record: OutboundOrder) => (
+        <Button type="link" size="small" onClick={() => navigate(`/outbound/${record.outbound_no}`)}>
+          详情
+        </Button>
+      ),
     },
   ]
 
@@ -149,7 +159,7 @@ export default function SalesOutboundListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有出库单"
-          scrollX={850}
+          scrollX={930}
         />
       </Card>
     </div>

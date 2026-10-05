@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Button, Card, Form, Input, Modal, Popconfirm, Spin, Tooltip, Tree, Typography, message } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { Button, Card, Dropdown, Form, Input, Modal, Spin, Tooltip, Tree, Typography, message } from 'antd'
+import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
+import type { MenuProps } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import type { TreeDataNode } from 'antd'
@@ -223,6 +224,17 @@ export default function RoleListPage() {
     onError: (error) => message.error(resolveErrorMessage(error)),
   })
 
+  // 「更多」菜单内 停用/启用 的二次确认：SfConfirm 为 Popconfirm 形态，无法锚定在
+  // Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading），文案逐字保留
+  const [rowConfirm, setRowConfirm] = useState<RoleItem | null>(null)
+  const handleRowConfirmOk = () => {
+    if (!rowConfirm) return
+    statusMutation.mutate(
+      { id: rowConfirm.id, status: rowConfirm.status === 'ENABLED' ? 'DISABLED' : 'ENABLED' },
+      { onSuccess: () => setRowConfirm(null) },
+    )
+  }
+
   const assignPermissionsMutation = useMutation({
     mutationFn: ({ id, permissionIds }: { id: string; permissionIds: number[] }) =>
       rbacApi.assignRolePermissions(id, permissionIds),
@@ -264,10 +276,18 @@ export default function RoleListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 190,
+      width: 150,
       fixed: 'right',
       render: (_, record) => {
-        const id = record.id
+        const disabling = record.status === 'ENABLED'
+        const rowMenu: MenuProps = {
+          items: [
+            { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling, disabled: record.is_system },
+          ],
+          onClick: ({ key }) => {
+            if (key === 'toggle') setRowConfirm(record)
+          },
+        }
         return (
           <>
             <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', role: record })}>
@@ -276,24 +296,13 @@ export default function RoleListPage() {
             <Button type="link" size="small" onClick={() => setModal({ kind: 'permissions', role: record })}>
               权限
             </Button>
-            {record.status === 'ENABLED' ? (
-              <Popconfirm
-                title="确认停用该角色？"
-                description="停用后关联用户将失去该角色的权限"
-                onConfirm={() => statusMutation.mutate({ id, status: 'DISABLED' })}
-                disabled={record.is_system}
-              >
-                <Tooltip title={record.is_system ? '内置角色不可停用' : undefined}>
-                  <Button type="link" size="small" danger disabled={record.is_system}>
-                    停用
-                  </Button>
-                </Tooltip>
-              </Popconfirm>
-            ) : (
-              <Button type="link" size="small" onClick={() => statusMutation.mutate({ id, status: 'ENABLED' })}>
-                启用
-              </Button>
-            )}
+            <Dropdown menu={rowMenu} trigger={['click']} disabled={record.is_system}>
+              <Tooltip title={record.is_system ? '内置角色不可停用' : undefined}>
+                <Button type="link" size="small" aria-label="更多操作">
+                  更多<MoreOutlined style={{ marginLeft: 2 }} />
+                </Button>
+              </Tooltip>
+            </Dropdown>
           </>
         )
       },
@@ -356,6 +365,22 @@ export default function RoleListPage() {
           onSubmit={(permissionIds) => assignPermissionsMutation.mutate({ id: modal.role.id, permissionIds })}
         />
       )}
+
+      {/* 「更多 → 停用/启用」的二次确认（文案与原行内 Popconfirm 逐字一致） */}
+      <Modal
+        title={rowConfirm?.status === 'ENABLED' ? '确认停用该角色？' : '确认启用该角色？'}
+        open={rowConfirm !== null}
+        width={440}
+        confirmLoading={statusMutation.isPending}
+        okText={rowConfirm?.status === 'ENABLED' ? '停用' : '启用'}
+        okButtonProps={{ danger: rowConfirm?.status === 'ENABLED' }}
+        onOk={handleRowConfirmOk}
+        onCancel={() => setRowConfirm(null)}
+      >
+        <Typography.Text type="secondary">
+          {rowConfirm?.status === 'ENABLED' ? '停用后关联用户将失去该角色的权限' : '启用后角色恢复生效。'}
+        </Typography.Text>
+      </Modal>
     </div>
   )
 }
