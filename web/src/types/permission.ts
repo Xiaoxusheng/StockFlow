@@ -47,16 +47,15 @@ const RESOURCE_ALIASES: Record<string, readonly string[]> = {
  * 跨域同名资源段的域段限定（matchBackendPermission 忽略域段的补充校验）：
  * 「资源:动作」两段匹配建立在 M1 清单资源段全局唯一的假设上；当同一资源段出现在
  * 多个后端域、或菜单指向的资源域尚未立项时，必须限定允许的后端域段，否则会误亮。
- * - task：后端 task 域未立项，task 资源段当前仅属 printing 域（printing:task:*，
- *   internal/auth/permissions.go:323-326）——菜单 /tasks（我的任务）指向未交付端点
- *   GET /api/tasks，不限定会误亮入口（持打印任务权限的非超管直接命中）。
- *   限定后任务域码立项前不可见（fail-closed，与端点未交付状态一致）；
- *   立项时把实际冻结码域段加入白名单即可。
+ * - task 条目已摘除（2026-10-05 平台批）：GET /api/tasks 交付并挂 inventory:inventory:list
+ *   （internal/reports/routes.go:115），菜单 /tasks 改挂 inventory:stock:view——经
+ *   RESOURCE_ALIASES stock→['stock','inventory'] 归一命中 inventory 域冻结码，原
+ *   「task 域未立项」的 fail-closed 限定失义；task 资源段在 M1 清单仍属 printing 域
+ *   （printing:task:*），但已无菜单码指向该资源段，无误亮面。后续如再出现跨域同名
+ *   资源段，按原规则补条目即可。
  * - 既有别名映射（stock/department）资源段全局唯一，不受影响。
  */
-const DOMAIN_BOUND_RESOURCES: Record<string, readonly string[]> = {
-  task: ['task'],
-}
+const DOMAIN_BOUND_RESOURCES: Record<string, readonly string[]> = {}
 
 /**
  * 菜单码与后端权限码的归一匹配（集中在本文件，不改 config/menu.tsx）：

@@ -70,9 +70,17 @@ export const useAuthStore = create<AuthState>((set) => {
     mustChangePassword: initial?.mustChangePassword ?? false,
     setSession: (session) => {
       // is_super 位于 MeResult 顶层而非 MeResult.user（service_auth.go:444 vs :474），
-      // 而菜单/按钮的 canAccess 判据是 user.is_super——此处统一并入，登录/自愈/刷新三路径全覆盖
+      // 而菜单/按钮的 canAccess 判据是 user.is_super——此处统一并入，登录/自愈/刷新三路径全覆盖。
+      // permissions 同理：MeResult.permissions 在顶层，而 canAccess 读 user.permissions
+      // （types/permission.ts:94）——不并入则非超管用户恒为空集，带码子菜单全部被
+      // fail-closed 滤空（侧边栏"分组能展开但没有子项"）。登录响应不含权限/超管标记，
+      // 由 PcLayout 会话自愈拉 /api/auth/me 补全（auth.ts StoredSession 注）。
       const nextUser = session.user
-        ? { ...session.user, is_super: session.isSuper ?? session.user.is_super }
+        ? {
+            ...session.user,
+            is_super: session.isSuper ?? session.user.is_super,
+            permissions: session.permissions ?? session.user.permissions,
+          }
         : null
       const next: StoredSession = {
         token: session.token,

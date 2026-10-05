@@ -9,31 +9,28 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
-/** 任务类型文案（api/task.ts TaskType；后端枚举冻结前未知值回退展示原始值） */
+/** 任务类型文案（api/task.ts TaskType 三值；未知值回退展示原始值） */
 const TYPE_LABEL: Record<string, string | undefined> = {
   putaway: '上架任务',
   picking: '拣货任务',
   checking: '复核任务',
-  packing: '打包任务',
-  moving: '移库任务',
-  counting: '盘点任务',
 }
 
+/** 类型筛选选项（后端仅映射 putaway/picking/checking 三任务表——packing/moving/counting
+ * 传值 400，api.md §9 平台批） */
 const TYPE_OPTIONS: Array<{ label: string; value: TaskType }> = [
   { label: '上架任务', value: 'putaway' },
   { label: '拣货任务', value: 'picking' },
   { label: '复核任务', value: 'checking' },
-  { label: '打包任务', value: 'packing' },
-  { label: '移库任务', value: 'moving' },
-  { label: '盘点任务', value: 'counting' },
 ]
 
-/** 状态选项与 types/status.ts 任务状态注册表一致 */
+/** 状态选项（统一五值；exception 为第五统一值——picking/checking 原态 EXCEPTION 映射） */
 const STATUS_OPTIONS: Array<{ label: string; value: TaskStatus }> = [
   { label: '待处理', value: 'pending' },
   { label: '进行中', value: 'in_progress' },
   { label: '已完成', value: 'completed' },
   { label: '已取消', value: 'cancelled' },
+  { label: '异常', value: 'exception' },
 ]
 
 const COLUMNS: ColumnsType<TaskItem> = [
@@ -81,7 +78,9 @@ const COLUMNS: ColumnsType<TaskItem> = [
   },
 ]
 
-/** 我的任务（/tasks，menu.tsx 仓储中心子菜单；GET /api/tasks 前端先行契约，后端未交付呈统一错误态） */
+/** 我的任务（/tasks，menu.tsx 仓储中心子菜单；GET /api/tasks 2026-10-05 平台批已交付，
+ * 行列含 raw_status 原表态）。筛选仅后端契约参数 task_type/status/warehouse_code
+ * （workbench.go:865-891 仅读三键）——keyword 后端不消费，假筛选项已摘除（api.md §9 平台批）。 */
 export default function MyTasksPage() {
   const [params, setParams] = useState<TaskQuery>({})
   const list = usePagedList<TaskItem, TaskQuery>({
@@ -97,11 +96,10 @@ export default function MyTasksPage() {
 
   return (
     <div className="sf-page">
-      <SfPageHeader title="我的任务" subtitle="上架 / 拣货 / 复核 / 打包 / 移库 / 盘点 作业任务" />
+      <SfPageHeader title="我的任务" subtitle="上架 / 拣货 / 复核 作业任务" />
       <Card size="small">
         <SfSearchForm
           fields={[
-            { name: 'keyword', label: '关键词', control: 'input', placeholder: '任务号 / 关联单号' },
             { name: 'task_type', label: '任务类型', control: 'select', options: TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
             { name: 'warehouse_code', label: '仓库', control: 'input', placeholder: '仓库编码' },

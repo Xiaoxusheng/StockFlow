@@ -140,13 +140,17 @@ export function PcLayout() {
     staleTime: 30_000,
   })
 
-  /** 可见菜单（与 sidebar 同一 canAccess fail-closed 过滤），同时驱动渲染与全局搜索 */
+  /** 可见菜单（与 sidebar 同一 canAccess fail-closed 过滤），同时驱动渲染与全局搜索。
+   * 子项全部被滤空的分组一并隐藏——保留空壳会出现"分组能展开但没有子项"的死入口
+   * （数据权限使然：如仅持仓储域权限的角色不应看到销售/系统管理的空分组）。 */
   const visibleMenu = useMemo(
     () =>
-      MENU_TREE.filter((group) => canAccess(user, group.permission)).map((group) => ({
-        ...group,
-        children: group.children?.filter((child) => canAccess(user, child.permission)),
-      })),
+      MENU_TREE.filter((group) => canAccess(user, group.permission))
+        .map((group) => ({
+          ...group,
+          children: group.children?.filter((child) => canAccess(user, child.permission)),
+        }))
+        .filter((group) => group.children === undefined || group.children.length > 0),
     [user],
   )
   const menuItems = useMemo(() => buildMenuItems(visibleMenu), [visibleMenu])
@@ -476,7 +480,7 @@ function ChangePasswordModal({
       onCancel={force ? undefined : onClose}
       closable={!force}
       keyboard={!force}
-      maskClosable={false}
+      mask={{ closable: false }}
       cancelButtonProps={force ? { style: { display: 'none' } } : undefined}
     >
       {contextHolder}

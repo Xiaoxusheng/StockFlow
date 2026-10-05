@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Descriptions, Drawer, Empty, Input, Select, Space, Tag, Timeline, Tooltip, Typography, message } from 'antd'
+import { Button, Descriptions, Drawer, Empty, Input, Select, Space, Tag, Timeline, Tooltip, Typography, Upload, message } from 'antd'
+import { UploadOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ExceptionId, ExceptionItem, ExceptionStatus } from '@/api/exception'
 import {
@@ -17,6 +18,13 @@ import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { canAccess } from '@/types/permission'
 import { useAuthStore } from '@/stores/auth'
 import { EMPTY_TEXT, formatDateTime } from '@/utils/format'
+import {
+  EXCEPTION_IMAGE_ACCEPT,
+  EXCEPTION_IMAGE_LIMIT,
+  ExceptionImageStrip,
+  exceptionImagesDisabledReason,
+  uploadAndAttachExceptionImages,
+} from './exceptionImages'
 
 const { Text } = Typography
 const NOTE_MAX = 200
@@ -50,8 +58,10 @@ function ExceptionStatusTag({ status }: { status: ExceptionStatus }) {
  * （freeze_lock_id，解决/关闭时后端同事务释放，inventory-rules.md §4.2）；
  * 生命周期动作真实接线（POST assign/start/review/resolve/close），前置权限码经 canAccess
  * fail-closed 控制、状态机前置态不满足时 disabled + Tooltip 说明原因（死按钮门禁）。
- * image_refs 后端有列无写入路径（创建恒空数组，service_exception.go:140）——只读展示，
- * 上传能力属后端侧条目，不提供假入口。
+ * 取证图片真实接线（./exceptionImages 契约注释）：image_refs 经认证 Blob 取流缩略图/全屏预览；
+ * 「挂接图片」两段式上传（文件中心 POST /api/files → POST /api/exceptions/{id}/images），
+ * 权限 returns:exception:execute + 生命周期 OPEN..PENDING_REVIEW 前置、累计 ≤20 预检，
+ * RESOLVED/CLOSED 后端 409 拒绝（2026-10-05 运行进程实测通过）。
  */
 export default function ExceptionDetailDrawer({ open, exceptionId, onClose }: ExceptionDetailDrawerProps) {
   const [messageApi, messageContext] = message.useMessage()
@@ -150,12 +160,45 @@ export default function ExceptionDetailDrawer({ open, exceptionId, onClose }: Ex
     return undefined
   }
 
+  // 挂接图片取证：./exceptionImages 两段式编排（文件中心上传 → /images 挂接），
+  // 权限/生命周期守卫经 exceptionImagesDisabledReason（RESOLVED/CLOSED 后端 409 拒绝）
+  const attachDisabledReason = exceptionImagesDisabledReason(detail, canExecute)
+  const attachMutation = useMutation({
+    mutationFn: (files: File[]) => {
+      if (exceptionId == null || detail == null) throw new Error('未选择异常单')
+      return uploadAndAttachExceptionImages(exceptionId, detail.exception_no, files)
+    },
+    onSuccess: (view, files) => {
+      messageApi.success(`已挂接 ${files.length} 张取证图片（共 ${view.image_refs.length}/${EXCEPTION_IMAGE_LIMIT}）`)
+      invalidate()
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
+  })
+
+  /** 挂接前预检：图片类型 + 累计 ≤20（后端权威校验，前端拦截明显超限的提交） */
+  const handleAttachFiles = (files: File[]) => {
+    if (detail == null) return
+    const images = files.filter((file) => file.type.startsWith('image/'))
+    if (images.length === 0) {
+      messageApi.warning(`请选择图片文件（${EXCEPTION_IMAGE_ACCEPT.replace(/\./g, '')}）`)
+      return
+    }
+    const room = EXCEPTION_IMAGE_LIMIT - detail.image_refs.length
+    if (images.length > room) {
+      messageApi.warning(
+        `累计挂接图片不能超过 ${EXCEPTION_IMAGE_LIMIT} 张（后端限制），还可挂接 ${Math.max(room, 0)} 张`,
+      )
+      return
+    }
+    attachMutation.mutate(images)
+  }
+
   return (
     <Drawer
       title={detail ? `异常单详情 · ${detail.exception_no}` : '异常单详情'}
       open={open}
       onClose={onClose}
-      width={760}
+      size={760}
       destroyOnHidden
     >
       {messageContext}
@@ -204,13 +247,42 @@ export default function ExceptionDetailDrawer({ open, exceptionId, onClose }: Ex
               { key: 'remark', label: '备注', children: detail.remark || EMPTY_TEXT, span: 2 },
               {
                 key: 'images',
-                label: '图片',
-                children: detail.image_refs.length > 0 ? (
-                  <Space wrap>{detail.image_refs.map((ref, i) => <Tag key={`${ref}-${i}`}>{ref}</Tag>)}</Space>
-                ) : (
-                  <Text type="secondary">无（后端异常域暂无图片上传/挂接端点，image_refs 有列无写入路径）</Text>
-                ),
+                label: `取证图片（${detail.image_refs.length}/${EXCEPTION_IMAGE_LIMIT}）`,
                 span: 2,
+                children: (
+                  <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                    {detail.image_refs.length > 0 ? (
+                      <ExceptionImageStrip refs={detail.image_refs} />
+                    ) : (
+                      <Text type="secondary">无</Text>
+                    )}
+                    <Tooltip
+                      title={
+                        attachDisabledReason ??
+                        `上传图片并挂接为本异常单取证（写入追加式处理记录，累计上限 ${EXCEPTION_IMAGE_LIMIT} 张）`
+                      }
+                    >
+                      {/* disabled 时外包 span 保证 Tooltip 可达（禁用必须带原因说明） */}
+                      <span style={{ display: 'inline-block' }}>
+                        <Upload
+                          accept={EXCEPTION_IMAGE_ACCEPT}
+                          multiple
+                          showUploadList={false}
+                          disabled={!!attachDisabledReason || attachMutation.isPending}
+                          beforeUpload={(file, fileList) => {
+                            // 阻止 antd 自动上传；多选时逐文件触发，仅以首个文件为准回调一次（SfAttachment 同款）
+                            if (fileList[0] === file) handleAttachFiles([...fileList])
+                            return false
+                          }}
+                        >
+                          <Button icon={<UploadOutlined />} loading={attachMutation.isPending}>
+                            挂接图片
+                          </Button>
+                        </Upload>
+                      </span>
+                    </Tooltip>
+                  </Space>
+                ),
               },
             ]}
           />

@@ -41,7 +41,12 @@ export const MENU_TREE: MenuItem[] = [
     label: '仓储中心',
     icon: <InboxOutlined />,
     children: [
-      { path: '/tasks', label: '我的任务', permission: 'task:view' },
+      // 我的任务（2026-10-05 平台批：GET /api/tasks 交付并挂 inventory:inventory:list——
+      // internal/reports/routes.go:115；菜单码 task:view 后端零命中 + DOMAIN_BOUND_RESOURCES
+      // 限定，端点交付后仍 fail-closed 恒隐身，故归一为 inventory:stock:view 经
+      // RESOURCE_ALIASES stock→['stock','inventory'] 命中（types/permission.ts），与
+      // 库存分析/仓库分析同款修法）
+      { path: '/tasks', label: '我的任务', permission: 'inventory:stock:view' },
       { path: '/inbound', label: '入库管理', permission: 'inbound:view' },
       // 入/出库分析菜单码 reports:report:view：数据端点挂 reports:report:read
       // （internal/reports/routes.go inbound-stats/outbound-stats），matchBackendPermission
@@ -111,6 +116,11 @@ export const MENU_TREE: MenuItem[] = [
       { path: '/purchases', label: '采购订单', permission: 'purchase:view' },
       { path: '/purchases/receipts', label: '收货', permission: 'purchase:receipt:view' },
       { path: '/purchases/returns', label: '采购退货', permission: 'purchase:return:view' },
+      // 采购分析（分析卡片轮立项：/api/purchases/analytics/trend、supplier-rank、
+      // status-composition 三端点挂 purchase:purchase:list——internal/reports/routes.go:103-105；
+      // 菜单码 purchase:view 取末两段，持采购域任意动作可见，与组内既有条目同规则；
+      // 页面消费 api/analytics.ts）
+      { path: '/purchases/analytics', label: '采购分析', permission: 'purchase:view' },
     ],
   },
   {
@@ -121,6 +131,9 @@ export const MENU_TREE: MenuItem[] = [
       { path: '/sales', label: '销售订单', permission: 'sales:view' },
       { path: '/sales/outbounds', label: '出库', permission: 'sales:outbound:view' },
       { path: '/sales/returns', label: '销售退货', permission: 'sales:return:view' },
+      // 销售分析（同采购分析：三端点挂 sales:sales:list——internal/reports/routes.go:106-108；
+      // 销售金额趋势为订单金额口径非流水估值，页面须标注——api.md §9 收口披露节③）
+      { path: '/sales/analytics', label: '销售分析', permission: 'sales:view' },
     ],
   },
   {

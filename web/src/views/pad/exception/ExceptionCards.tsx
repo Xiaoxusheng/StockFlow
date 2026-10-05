@@ -64,41 +64,6 @@ export function ExceptionCard({ item, selected = false, onClick }: ExceptionCard
   )
 }
 
-export interface ActionPlaceholderProps {
-  label: string
-  icon?: ReactNode
-  /** 禁用原因（死按钮门禁：disabled 必须给原因，点按 Toast 送达） */
-  reason: string
-  notify: (message: string) => void
-}
-
-/**
- * 动作占位按钮（frontend.md §9.1 Disabled 口径，同地基 PadActionBar 禁用包装模式）：
- * 后端端点未交付的动作（拍照取证——异常域无图片挂接端点）disabled + 点按 Toast 原因，
- * 不假装可用。生命周期动作已接线，走 PadExceptionAction。
- */
-export function ActionPlaceholder({ label, icon, reason, notify }: ActionPlaceholderProps) {
-  return (
-    <span
-      role="button"
-      tabIndex={0}
-      aria-label={`${label}（不可用：${reason}）`}
-      style={{ display: 'block', cursor: 'not-allowed' }}
-      onClick={() => notify(reason)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault()
-          notify(reason)
-        }
-      }}
-    >
-      <Button block size="large" icon={icon} disabled style={{ height: 'var(--sf-pad-touch-min)' }}>
-        {label}
-      </Button>
-    </span>
-  )
-}
-
 export interface PadExceptionActionProps {
   label: string
   icon?: ReactNode

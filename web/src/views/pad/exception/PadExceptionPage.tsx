@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Button, message } from 'antd'
 import {
   CameraOutlined,
@@ -28,7 +28,13 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { EMPTY_TEXT, formatDateTime } from '@/utils/format'
-import { ActionPlaceholder, ExceptionCard, ExceptionStatusTag, PadExceptionAction } from './ExceptionCards'
+import {
+  EXCEPTION_IMAGE_LIMIT,
+  ExceptionImageStrip,
+  exceptionImagesDisabledReason,
+  uploadAndAttachExceptionImages,
+} from '@/views/exception/exceptionImages'
+import { ExceptionCard, ExceptionStatusTag, PadExceptionAction } from './ExceptionCards'
 
 /** 九类异常 chip（后端中文值域即文案：internal/returns/models.go:48-51） */
 const TYPE_OPTIONS: Array<{ label: string; value: ExceptionType }> = EXCEPTION_TYPES.map((value) => ({
@@ -41,10 +47,9 @@ const STATUS_OPTIONS: Array<{ label: string; value: ExceptionStatus }> = (
   Object.keys(EXCEPTION_STATUS_TAG) as ExceptionStatus[]
 ).map((value) => ({ label: EXCEPTION_STATUS_TAG[value].label, value }))
 
-/** 拍照取证占位原因：后端异常域无图片挂接端点（image_refs 有列无写入路径，
- * service_exception.go:140；文件域 /api/files 已交付但未与异常单打通）——后端侧条目，保持占位 */
-const PHOTO_DISABLED_REASON =
-  '拍照取证暂无法接线：后端异常域无图片上传/挂接端点（image_refs 有列无写入路径），待后端补端点后接线，本轮为占位入口'
+/** 拍照取证：capture=environment 直起相机（桌面浏览器忽略该属性降级为选图），
+ * 仅收图片；白名单/数量权威校验在后端（internal/returns/service_exception_images.go） */
+const PHOTO_INPUT_ACCEPT = 'image/*'
 
 /**
  * Pad 异常页（/pad/exception，frontend.md §20.2/§20.3/§20.4 + business-flow.md §11.2）：
@@ -57,7 +62,9 @@ const PHOTO_DISABLED_REASON =
  *   （PROCESSING）、解决=resolve（PENDING_REVIEW，后端同事务释放异常冻结）、关闭=close
  *   （RESOLVED）；前置权限码 returns:exception:* 经 canAccess fail-closed 控制
  *   （permission.md §5：前端仅体验优化，后端 RequirePermission 仍强校验）；
- * - 拍照取证保持占位（后端无图片挂接端点，disabled 注明原因，不假装可用）；
+ * - 拍照取证真实接线（@/views/exception/exceptionImages 两段式契约：文件中心上传 →
+ *   POST /api/exceptions/{id}/images 挂接，权限 returns:exception:execute + 生命周期
+ *   OPEN..PENDING_REVIEW 前置、累计 ≤20 预检）；取证图片经认证 Blob 缩略图展示；
  * - 竖屏堆叠：顶部当前异常卡（选中详情内联列表上方）→ 详情/列表滚动区 → 底部 PadActionBar。
  */
 export default function PadExceptionPage() {
@@ -132,6 +139,39 @@ export default function PadExceptionPage() {
     },
     onError: notifyError,
   })
+
+  // 拍照取证：@/views/exception/exceptionImages 两段式编排——文件中心上传
+  // （module=exception、business_no=异常单号）→ POST /api/exceptions/{id}/images 挂接（追加式）
+  const cameraInputRef = useRef<HTMLInputElement>(null)
+  const attachMutation = useMutation({
+    mutationFn: (files: File[]) => {
+      if (selected == null) throw new Error('未选择异常单')
+      return uploadAndAttachExceptionImages(selected.id, selected.exception_no, files)
+    },
+    onSuccess: (view, files) => {
+      messageApi.success(`已挂接 ${files.length} 张取证图片（共 ${view.image_refs.length}/${EXCEPTION_IMAGE_LIMIT}）`)
+      invalidateExceptions()
+    },
+    onError: notifyError,
+  })
+
+  /** 拍照/选图提交前预检：图片类型 + 累计 ≤20（后端权威校验，前端拦截明显超限的提交） */
+  const handlePhotoFiles = (fileList: FileList | null) => {
+    if (selected == null || fileList == null || fileList.length === 0) return
+    const files = Array.from(fileList).filter((file) => file.type.startsWith('image/'))
+    if (files.length === 0) {
+      messageApi.warning('请选择图片文件（png/jpg/jpeg/gif/webp/bmp）')
+      return
+    }
+    const room = EXCEPTION_IMAGE_LIMIT - selected.image_refs.length
+    if (files.length > room) {
+      messageApi.warning(
+        `累计挂接图片不能超过 ${EXCEPTION_IMAGE_LIMIT} 张（后端限制），还可挂接 ${Math.max(room, 0)} 张`,
+      )
+      return
+    }
+    attachMutation.mutate(files)
+  }
 
   const handleFilter = (apply: () => void) => {
     apply()
@@ -209,6 +249,14 @@ export default function PadExceptionPage() {
           : []),
         { label: '描述', value: selected.detail || EMPTY_TEXT },
         { label: '备注', value: selected.remark || EMPTY_TEXT },
+        ...(selected.image_refs.length > 0
+          ? [
+              {
+                label: `取证图片（${selected.image_refs.length}）`,
+                value: <ExceptionImageStrip refs={selected.image_refs} width={56} height={56} />,
+              },
+            ]
+          : []),
       ]}
       columns={2}
     />
@@ -339,7 +387,18 @@ export default function PadExceptionPage() {
     </div>
   )
 
-  // 右栏处理操作区：生命周期动作真实接线（权限/状态守卫）+ 拍照取证占位（后端无端点）
+  // 右栏处理操作区：生命周期动作真实接线（权限/状态守卫）+ 拍照取证（两段式挂接，守卫同口径）
+  const photoReason = selected
+    ? exceptionImagesDisabledReason(selected, canExecute)
+    : '先从左侧选择一张异常卡'
+  const openPhotoPicker = () => {
+    if (photoReason) {
+      messageApi.warning(photoReason)
+      return
+    }
+    cameraInputRef.current?.click()
+  }
+
   const actionPanel = (
     <section className="sf-pad-card" aria-label="异常处理操作区">
       <h3 className="sf-pad-card-title">处理操作</h3>
@@ -382,11 +441,41 @@ export default function PadExceptionPage() {
             loading={lifecycleMutation.isPending}
             onClick={() => handleAction('close')}
           />
-          <ActionPlaceholder
-            label="拍照取证（占位）"
-            icon={<CameraOutlined />}
-            reason={PHOTO_DISABLED_REASON}
-            notify={(text) => messageApi.info(text)}
+          <span
+            role="button"
+            tabIndex={0}
+            aria-label={photoReason ? `拍照取证（不可用：${photoReason}）` : '拍照取证'}
+            style={{ display: 'block', cursor: photoReason ? 'not-allowed' : 'pointer' }}
+            onClick={openPhotoPicker}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                openPhotoPicker()
+              }
+            }}
+          >
+            <Button
+              block
+              size="large"
+              icon={<CameraOutlined />}
+              disabled={!!photoReason}
+              loading={attachMutation.isPending}
+              style={{ height: 'var(--sf-pad-touch-min)' }}
+            >
+              拍照取证
+            </Button>
+          </span>
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept={PHOTO_INPUT_ACCEPT}
+            capture="environment"
+            multiple
+            hidden
+            onChange={(e) => {
+              handlePhotoFiles(e.target.files)
+              e.target.value = ''
+            }}
           />
           <p className="sf-pad-muted-note" style={{ margin: 0 }}>
             生命周期：待处理 → 已分派 → 处理中 → 待复核 → 已解决 → 已关闭

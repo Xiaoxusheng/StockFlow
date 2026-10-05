@@ -1,29 +1,24 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 
-// ---------- 任务中心（F8：/workbench + /tasks；后端任务域 M1/M2 未交付，以下为前端先行契约） ----------
-// 命名已对齐后端惯例（无实际错位，端点未上线故调用 404 → 页面统一错误态，requirements.md §10）：
-// - 响应字段 snake_case（后端 DTO JSON tag 惯例，grep internal/ 实测 source_no/serial_no 等）；
-// - 列表筛选 query 参数 snake_case（后端 c.Query 惯例：warehouse_id/source_no 等，grep 实测）；
-// - 分页除外：page/pageSize 双端一致（internal/response/response.go:54-62 ParsePage 读
-//   "page"/"pageSize"，types/api.ts PageQuery/PageResult 同形，共享文件本轮不动）；
-// - 枚举值域后端 dto/迁移 CHECK 冻结前保持现值，未知值由页面回退展示原始值；
-//   端点交付时以 Go JSON tag / CHECK 逐字段复核（对齐机制同 docs/tasks/current.md 遗留清单）。
+// ---------- 任务中心（F8：/workbench + /tasks；后端 2026-10-05 平台批已交付，契约对齐
+// docs/api.md §9「平台批」节 + internal/reports/workbench_summary.go/workbench.go JSON tag） ----------
+// 响应字段 snake_case（后端 DTO JSON tag 惯例）；列表筛选 query 参数 snake_case；
+// 分页除外：page/pageSize 双端一致（internal/response/response.go ParsePage 读
+// "page"/"pageSize"，types/api.ts PageQuery/PageResult 同形）；
+// 枚举值域已冻结：task_type=putaway|picking|checking（packing/moving/counting 无独立
+// 任务表不映射，传值 400）、status 统一五值 pending|in_progress|completed|cancelled|
+// exception（picking/checking 的 EXCEPTION 原态映射第五值，raw_status 随行下发原态）。
 
 /**
- * 任务类型（业务依据：上架 business-flow.md §5、拣货 §8.2、复核 §8.3、打包 §7.2、
- * 移库 frontend.md §21、盘点 frontend.md §10.5；后端枚举冻结前仅用于筛选传参，展示走页面标签映射兜底）
+ * 任务类型（后端冻结三值：GET /api/tasks UNION 三任务表 putaway/pick/check——
+ * internal/reports/workbench.go；packing/moving/counting 无独立任务表不映射，传值 400）
  */
-export type TaskType =
-  | 'putaway' // 上架任务
-  | 'picking' // 拣货任务
-  | 'checking' // 复核任务
-  | 'packing' // 打包任务
-  | 'moving' // 移库任务
-  | 'counting' // 盘点任务
+export type TaskType = 'putaway' | 'picking' | 'checking'
 
-/** 任务状态（与 types/status.ts 注册表一致；上架等子流程状态由各域页面表达） */
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled'
+/** 任务状态（统一五值，api.md §9 平台批；exception 为第五值——picking/checking 原态
+ * EXCEPTION 映射；types/status.ts 注册表 exception 键同源） */
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'exception'
 
 export interface TaskQuery extends PageQuery {
   keyword?: string
@@ -45,13 +40,22 @@ export interface TaskItem {
   /** 已完成数量（作业支持部分完成，business-flow.md §3.3/§8.2） */
   completed_qty: number
   status: string
+  /** 原表态（putaway_tasks/pick_tasks/check_tasks 的 status 原值，随行下发——
+   * 统一五值 status 之外的明细依据，2026-10-05 平台批） */
+  raw_status: string
   /** 负责人（我的任务 = 指派给当前用户的任务子集） */
   assignee_name?: string
   created_at: string
   completed_at?: string
 }
 
-/** 我的工作台入口计数（frontend.md §15.1 四块；前端先行契约，端点交付时以 Go JSON tag 复核） */
+/**
+ * 我的工作台入口计数（frontend.md §15.1 四块；2026-10-05 平台批交付，与
+ * workbench_summary.go JSON tag 逐字段对齐）。共享裁决：四块互斥，
+ * Σ(todo+approval+task+exception) ≠ Dashboard pendingTaskCount——pendingTask
+ * （dashboard.go:613）= receive + 六作业块 + exception 不含 approval，即
+ * Σ = pendingTaskCount + approval_count；前端 tooltip 须如实披露（api.md §9 收口披露节④）。
+ */
 export interface WorkbenchSummary {
   /** 我的待办 */
   todo_count: number

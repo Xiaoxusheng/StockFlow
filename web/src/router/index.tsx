@@ -48,8 +48,12 @@ const OutboundPage = lazy(() => import('@/views/outbound/OutboundPage'))
 const PurchaseListPage = lazy(() => import('@/views/purchase/PurchaseListPage'))
 // 出库分析（六域图表轮：/api/reports/outbound-stats 挂 reports:report:read）
 const OutboundAnalyticsPage = lazy(() => import('@/views/outbound/OutboundAnalyticsPage'))
+// 采购/销售分析（分析卡片轮：六聚合端点挂域列表码 purchase:purchase:list /
+// sales:sales:list——internal/reports/routes.go:103-108；页面消费 api/analytics.ts）
+const PurchaseAnalyticsPage = lazy(() => import('@/views/purchase/PurchaseAnalyticsPage'))
+const SalesAnalyticsPage = lazy(() => import('@/views/sales/SalesAnalyticsPage'))
 
-// 任务中心（F8：工作台四计数 + 我的任务；后端任务域未交付，呈统一错误态）
+// 任务中心（F8：工作台四计数 + 我的任务；后端 2026-10-05 平台批已交付）
 const WorkbenchPage = lazy(() => import('@/views/workbench/WorkbenchPage'))
 const MyTasksPage = lazy(() => import('@/views/task/MyTasksPage'))
 
@@ -195,6 +199,9 @@ const IMPLEMENTED_PATHS = new Set([
   // 出库分析（六域图表轮；同上）
   '/outbound/analytics',
   '/purchases',
+  // 采购/销售分析（分析卡片轮；IMPLEMENTED_PATHS 漏加则 placeholderRoutes 同路径占位
+  // 永久遮蔽真页——current.md 收口教训）
+  '/purchases/analytics',
   // 异常中心
   '/exceptions',
   // 出库作业（P0）
@@ -209,6 +216,7 @@ const IMPLEMENTED_PATHS = new Set([
   '/sales',
   '/sales/outbounds',
   '/sales/returns',
+  '/sales/analytics',
   // 质量中心（前端先行契约）
   '/quality/inspections',
   '/quality/nonconforming',
@@ -448,6 +456,13 @@ export const router = createBrowserRouter([
         path: 'purchases/new',
         element: <LazyPage><PurchaseOrderFormPage /></LazyPage>,
       },
+      // 采购分析（分析卡片轮：/api/purchases/analytics|supplier-rank|status-composition
+      // 挂 purchase:purchase:list；静态段先于 purchases/:id 动态段——gin 静态优先，
+      // inbound/analytics 先例）
+      {
+        path: 'purchases/analytics',
+        element: <LazyPage><PurchaseAnalyticsPage /></LazyPage>,
+      },
       // 采购订单详情（Timeline 含部分收货进度；动态段无菜单，与 receipts/returns 静态段共存静态优先）
       {
         path: 'purchases/:id',
@@ -484,6 +499,12 @@ export const router = createBrowserRouter([
       {
         path: 'sales/returns',
         element: <LazyPage><SalesReturnListPage /></LazyPage>,
+      },
+      // 销售分析（分析卡片轮：/api/sales/analytics|product-rank|status-composition
+      // 挂 sales:sales:list；静态段先于 sales/:id 动态段——gin 静态优先）
+      {
+        path: 'sales/analytics',
+        element: <LazyPage><SalesAnalyticsPage /></LazyPage>,
       },
       // 销售订单详情（组5；动态段无菜单，殿后注册）
       {

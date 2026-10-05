@@ -13,9 +13,9 @@ import {
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { analyticsApi, type InventorySkuTopRow } from '@/api/analytics'
 import { dashboardApi, type DashboardWarehouseStock } from '@/api/dashboard'
 import { inventoryApi, type StockSummary } from '@/api/inventory'
-import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import {
@@ -24,6 +24,7 @@ import {
   SfChartCard,
   SfDonutChart,
   SfHBarChart,
+  SfLineChart,
   type SfDonutDatum,
 } from '@/components/charts'
 import { formatMoney, formatNumber, formatPercent, formatQty } from '@/utils/format'
@@ -37,6 +38,14 @@ const RANGE_OPTIONS = [
 ]
 
 const DEFAULT_RANGE = '30'
+
+/** SKU TOP 排序指标（GET /api/inventory/sku-top metric=qty|value，后端 ORDER BY 二选一白名单） */
+type SkuTopMetric = 'qty' | 'value'
+
+const SKU_METRIC_OPTIONS = [
+  { label: '按数量', value: 'qty' },
+  { label: '按金额', value: 'value' },
+]
 
 /** 图表统一高度（§45 紧凑卡片适配，与 Dashboard 图表块一致） */
 const CHART_HEIGHT = 280
@@ -73,22 +82,37 @@ function buildWarehouseRankData(items: DashboardWarehouseStock[]) {
 }
 
 /**
+ * SKU TOP 排行数据映射（GET /api/inventory/sku-top，analytics.go:30-39：后端
+ * ORDER BY total_qty/stock_value DESC + HAVING SUM(total_qty)>0 只看在库 SKU，
+ * 前端保持原序、不重排不拼算）。类目轴取 sku_code——sku_name 同商品多 SKU 会重名
+ * （实测 SKU-D003-01/02 同名「Type-C 数据线」），code 为唯一键；两值字段随 metric
+ * 二选一作 valueField（均后端直出）。
+ */
+function buildSkuTopData(rows: InventorySkuTopRow[]) {
+  return rows.map((row) => ({
+    sku_code: row.sku_code,
+    total_qty: row.total_qty,
+    stock_value: row.stock_value,
+  }))
+}
+
+/**
  * 库存分析（frontend.md §10.1 口径：库存金额 / 周转率 / 周转天数 / ABC 分析 / 库存趋势）。
  *
  * 数据全部来自真实端点（internal/reports/routes.go，权限均挂 inventory:inventory:list）：
  * - GET /api/inventory/analytics（routes.go:67，2026-10-05 已交付）：指标条 + ABC + 趋势
  * - GET /api/inventory/summary（routes.go:64）：库存状态构成 Donut
  * - GET /api/reports/dashboard/warehouse-stock（routes.go:60）：仓库库存排行横向 Bar
- *
- * §39 补图挂账（无真实数据不伪造，§54）：
- * - SKU 库存 TOP10：/api/reports/inventory-summary 为分页明细且无排序参数
- *   （internal/reports/handler.go:76-95 仅 page/pageSize/warehouse_id/sku_id），
- *   前端跨页取 TOP 属拼装数据——走 SfEmpty 挂账后端排序聚合参数或专用端点
- * - 库存周转趋势：/api/reports/inventory-turnover 为按仓 + SKU 统计快照行集
- *   （repository.go TurnoverRow）非时序，不能画时序 Line——走 SfEmpty 挂账后端时序端点
+ * - GET /api/inventory/sku-top（routes.go:88，2026-10-05 分析卡片轮已交付）：
+ *   SKU 库存 TOP10 横向 Bar（metric=qty|value 由卡右上 Segmented 切换排序口径，
+ *   api/analytics.ts inventorySkuTop）——销 §39 旧挂账「inventory-summary 无排序参数」项
+ * - GET /api/inventory/turnover-trend（routes.go:89，同轮已交付）：库存周转趋势 Line
+ *   （days 与页面时间档同窗，日粒度连续序列后端补零，api/analytics.ts inventoryTurnoverTrend）
+ *   ——销 §39 旧挂账「inventory-turnover 非时序」项
  */
 export default function AnalyticsPage() {
   const [range, setRange] = useState(DEFAULT_RANGE)
+  const [skuMetric, setSkuMetric] = useState<SkuTopMetric>('qty')
   const analytics = useQuery({
     queryKey: ['inventory', 'analytics', range],
     queryFn: () => inventoryApi.analytics({ days: Number(range) }),
@@ -100,6 +124,16 @@ export default function AnalyticsPage() {
   const warehouseStock = useQuery({
     queryKey: ['inventory', 'warehouse-stock'],
     queryFn: () => dashboardApi.warehouseStock(),
+  })
+  // SKU TOP10（metric 切换排序口径；limit=10 与 topN 一致，后端 1–50 白名单）
+  const skuTop = useQuery({
+    queryKey: ['inventory', 'sku-top', skuMetric],
+    queryFn: () => analyticsApi.inventorySkuTop({ metric: skuMetric, limit: 10 }),
+  })
+  // 库存周转趋势（与页面时间档同窗——库存趋势卡 Segmented 驱动，窗口在卡副标题披露）
+  const turnoverTrend = useQuery({
+    queryKey: ['inventory', 'turnover-trend', range],
+    queryFn: () => analyticsApi.inventoryTurnoverTrend({ days: Number(range) }),
   })
 
   const data = analytics.data
@@ -267,15 +301,60 @@ export default function AnalyticsPage() {
         </Row>
 
         <Row gutter={[16, 16]}>
-          {/* §39 挂账空态：无真实数据不伪造（§54），后端立项后接入 */}
+          {/* SKU TOP10（§35 排行榜横向 Bar）：GET /api/inventory/sku-top 后端排序聚合直出，
+              metric Segmented 切换 qty（现存量）/ value（库存金额，成本价口径——与
+              inventory-summary 同源披露）；类目取 sku_code 唯一键（见 buildSkuTopData 注） */}
           <Col xs={24} lg={12}>
-            <SfChartCard title="SKU 库存 TOP 10" subtitle="按现存量排行">
-              <SfEmpty description="后端暂无 SKU 库存排序聚合端点（/api/reports/inventory-summary 为分页明细、无排序参数，前端跨页取 TOP 属拼装数据），待后端补充排序聚合端点后接入" />
+            <SfChartCard
+              title="SKU 库存 TOP 10"
+              subtitle={skuMetric === 'qty' ? '按现存量排行（在库 SKU）' : '按库存金额排行（成本价口径）'}
+              extra={
+                <Flex gap={8} align="center">
+                  <Segmented
+                    size="small"
+                    options={SKU_METRIC_OPTIONS}
+                    value={skuMetric}
+                    onChange={(v) => setSkuMetric(v as SkuTopMetric)}
+                  />
+                  <RefreshButton onClick={() => void skuTop.refetch()} />
+                </Flex>
+              }
+            >
+              <SfHBarChart
+                data={buildSkuTopData(skuTop.data ?? [])}
+                categoryField="sku_code"
+                valueField={skuMetric === 'qty' ? 'total_qty' : 'stock_value'}
+                topN={10}
+                height={CHART_HEIGHT}
+                loading={skuTop.isPending}
+                error={skuTop.error}
+                onRetry={() => void skuTop.refetch()}
+                emptyText="当前没有在库 SKU 库存数据"
+              />
             </SfChartCard>
           </Col>
+          {/* 库存周转趋势（§32 折线图）：GET /api/inventory/turnover-trend 日粒度连续序列，
+              turnover_rate = 当日出库量 / 平均库存（avg≤0 后端记 0，不造假分母）；
+              与页面时间档同窗（库存趋势卡 Segmented 驱动），窗口在副标题披露 */}
           <Col xs={24} lg={12}>
-            <SfChartCard title="库存周转趋势" subtitle="按日周转率 / 周转天数">
-              <SfEmpty description="GET /api/reports/inventory-turnover 为按仓 + SKU 的统计快照行集，非时序数据，无法绘制周转趋势，待后端时序端点交付后接入" />
+            <SfChartCard
+              title="库存周转趋势"
+              subtitle={`按日周转率 = 当日出库量 / 平均库存 · 近 ${range} 天`}
+              extra={<RefreshButton onClick={() => void turnoverTrend.refetch()} />}
+            >
+              <SfLineChart
+                data={(turnoverTrend.data ?? []).map((row) => ({
+                  date: row.date,
+                  turnover_rate: row.turnover_rate,
+                }))}
+                xField="date"
+                series={[{ key: 'turnover_rate', name: '周转率' }]}
+                height={CHART_HEIGHT}
+                loading={turnoverTrend.isPending}
+                error={turnoverTrend.error}
+                onRetry={() => void turnoverTrend.refetch()}
+                emptyText="所选时间范围内暂无库存周转数据"
+              />
             </SfChartCard>
           </Col>
         </Row>

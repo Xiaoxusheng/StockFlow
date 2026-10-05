@@ -57,7 +57,8 @@ function ExceptionStatusTag({ status }: { status: ExceptionStatus }) {
  * 九类异常（收货/质检/上架/库存/拣货/复核/物流/盘点/系统，中文值域）与生命周期六态
  * （待处理→已分派→处理中→待复核→已解决→已关闭）对齐 business-flow.md §11.2；
  * 处理记录/异常冻结经详情抽屉呈现（追加式台账，inventory-rules.md §4.2）；
- * 图片能力后端有列无写入路径，详情只读注明，不提供假上传入口（requirements.md §10）。
+ * 取证图片经详情抽屉真实接线（./exceptionImages：认证取流缩略图/预览 + 两段式上传挂接，
+ * POST /api/exceptions/{id}/images，权限 returns:exception:execute）。
  */
 export default function ExceptionCenterPage() {
   const [params, setParams] = useState<ExceptionQuery>({})

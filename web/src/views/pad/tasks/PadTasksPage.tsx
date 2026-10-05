@@ -18,24 +18,23 @@ import {
 import { usePagedList } from '@/hooks/usePagedList'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
 
-/** 任务类型 chip（api/task.ts TaskType 前端先行契约；文案与 PAD_TASK_TYPE_LABEL 同源） */
+/** 任务类型 chip（api/task.ts TaskType 三值——后端仅映射 putaway/pick/check 三任务表，
+ * packing/moving/counting 传值 400（api.md §9 平台批）；文案与 PAD_TASK_TYPE_LABEL 同源） */
 const TYPE_OPTIONS: Array<{ label: string; value: TaskType }> = [
   { label: '上架', value: 'putaway' },
   { label: '拣货', value: 'picking' },
   { label: '复核', value: 'checking' },
-  { label: '打包', value: 'packing' },
-  { label: '移库', value: 'moving' },
-  { label: '盘点', value: 'counting' },
 ]
 
-/** 状态 chip / 分组顺序（TaskStatus 仅 pending/in_progress/completed/cancelled 四值，
- * api/task.ts:20；标签取 types/status.ts 注册表。「异常」分组无契约状态值，待后端任务域
- * 冻结枚举后补，不造假值） */
+/** 状态 chip / 分组顺序（统一五值 pending/in_progress/completed/cancelled/exception，
+ * api/task.ts；标签取 types/status.ts 注册表。「异常」为第五统一值——picking/checking
+ * 原态 EXCEPTION 映射，2026-10-05 平台批冻结后补入） */
 const STATUS_OPTIONS: Array<{ label: string; value: TaskStatus }> = [
   { label: '待处理', value: 'pending' },
   { label: '进行中', value: 'in_progress' },
   { label: '已完成', value: 'completed' },
   { label: '已取消', value: 'cancelled' },
+  { label: '异常', value: 'exception' },
 ]
 
 const statusLabel = (status: TaskStatus) => STATUS_META[status]?.label ?? status

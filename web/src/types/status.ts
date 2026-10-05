@@ -32,6 +32,9 @@ export const STATUS_META: Record<string, StatusMeta> = {
   closed: { label: '已关闭', semantic: 'neutral' },
   cancelled: { label: '已取消', semantic: 'neutral' },
   voided: { label: '已作废', semantic: 'neutral' },
+  // /api/tasks 统一五值的第五值（2026-10-05 平台批：picking/checking 原态 EXCEPTION 映射，
+  // raw_status 留原态；api.md §9 平台批 + 收口披露节⑤）
+  exception: { label: '异常', semantic: 'danger' },
 
   // 入库（business-flow.md §2–5）
   pending_receipt: { label: '待收货', semantic: 'pending' },
