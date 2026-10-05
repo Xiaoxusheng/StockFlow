@@ -283,8 +283,8 @@ const docTemplate = `{
                 "summary": "DELETE /api/auth/sessions/:id（auth:session:kick；强制审计）",
                 "parameters": [
                     {
-                        "type": "integer",
-                        "description": "路径参数 id",
+                        "type": "string",
+                        "description": "会话 SID（Redis 会话键 sid，字符串形态；非数字 ID）",
                         "name": "id",
                         "in": "path",
                         "required": true
@@ -2155,6 +2155,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/exceptions/{id}/images": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "退货与异常"
+                ],
+                "summary": "POST /api/exceptions/:id/images（挂接图片取证；file_ids 为文件中心上传产物）",
+                "parameters": [
+                    {
+                        "description": "请求体",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_returns.ExceptionImageInput"
+                        }
+                    },
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/exceptions/{id}/resolve": {
             "post": {
                 "consumes": [
@@ -2827,6 +2873,70 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/inbounds/status-composition": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/inbounds/status-composition",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/inbounds/supplier-rank": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/inbounds/supplier-rank",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/inbounds/{id}": {
             "get": {
                 "produces": [
@@ -2909,6 +3019,14 @@ const docTemplate = `{
                 ],
                 "summary": "POST /api/inbounds/:id/cancel",
                 "parameters": [
+                    {
+                        "description": "请求体（reason 可选，落审计快照）",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_purchase.CancelInput"
+                        }
+                    },
                     {
                         "type": "integer",
                         "description": "路径参数 id",
@@ -3070,6 +3188,33 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/inventory/analytics": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/inventory/analytics",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "趋势窗口天数（默认 30，上限 366）",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/inventory/locks": {
             "get": {
                 "produces": [
@@ -3134,6 +3279,51 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/inventory/sku-top": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/inventory/sku-top",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "排序指标 qty|value（缺省 qty）",
+                        "name": "metric",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "仓库 ID（缺省不过滤）",
+                        "name": "warehouse_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/inventory/summary": {
             "get": {
                 "produces": [
@@ -3168,6 +3358,39 @@ const docTemplate = `{
                     "退货与异常"
                 ],
                 "summary": "GET /api/inventory/trace",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/inventory/turnover-trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/inventory/turnover-trend",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "窗口天数（缺省 30，1–366）",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "统一响应信封",
@@ -3426,6 +3649,90 @@ const docTemplate = `{
                     "销售出库"
                 ],
                 "summary": "GET /api/outbounds",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/outbounds/completion-rate": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/outbounds/completion-rate",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/outbounds/product-rank": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/outbounds/product-rank",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "统一响应信封",
@@ -4966,6 +5273,109 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/purchases/analytics/trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/purchases/analytics/trend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/purchases/status-composition": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/purchases/status-composition",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/purchases/supplier-rank": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/purchases/supplier-rank",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/purchases/{id}": {
             "get": {
                 "produces": [
@@ -5085,6 +5495,14 @@ const docTemplate = `{
                 ],
                 "summary": "POST /api/purchases/:id/cancel",
                 "parameters": [
+                    {
+                        "description": "请求体（reason 可选，落取消审批记录与审计）",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "$ref": "#/definitions/internal_purchase.CancelInput"
+                        }
+                    },
                     {
                         "type": "integer",
                         "description": "路径参数 id",
@@ -5341,6 +5759,74 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/putaway/{id}/pause": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "POST /api/putaway/:id/pause（暂停任务，IN_PROGRESS→PAUSED；仅领取人/超管）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/putaway/{id}/resume": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "POST /api/putaway/:id/resume（恢复任务，PAUSED→IN_PROGRESS；仅原领取人/超管）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/quality": {
             "get": {
                 "produces": [
@@ -5376,6 +5862,102 @@ const docTemplate = `{
                     "采购入库"
                 ],
                 "summary": "POST /api/quality",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/quality/nonconforming": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "GET /api/quality/nonconforming（不合格品记录列表）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "QC 单号/SKU 编码模糊",
+                        "name": "keyword",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "处置六值英文键（return_supplier/scrap/rework/downgrade/to_defective_warehouse/special_release）",
+                        "name": "disposition",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "不支持（质检单未记录去向，传值返回 400）",
+                        "name": "destination",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/quality/trace": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "GET /api/quality/trace（质量追溯：检验→处置记录链，quality_items 行粒度）",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "SKU 编码（等值）",
+                        "name": "sku_code",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "批次号（等值）",
+                        "name": "batch_no",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "来源单据号（等值）",
+                        "name": "biz_no",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "不支持（质检链未记录序列号，传值返回 400）",
+                        "name": "serial_no",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "统一响应信封",
@@ -5619,6 +6201,168 @@ const docTemplate = `{
                     "报表"
                 ],
                 "summary": "GET /api/reports",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/dashboard/alerts": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/dashboard/alerts",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/dashboard/tasks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/dashboard/tasks",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/dashboard/today": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/dashboard/today",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/dashboard/trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/dashboard/trend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "时间档 7d/30d/90d/custom",
+                        "name": "range",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "自定义档起（YYYY-MM-DD）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "自定义档止（YYYY-MM-DD）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/dashboard/warehouse-stock": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/dashboard/warehouse-stock",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/reports/flow-trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/reports/flow-trend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "流水类型 inbound|outbound",
+                        "name": "type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
                 "responses": {
                     "200": {
                         "description": "统一响应信封",
@@ -6435,6 +7179,115 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sales/analytics/trend": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/sales/analytics/trend",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sales/product-rank": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/sales/product-rank",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "排序键 qty|amount（缺省 qty）",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/sales/status-composition": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/sales/status-composition",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -7758,6 +8611,63 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/tasks",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "页码（缺省 1）",
+                        "name": "page",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "页大小（缺省 20，1-100）",
+                        "name": "pageSize",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "任务类型 putaway|picking|checking（可选）",
+                        "name": "task_type",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "统一状态 pending|in_progress|completed|cancelled|exception（可选）",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "仓库编码（可选）",
+                        "name": "warehouse_code",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/transfers": {
             "get": {
                 "produces": [
@@ -8659,6 +9569,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/warehouses/workload": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/warehouses/workload",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "起（YYYY-MM-DD，缺省近 30 天）",
+                        "name": "time_from",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "止（YYYY-MM-DD，上限 366 天）",
+                        "name": "time_to",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/warehouses/{id}": {
             "get": {
                 "produces": [
@@ -8842,6 +9791,25 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/workbench/summary": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/workbench/summary",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -9482,6 +10450,14 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_purchase.CancelInput": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_returns.ApproveInput": {
             "type": "object",
             "properties": {
@@ -9562,6 +10538,18 @@ const docTemplate = `{
                 "type": {
                     "description": "九类中文值域（business-flow §11.2）",
                     "type": "string"
+                }
+            }
+        },
+        "internal_returns.ExceptionImageInput": {
+            "type": "object",
+            "properties": {
+                "file_ids": {
+                    "description": "FileIDs 文件中心上传返回的文件 ID（database.ID 反序列化同时接受字符串与数字，\n对齐全仓「业务 ID 字符串」约定）。",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
                 }
             }
         },

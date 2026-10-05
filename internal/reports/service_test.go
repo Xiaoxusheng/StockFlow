@@ -7,6 +7,7 @@ package reports
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -225,5 +226,45 @@ func TestServiceAlertThresholdsInjection(t *testing.T) {
 	}))
 	if _, _, err := s.alertThresholds(context.Background()); err == nil {
 		t.Fatal("阈值替身错误应上抛（fail-closed，不静默用缺省值）")
+	}
+}
+
+// TestMyTasksBranchSpecs /api/tasks task_type 分支选取断言（bug 回归冻结：此前
+// branches[idx:] 截头不截尾，task_type=putaway 误带 picking/checking 分支返回
+// 未请求类型的行——独立复核 2026-10-05 发现①）。
+func TestMyTasksBranchSpecs(t *testing.T) {
+	all := taskBranchSpecs("")
+	if len(all) != 3 {
+		t.Fatalf("无 task_type 过滤应为全三分支，实际 %d", len(all))
+	}
+	cases := []struct {
+		taskType   string
+		wantIdx    int
+		mustHave   string // 该分支特有任务号前缀/列名
+		mustNotHas []string
+	}{
+		{"putaway", 0, "putaway_no", []string{"pick_no", "check_no"}},
+		{"picking", 1, "pick_no", []string{"putaway_no", "check_no"}},
+		{"checking", 2, "check_no", []string{"putaway_no", "pick_no"}},
+	}
+	for _, c := range cases {
+		specs := taskBranchSpecs(c.taskType)
+		if len(specs) != 1 {
+			t.Fatalf("task_type=%s 应恰取 1 分支，实际 %d", c.taskType, len(specs))
+		}
+		if specs[0].scopeCol != all[c.wantIdx].scopeCol {
+			t.Fatalf("task_type=%s 分支范围列应为 %s，实际 %s", c.taskType, all[c.wantIdx].scopeCol, specs[0].scopeCol)
+		}
+		if !strings.Contains(specs[0].sql, c.mustHave) {
+			t.Fatalf("task_type=%s 分支 SQL 应含 %s", c.taskType, c.mustHave)
+		}
+		for _, bad := range c.mustNotHas {
+			if strings.Contains(specs[0].sql, bad) {
+				t.Fatalf("task_type=%s 分支 SQL 不得含他类任务列 %s", c.taskType, bad)
+			}
+		}
+	}
+	if got := taskBranchIndex("bogus"); got != -1 {
+		t.Fatalf("非法 task_type 应返回 -1（handler 白名单前置，防御可达性），实际 %d", got)
 	}
 }

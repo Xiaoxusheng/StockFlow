@@ -24,8 +24,23 @@ type ServiceOption = Option
 //	GET /api/reports/inventory-turnover          reports:report:read   库存周转
 //	GET /api/reports/stagnant-stock              reports:report:read   积压识别
 //	GET /api/reports/replenishment-suggestions   reports:report:read   智能补货建议
+//	GET /api/reports/flow-trend                  reports:report:read   出入库流水趋势
 //	GET /api/inventory/summary                   inventory:inventory:list   Dashboard/库存页汇总条
 //	GET /api/inventory/alerts                    inventory:inventory:list   Dashboard/库存页预警条
+//	GET /api/inventory/analytics                 inventory:inventory:list   库存分析
+//	GET /api/inventory/sku-top                   inventory:inventory:list   SKU 库存 TOP N
+//	GET /api/inventory/turnover-trend            inventory:inventory:list   库存周转趋势
+//	GET /api/warehouses/workload                 inventory:inventory:list   仓库作业量
+//	GET /api/inbounds/status-composition         reports:report:read   入库单状态构成
+//	GET /api/inbounds/supplier-rank              reports:report:read   供应商入库排行
+//	GET /api/outbounds/completion-rate           reports:report:read   出库订单完成率
+//	GET /api/outbounds/product-rank              reports:report:read   商品出库排行
+//	GET /api/purchases/analytics/trend           purchase:purchase:list   采购订单金额趋势
+//	GET /api/purchases/supplier-rank             purchase:purchase:list   供应商采购排行
+//	GET /api/purchases/status-composition        purchase:purchase:list   采购单状态构成
+//	GET /api/sales/analytics/trend               sales:sales:list   销售订单金额趋势
+//	GET /api/sales/product-rank                  sales:sales:list   商品销售排行
+//	GET /api/sales/status-composition            sales:sales:list   销售单状态构成
 //
 // /api/inventory/summary|alerts 挂载口径（2026-10-04 裁决）：inventory 前缀端点的消费方
 // 是库存域页面与 Dashboard（web/src/api/inventory.ts stockSummary/alerts、Pad 库存页、
@@ -65,4 +80,37 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.GET("/inventory/alerts", RequirePerm(auth.PermInventoryList), h.dashboardAlerts)
 	// 库存分析（/inventory/analytics 页数据源，2026-10-05 补齐；inventory 前缀挂载同上）。
 	rg.GET("/inventory/analytics", RequirePerm(auth.PermInventoryList), h.inventoryAnalytics)
+
+	// 聚合分析端点批（2026-10-05 分析卡片轮，docs/api.md §9 契约先行——analytics.go/
+	// workbench.go；静态段与各域 :id/:no 动态段共存（gin 静态优先，/inventory/summary
+	// 与 /inventory/:id 同组共存先例），全部免分页直出、scopeOf 会话仓库快照）。
+	// 库存域三端点：挂 inventory:inventory:list（消费方库存分析页，/inventory/analytics 同码先例）。
+	rg.GET("/inventory/sku-top", RequirePerm(auth.PermInventoryList), h.skuTop)
+	rg.GET("/inventory/turnover-trend", RequirePerm(auth.PermInventoryList), h.turnoverTrend)
+	// 报表域趋势（ReportFlowStats 页既有 inbound/outbound-stats 同码，去分页销
+	// report-flowstats-trend-cap）。
+	rg.GET("/reports/flow-trend", RequirePerm(PermReportRead), h.flowTrend)
+	// 入库/出域四端点：挂 reports:report:read（所在分析页既有趋势端点同码，
+	// 页面同权限面"菜单可见⟺数据可达"）。
+	rg.GET("/inbounds/status-composition", RequirePerm(PermReportRead), h.inboundStatusComposition)
+	rg.GET("/inbounds/supplier-rank", RequirePerm(PermReportRead), h.inboundSupplierRank)
+	rg.GET("/outbounds/completion-rate", RequirePerm(PermReportRead), h.outboundCompletionRate)
+	rg.GET("/outbounds/product-rank", RequirePerm(PermReportRead), h.outboundProductRank)
+	// 仓库作业量：挂 inventory:inventory:list（仓库分析页 warehouse-stock 同码）。
+	rg.GET("/warehouses/workload", RequirePerm(auth.PermInventoryList), h.warehouseWorkload)
+	// 采购/销售六端点：挂域列表读权限（新分析页独立权限面，current.md 挂账口径；
+	// 立项若裁决改挂 reports:report:read 可平移不改契约形状）。
+	rg.GET("/purchases/analytics/trend", RequirePerm(auth.PermPurchaseList), h.purchaseTrend)
+	rg.GET("/purchases/supplier-rank", RequirePerm(auth.PermPurchaseList), h.purchaseSupplierRank)
+	rg.GET("/purchases/status-composition", RequirePerm(auth.PermPurchaseList), h.purchaseStatusComposition)
+	rg.GET("/sales/analytics/trend", RequirePerm(auth.PermSalesList), h.salesTrend)
+	rg.GET("/sales/product-rank", RequirePerm(auth.PermSalesList), h.salesProductRank)
+	rg.GET("/sales/status-composition", RequirePerm(auth.PermSalesList), h.salesStatusComposition)
+
+	// 平台批（2026-10-05——task.ts 前端先行契约：工作台四块计数 + 我的任务明细化；
+	// 挂 inventory:inventory:list——Dashboard/tasks 计数版已在同码暴露同一信息面，
+	// 明细化不抬高敏感面；workbench_summary.go/workbench.go 实现；/api/tasks 无路由
+	// 冲突——全域唯一 /api/prints/tasks 属 prints 组前缀不同）。
+	rg.GET("/workbench/summary", RequirePerm(auth.PermInventoryList), h.workbenchSummary)
+	rg.GET("/tasks", RequirePerm(auth.PermInventoryList), h.myTasks)
 }

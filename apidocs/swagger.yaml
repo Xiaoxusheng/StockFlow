@@ -261,6 +261,11 @@ definitions:
       remark:
         type: string
     type: object
+  internal_purchase.CancelInput:
+    properties:
+      reason:
+        type: string
+    type: object
   internal_returns.ApproveInput:
     properties:
       approved:
@@ -318,6 +323,16 @@ definitions:
       type:
         description: 九类中文值域（business-flow §11.2）
         type: string
+    type: object
+  internal_returns.ExceptionImageInput:
+    properties:
+      file_ids:
+        description: |-
+          FileIDs 文件中心上传返回的文件 ID（database.ID 反序列化同时接受字符串与数字，
+          对齐全仓「业务 ID 字符串」约定）。
+        items:
+          type: integer
+        type: array
     type: object
   internal_returns.PurchaseReturnCreateInput:
     properties:
@@ -981,11 +996,11 @@ paths:
   /api/auth/sessions/{id}:
     delete:
       parameters:
-      - description: 路径参数 id
+      - description: 会话 SID（Redis 会话键 sid，字符串形态；非数字 ID）
         in: path
         name: id
         required: true
-        type: integer
+        type: string
       produces:
       - application/json
       responses:
@@ -2199,6 +2214,36 @@ paths:
       summary: POST /api/exceptions/:id/close
       tags:
       - 退货与异常
+  /api/exceptions/{id}/images:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: 请求体
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/internal_returns.ExceptionImageInput'
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/exceptions/:id/images（挂接图片取证；file_ids 为文件中心上传产物）
+      tags:
+      - 退货与异常
   /api/exceptions/{id}/resolve:
     post:
       consumes:
@@ -2684,6 +2729,11 @@ paths:
       consumes:
       - application/json
       parameters:
+      - description: 请求体（reason 可选，落审计快照）
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_purchase.CancelInput'
       - description: 路径参数 id
         in: path
         name: id
@@ -2727,6 +2777,47 @@ paths:
       summary: POST /api/inbounds/:id/close
       tags:
       - 采购入库
+  /api/inbounds/status-composition:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inbounds/status-composition
+      tags:
+      - 报表
+  /api/inbounds/supplier-rank:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      - description: 返回条数（缺省 10，1–50）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inbounds/supplier-rank
+      tags:
+      - 报表
   /api/inventory:
     get:
       produces:
@@ -2813,6 +2904,23 @@ paths:
       summary: GET /api/inventory/alerts
       tags:
       - 报表
+  /api/inventory/analytics:
+    get:
+      parameters:
+      - description: 趋势窗口天数（默认 30，上限 366）
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/analytics
+      tags:
+      - 报表
   /api/inventory/locks:
     get:
       produces:
@@ -2854,6 +2962,35 @@ paths:
       summary: 仓内移库
       tags:
       - 库存作业
+  /api/inventory/sku-top:
+    get:
+      parameters:
+      - description: 排序指标 qty|value（缺省 qty）
+        in: query
+        name: metric
+        type: string
+      - description: 返回条数（缺省 10，1–50）
+        in: query
+        name: limit
+        type: integer
+      - description: 仓库 ID（缺省不过滤）
+        in: query
+        name: warehouse_id
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/sku-top
+      tags:
+      - 报表
   /api/inventory/summary:
     get:
       produces:
@@ -2886,6 +3023,27 @@ paths:
       summary: GET /api/inventory/trace
       tags:
       - 退货与异常
+  /api/inventory/turnover-trend:
+    get:
+      parameters:
+      - description: 窗口天数（缺省 30，1–366）
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/turnover-trend
+      tags:
+      - 报表
   /api/logs/logins:
     get:
       produces:
@@ -3136,6 +3294,60 @@ paths:
       summary: 生成拣货任务（ALLOCATED→PICKING）
       tags:
       - 销售出库
+  /api/outbounds/completion-rate:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/outbounds/completion-rate
+      tags:
+      - 报表
+  /api/outbounds/product-rank:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      - description: 返回条数（缺省 10，1–50）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/outbounds/product-rank
+      tags:
+      - 报表
   /api/packing:
     get:
       produces:
@@ -4093,6 +4305,11 @@ paths:
       consumes:
       - application/json
       parameters:
+      - description: 请求体（reason 可选，落取消审批记录与审计）
+        in: body
+        name: body
+        schema:
+          $ref: '#/definitions/internal_purchase.CancelInput'
       - description: 路径参数 id
         in: path
         name: id
@@ -4160,6 +4377,72 @@ paths:
       summary: POST /api/purchases/:id/submit
       tags:
       - 采购入库
+  /api/purchases/analytics/trend:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchases/analytics/trend
+      tags:
+      - 报表
+  /api/purchases/status-composition:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchases/status-composition
+      tags:
+      - 报表
+  /api/purchases/supplier-rank:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      - description: 返回条数（缺省 10，1–50）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/purchases/supplier-rank
+      tags:
+      - 报表
   /api/putaway:
     get:
       produces:
@@ -4244,6 +4527,50 @@ paths:
           schema:
             $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
       summary: POST /api/putaway/:id/execute
+      tags:
+      - 采购入库
+  /api/putaway/{id}/pause:
+    post:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/putaway/:id/pause（暂停任务，IN_PROGRESS→PAUSED；仅领取人/超管）
+      tags:
+      - 采购入库
+  /api/putaway/{id}/resume:
+    post:
+      parameters:
+      - description: 路径参数 id
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: POST /api/putaway/:id/resume（恢复任务，PAUSED→IN_PROGRESS；仅原领取人/超管）
       tags:
       - 采购入库
   /api/putaway/recommend:
@@ -4365,6 +4692,68 @@ paths:
       summary: POST /api/quality/:id/start
       tags:
       - 采购入库
+  /api/quality/nonconforming:
+    get:
+      parameters:
+      - description: QC 单号/SKU 编码模糊
+        in: query
+        name: keyword
+        type: string
+      - description: 处置六值英文键（return_supplier/scrap/rework/downgrade/to_defective_warehouse/special_release）
+        in: query
+        name: disposition
+        type: string
+      - description: 不支持（质检单未记录去向，传值返回 400）
+        in: query
+        name: destination
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/quality/nonconforming（不合格品记录列表）
+      tags:
+      - 采购入库
+  /api/quality/trace:
+    get:
+      parameters:
+      - description: SKU 编码（等值）
+        in: query
+        name: sku_code
+        type: string
+      - description: 批次号（等值）
+        in: query
+        name: batch_no
+        type: string
+      - description: 来源单据号（等值）
+        in: query
+        name: biz_no
+        type: string
+      - description: 不支持（质检链未记录序列号，传值返回 400）
+        in: query
+        name: serial_no
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/quality/trace（质量追溯：检验→处置记录链，quality_items 行粒度）
+      tags:
+      - 采购入库
   /api/receipts:
     get:
       produces:
@@ -4450,6 +4839,110 @@ paths:
           schema:
             $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
       summary: GET /api/reports
+      tags:
+      - 报表
+  /api/reports/dashboard/alerts:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/dashboard/alerts
+      tags:
+      - 报表
+  /api/reports/dashboard/tasks:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/dashboard/tasks
+      tags:
+      - 报表
+  /api/reports/dashboard/today:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/dashboard/today
+      tags:
+      - 报表
+  /api/reports/dashboard/trend:
+    get:
+      parameters:
+      - description: 时间档 7d/30d/90d/custom
+        in: query
+        name: range
+        required: true
+        type: string
+      - description: 自定义档起（YYYY-MM-DD）
+        in: query
+        name: time_from
+        type: string
+      - description: 自定义档止（YYYY-MM-DD）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/dashboard/trend
+      tags:
+      - 报表
+  /api/reports/dashboard/warehouse-stock:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/dashboard/warehouse-stock
+      tags:
+      - 报表
+  /api/reports/flow-trend:
+    get:
+      parameters:
+      - description: 流水类型 inbound|outbound
+        in: query
+        name: type
+        required: true
+        type: string
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/reports/flow-trend
       tags:
       - 报表
   /api/reports/inbound-stats:
@@ -5140,6 +5633,76 @@ paths:
       summary: PUT /api/sales/:id/submit
       tags:
       - 销售出库
+  /api/sales/analytics/trend:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/sales/analytics/trend
+      tags:
+      - 报表
+  /api/sales/product-rank:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      - description: 排序键 qty|amount（缺省 qty）
+        in: query
+        name: sort
+        type: string
+      - description: 返回条数（缺省 10，1–50）
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/sales/product-rank
+      tags:
+      - 报表
+  /api/sales/status-composition:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/sales/status-composition
+      tags:
+      - 报表
   /api/scanner/logs:
     get:
       produces:
@@ -5829,6 +6392,43 @@ paths:
       summary: GET /api/system/monitor
       tags:
       - 系统运维
+  /api/tasks:
+    get:
+      parameters:
+      - description: 页码（缺省 1）
+        in: query
+        name: page
+        type: integer
+      - description: 页大小（缺省 20，1-100）
+        in: query
+        name: pageSize
+        type: integer
+      - description: 任务类型 putaway|picking|checking（可选）
+        in: query
+        name: task_type
+        type: string
+      - description: 统一状态 pending|in_progress|completed|cancelled|exception（可选）
+        in: query
+        name: status
+        type: string
+      - description: 仓库编码（可选）
+        in: query
+        name: warehouse_code
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/tasks
+      tags:
+      - 报表
   /api/transfers:
     get:
       produces:
@@ -6538,6 +7138,43 @@ paths:
       summary: PUT /api/warehouses/:id/status
       tags:
       - 仓库与库位
+  /api/warehouses/workload:
+    get:
+      parameters:
+      - description: 起（YYYY-MM-DD，缺省近 30 天）
+        in: query
+        name: time_from
+        type: string
+      - description: 止（YYYY-MM-DD，上限 366 天）
+        in: query
+        name: time_to
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/warehouses/workload
+      tags:
+      - 报表
+  /api/workbench/summary:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/workbench/summary
+      tags:
+      - 报表
   /api/zones:
     get:
       produces:

@@ -2,6 +2,7 @@ package reports
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +42,13 @@ func (h *handler) requireRange(c *gin.Context) (time.Time, time.Time, bool) {
 		if err != nil {
 			response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{"field": "time_to", "reason": err.Error()}))
 			return time.Time{}, time.Time{}, false
+		}
+		// 按天语义：纯日期 time_to（YYYY-MM-DD）视为"含当天"——查询右界为排他
+		// （created_at < to），须前进到次日零点，否则末整天的流水/单据被整体排除
+		// （2026-10-05 实录：出库分析页 time_to=今天 → 当日落账全部不可见）。
+		// 带时刻的 time_to（YYYY-MM-DD HH:mm:ss）维持精确边界不变。
+		if len(strings.TrimSpace(raw)) == 10 {
+			t = t.AddDate(0, 0, 1)
 		}
 		toPtr = &t
 	}
