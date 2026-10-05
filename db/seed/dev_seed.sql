@@ -115,7 +115,12 @@ VALUES (9901, 9101, 0),
        (9902, 9101, 0),
        (9903, 9102, 0),
        (9904, 9101, 0),
-       (9904, 9102, 0)
+       (9904, 9102, 0),
+       (9901, 9103, 0),
+       (9901, 9104, 0),
+       (9901, 9105, 0),
+       (9902, 9103, 0),
+       (9903, 9105, 0)
 ON CONFLICT DO NOTHING;
 
 -- ============ 3) 仓库 / 库区 / 货架 / 库位（business-flow §1.6 四级结构） ============
@@ -446,6 +451,824 @@ JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
 JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
 LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
 ON CONFLICT (serial_no) DO NOTHING;
+
+-- ============ 10) 电子厂场景扩展（2026-10-05：覆盖采购→收货→质检→上架、销售→出库全链、
+--      调拨、盘点、打印任务与单号计数器推进；新增三仓/物料/供应商/客户，既有演示集不动） ============
+-- ID 段新增分配：仓库 9103-9105 / 库区 9930-9941 / 货架 9950-9961 / 库位 9970-9999 /
+--   分类 9206-9210 / 单位 9215-9218 / 商品 9311-9326 / SKU 9421-9440 / 条码 9477-9500 /
+--   供应商 9504-9507 / 客户 9524-9526 / 批次 9608-9617 / 序列号 9724-9801 /
+--   期初库存 9825-9842 / 期初流水 9879-9896 / 影流水 9897-9900 / 打印模板 9991-9992 /
+--   打印任务行 9995-9999（打印任务/单据表为 bigserial，幂等靠业务单号唯一索引 + ON CONFLICT）。
+-- 场景：深圳泰克威电子——SMT 贴片 + 整机组装。原料仓 WH-E01（元器件/辅料）、
+--   半成品仓 WH-E02（PCBA）、成品仓 WH-E03（整机）。单据链状态机铺开：
+--   采购（完成/部分收货/待审/草稿）→ 收货（批号/效期采集）→ 质检（抽检合格）→ 上架（完成/待办）；
+--   销售（完成/部分发货/待审）→ 出库（分配/拣/复核/打包/发货全链 + 部分发货）；
+--   调拨（完成/待收）、盘点（待差异审核/盘点中）、打印（已执行/排队）。
+-- 自洽口径：期初库存 = 当前存量快照（全部 available，1:1 配对期初流水，沿用 §8 口径）；
+--   序列号 SKU 的库位数 = IN_STOCK 序列号行数（已发部分序列号 status=OUTBOUND 留痕）；
+--   已发货物料不在期初出现（历史量不回填，期初=终态）。
+
+-- ---- 10.1 仓库 ×3（电子厂三仓）----
+INSERT INTO warehouses (id, code, name, address, contact, phone, type, status, created_by)
+VALUES (9103, 'WH-E01', '电子原料仓', '深圳市宝安区泰克威工业园 A 栋 1 层', '吴原料', '0755-30001001', 'NORMAL', 'ENABLED', 0),
+       (9104, 'WH-E02', '半成品仓', '深圳市宝安区泰克威工业园 A 栋 2 层', '郑半品', '0755-30001002', 'NORMAL', 'ENABLED', 0),
+       (9105, 'WH-E03', '成品仓', '深圳市宝安区泰克威工业园 B 栋 1 层', '冯成品', '0755-30001003', 'NORMAL', 'ENABLED', 0)
+ON CONFLICT (code) WHERE deleted_at IS NULL DO NOTHING;
+
+-- 库区（含不良品隔离区 NG——结构就绪，不良库存由质检流程运行时产生）
+INSERT INTO zones (id, warehouse_id, code, name, zone_type, capacity, created_by)
+VALUES (9930, 9103, 'E01-STORE', '元器件存储区', 'STORAGE', 2000, 0),
+       (9931, 9103, 'E01-PICK', '拣料区', 'PICKING', 800, 0),
+       (9932, 9103, 'E01-RECV', '收货暂存区', 'RECEIVING', 300, 0),
+       (9933, 9103, 'E01-NG', '不良品隔离区', 'QUARANTINE', 100, 0),
+       (9934, 9104, 'E02-STORE', '半成品存储区', 'STORAGE', 1200, 0),
+       (9935, 9104, 'E02-RECV', '收货暂存区', 'RECEIVING', 200, 0),
+       (9936, 9105, 'E03-STORE', '成品存储区', 'STORAGE', 1500, 0),
+       (9937, 9105, 'E03-PICK', '拣货区', 'PICKING', 600, 0),
+       (9938, 9105, 'E03-RECV', '收货暂存区', 'RECEIVING', 200, 0)
+ON CONFLICT (warehouse_id, code) DO NOTHING;
+
+INSERT INTO shelves (id, warehouse_id, zone_id, code, layers, columns, capacity, created_by)
+VALUES (9950, 9103, 9930, 'REEL-01', 3, 2, 600, 0),
+       (9951, 9103, 9930, 'REEL-02', 3, 2, 600, 0),
+       (9952, 9103, 9930, 'IC-01', 3, 2, 400, 0),
+       (9953, 9103, 9931, 'PK-01', 2, 2, 200, 0),
+       (9954, 9103, 9932, 'RV-01', 1, 2, 100, 0),
+       (9955, 9103, 9933, 'NG-01', 1, 2, 100, 0),
+       (9956, 9104, 9934, 'SA-01', 3, 2, 500, 0),
+       (9957, 9104, 9934, 'SB-01', 2, 2, 300, 0),
+       (9958, 9104, 9935, 'SR-01', 1, 2, 100, 0),
+       (9959, 9105, 9936, 'FG-01', 3, 2, 400, 0),
+       (9960, 9105, 9936, 'FG-02', 2, 2, 400, 0),
+       (9961, 9105, 9937, 'FP-01', 2, 2, 200, 0)
+ON CONFLICT (zone_id, code) DO NOTHING;
+
+INSERT INTO bins (id, warehouse_id, zone_id, shelf_id, layer, column_no, code, bin_type, max_capacity, status, created_by)
+VALUES (9970, 9103, 9930, 9950, 1, 1, 'REEL-01-11', 'STORAGE', 200, 'ENABLED', 0),
+       (9971, 9103, 9930, 9950, 1, 2, 'REEL-01-12', 'STORAGE', 200, 'ENABLED', 0),
+       (9972, 9103, 9930, 9950, 2, 1, 'REEL-01-21', 'STORAGE', 200, 'ENABLED', 0),
+       (9973, 9103, 9930, 9950, 2, 2, 'REEL-01-22', 'STORAGE', 200, 'ENABLED', 0),
+       (9974, 9103, 9930, 9951, 1, 1, 'REEL-02-11', 'STORAGE', 200, 'ENABLED', 0),
+       (9975, 9103, 9930, 9951, 1, 2, 'REEL-02-12', 'STORAGE', 200, 'ENABLED', 0),
+       (9976, 9103, 9930, 9951, 2, 1, 'REEL-02-21', 'STORAGE', 200, 'ENABLED', 0),
+       (9977, 9103, 9930, 9951, 2, 2, 'REEL-02-22', 'STORAGE', 200, 'ENABLED', 0),
+       (9978, 9103, 9930, 9952, 1, 1, 'IC-01-11', 'STORAGE', 150, 'ENABLED', 0),
+       (9979, 9103, 9930, 9952, 1, 2, 'IC-01-12', 'STORAGE', 150, 'ENABLED', 0),
+       (9980, 9103, 9931, 9953, 1, 1, 'PK-01-11', 'PICK', 150, 'ENABLED', 0),
+       (9981, 9103, 9931, 9953, 1, 2, 'PK-01-12', 'PICK', 150, 'ENABLED', 0),
+       (9982, 9103, 9932, 9954, 1, 1, 'RV-01-11', 'RECEIVE', 100, 'ENABLED', 0),
+       (9983, 9103, 9932, 9954, 1, 2, 'RV-01-12', 'RECEIVE', 100, 'ENABLED', 0),
+       (9984, 9103, 9933, 9955, 1, 1, 'NG-01-11', 'QUARANTINE', 100, 'ENABLED', 0),
+       (9985, 9103, 9933, 9955, 1, 2, 'NG-01-12', 'QUARANTINE', 100, 'ENABLED', 0),
+       (9986, 9104, 9934, 9956, 1, 1, 'SA-01-11', 'STORAGE', 200, 'ENABLED', 0),
+       (9987, 9104, 9934, 9956, 1, 2, 'SA-01-12', 'STORAGE', 200, 'ENABLED', 0),
+       (9988, 9104, 9934, 9956, 2, 1, 'SA-01-21', 'STORAGE', 200, 'ENABLED', 0),
+       (9989, 9104, 9934, 9957, 1, 1, 'SB-01-11', 'STORAGE', 150, 'ENABLED', 0),
+       (9990, 9104, 9935, 9958, 1, 1, 'SR-01-11', 'RECEIVE', 100, 'ENABLED', 0),
+       (9991, 9104, 9935, 9958, 1, 2, 'SR-01-12', 'RECEIVE', 100, 'ENABLED', 0),
+       (9992, 9105, 9936, 9959, 1, 1, 'FG-01-11', 'STORAGE', 120, 'ENABLED', 0),
+       (9993, 9105, 9936, 9959, 1, 2, 'FG-01-12', 'STORAGE', 120, 'ENABLED', 0),
+       (9994, 9105, 9936, 9959, 2, 1, 'FG-01-21', 'STORAGE', 120, 'ENABLED', 0),
+       (9995, 9105, 9936, 9959, 2, 2, 'FG-01-22', 'STORAGE', 120, 'ENABLED', 0),
+       (9996, 9105, 9936, 9960, 1, 1, 'FG-02-11', 'STORAGE', 150, 'ENABLED', 0),
+       (9997, 9105, 9936, 9960, 1, 2, 'FG-02-12', 'STORAGE', 150, 'ENABLED', 0),
+       (9998, 9105, 9937, 9961, 1, 1, 'FP-01-11', 'PICK', 100, 'ENABLED', 0),
+       (9999, 9105, 9937, 9961, 1, 2, 'FP-01-12', 'PICK', 100, 'ENABLED', 0)
+ON CONFLICT (warehouse_id, code) DO NOTHING;
+
+-- ---- 10.2 分类 / 单位（电子制造域）----
+INSERT INTO product_categories (id, parent_id, code, name, sort, created_by)
+VALUES (9206, NULL, 'C-SMT', '贴片元器件', 4, 0),
+       (9207, NULL, 'C-CONN', '连接器线材', 5, 0),
+       (9208, NULL, 'C-PCB', '印制电路板', 6, 0),
+       (9209, NULL, 'C-ASSY', '组装成品', 7, 0),
+       (9210, NULL, 'C-AST', '制程辅料', 8, 0)
+ON CONFLICT (code) DO NOTHING;
+
+INSERT INTO units (id, code, name, created_by)
+VALUES (9215, 'U-REEL', '盘（编带）', 0),
+       (9216, 'U-KPC', '千颗', 0),
+       (9217, 'U-M', '米', 0),
+       (9218, 'U-SHT', '张', 0)
+ON CONFLICT (code) DO NOTHING;
+
+-- ---- 10.3 商品 16 / SKU 20（电子物料与整机；三开关组合延续覆盖）----
+INSERT INTO products (id, code, name, short_name, category_id, brand, model, spec, unit_id, weight, status, created_by)
+VALUES (9311, 'P-E001', '贴片电阻 0402 10KΩ', '0402电阻', 9206, 'YAGEO 国巨', 'RC0402FR-0710KL', '10KΩ ±1% 1/16W, 5千颗/盘', 9215, 0.0003, 'ENABLED', 0),
+       (9312, 'P-E002', '贴片电阻 0402 100KΩ', '0402电阻', 9206, 'YAGEO 国巨', 'RC0402FR-07100KL', '100KΩ ±1% 1/16W, 5千颗/盘', 9215, 0.0003, 'ENABLED', 0),
+       (9313, 'P-E003', '贴片电容 MLCC 0603 22µF', '0603电容', 9206, '三星电机', 'CL10A226MQQNNWE', '22µF ±20% 10V X5R, 3千颗/盘', 9215, 0.0005, 'ENABLED', 0),
+       (9314, 'P-E004', '贴片电容 MLCC 0805 100nF', '0805电容', 9206, '三星电机', 'CL21B104KBNNNC', '100nF ±10% 50V X7R', 9215, 0.0005, 'ENABLED', 0),
+       (9315, 'P-E005', 'MCU 主控芯片', 'MCU', 9206, 'ST 意法半导体', 'STM32F103C8T6', 'LQFP48, 72MHz, 64KB Flash', 9211, 0.0030, 'ENABLED', 0),
+       (9316, 'P-E006', 'DC-DC 电源芯片', '电源IC', 9206, '矽力杰', 'SY8089AAC', 'SOT-23-5, 3A 同步整流', 9211, 0.0010, 'ENABLED', 0),
+       (9317, 'P-E007', '石英晶振 8MHz', '晶振', 9206, 'TXC 台晶', '8X-8.000MAAE-T', 'HC-49S, ±20ppm', 9211, 0.0020, 'ENABLED', 0),
+       (9318, 'P-E008', '线对板连接器 2.0mm-4P', 'PH2.0连接器', 9207, '联捷电子', 'PH2.0-4P-L', '卧贴 4Pin, 端子镀金', 9211, 0.0040, 'ENABLED', 0),
+       (9319, 'P-E009', 'FPC 软排线 0.5mm-30P', 'FPC排线', 9207, '联德电子', 'FPC-30P-80', '0.5mm 间距 30Pin, 长 80mm', 9211, 0.0060, 'ENABLED', 0),
+       (9320, 'P-E010', '智能温控器主板 PCBA', '温控主板', 9208, '泰克威', 'STC-MB-V1.2', '双面贴片, 三防漆涂覆', 9211, 0.0800, 'ENABLED', 0),
+       (9321, 'P-E011', 'PCB 空板 双面 FR-4', 'PCB空板', 9208, '迅捷电路', 'STC-V1.2', '100x80mm 1.6mm 沉金', 9211, 0.0600, 'ENABLED', 0),
+       (9322, 'P-E012', '无铅锡膏 Sn63/Pb37', '锡膏', 9210, '唯特偶', 'SPT-6337', '500g/罐, 保质 180 天 0~10℃', 9211, 0.5200, 'ENABLED', 0),
+       (9323, 'P-E013', 'SMT 钢网 420x520', '钢网', 9210, '精诚网版', 'SG-4252', '420x520mm 激光切割', 9211, 1.2000, 'ENABLED', 0),
+       (9324, 'P-E014', '防静电周转托盘', 'ESD托盘', 9203, '有力防静电', 'ESD-3116', '316x316x60mm 黑色', 9211, 0.4500, 'ENABLED', 0),
+       (9325, 'P-E015', '智能温控器 STC-2000', '温控器', 9209, '泰克威', 'STC-2000', '白色, NTC/继电器, 220V', 9211, 0.3200, 'ENABLED', 0),
+       (9326, 'P-E016', 'WiFi 智能插座 SP-10', '智能插座', 9209, '泰克威', 'SP-10', '16A, 支持 Alexa/小爱', 9211, 0.1500, 'ENABLED', 0)
+ON CONFLICT (code) WHERE deleted_at IS NULL DO NOTHING;
+
+-- 20 SKU：批次×8 / 批次+效期×2（MCU 湿敏效期、锡膏冷藏效期）/ 批次+序列号×1（PCBA）/ 序列号×3（整机）/ 全关×6
+INSERT INTO skus (id, code, product_id, spec_attrs, cost_price, sale_price, safety_stock, max_stock,
+                  min_replenish_qty, is_batch_managed, is_expiry_managed, is_serial_managed, is_enabled, created_by)
+VALUES (9421, 'SKU-E001-01', 9311, '{"阻值": "10KΩ", "封装": "0402"}'::jsonb, 8.5000, 18.0000, 20.0000, 400.0000, 20.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9422, 'SKU-E001-02', 9312, '{"阻值": "100KΩ", "封装": "0402"}'::jsonb, 8.5000, 18.0000, 20.0000, 400.0000, 20.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9423, 'SKU-E002-01', 9313, '{"容值": "22µF", "封装": "0603"}'::jsonb, 22.0000, 46.0000, 15.0000, 300.0000, 15.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9424, 'SKU-E002-02', 9314, '{"容值": "100nF", "封装": "0805"}'::jsonb, 6.0000, 14.0000, 15.0000, 300.0000, 15.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9425, 'SKU-E003-01', 9315, '{"内核": "Cortex-M3", "闪存": "64KB"}'::jsonb, 12.6000, 25.8000, 200.0000, 5000.0000, 200.0000, TRUE, TRUE, FALSE, TRUE, 0),
+       (9426, 'SKU-E004-01', 9316, '{"输出电流": "3A"}'::jsonb, 1.6500, 4.2000, 300.0000, 8000.0000, 300.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9427, 'SKU-E005-01', 9317, '{"频率": "8MHz"}'::jsonb, 0.9800, 2.8000, 200.0000, 8000.0000, 200.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9428, 'SKU-E006-01', 9318, '{"间距": "2.0mm", "Pin": "4P", "方向": "卧贴"}'::jsonb, 0.8500, 2.5000, 100.0000, 5000.0000, 100.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9429, 'SKU-E006-02', 9318, '{"间距": "2.0mm", "Pin": "4P", "方向": "立贴"}'::jsonb, 0.9000, 2.6000, 100.0000, 5000.0000, 100.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9430, 'SKU-E007-01', 9319, '{"Pin": "30P", "长度": "80mm"}'::jsonb, 2.2000, 6.5000, 100.0000, 5000.0000, 100.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9431, 'SKU-E008-01', 9320, '{"版本": "V1.2", "工艺": "三防漆"}'::jsonb, 38.0000, 0.0000, 50.0000, 500.0000, 50.0000, TRUE, FALSE, TRUE, TRUE, 0),
+       (9432, 'SKU-E009-01', 9321, '{"板层": "双面", "表面处理": "沉金"}'::jsonb, 15.8000, 0.0000, 100.0000, 2000.0000, 100.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9433, 'SKU-E010-01', 9322, '{"合金": "Sn63/Pb37", "规格": "500g"}'::jsonb, 28.0000, 0.0000, 10.0000, 100.0000, 10.0000, TRUE, TRUE, FALSE, TRUE, 0),
+       (9434, 'SKU-E011-01', 9323, '{"尺寸": "420x520mm"}'::jsonb, 180.0000, 0.0000, 2.0000, 20.0000, 2.0000, FALSE, FALSE, FALSE, TRUE, 0),
+       (9435, 'SKU-E012-01', 9324, '{"尺寸": "316x316x60mm", "颜色": "黑色"}'::jsonb, 9.8000, 0.0000, 30.0000, 600.0000, 30.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9436, 'SKU-E013-01', 9325, '{"颜色": "白色"}'::jsonb, 68.0000, 129.0000, 20.0000, 300.0000, 20.0000, FALSE, FALSE, TRUE, TRUE, 0),
+       (9437, 'SKU-E013-02', 9325, '{"颜色": "黑色"}'::jsonb, 68.0000, 129.0000, 20.0000, 300.0000, 20.0000, FALSE, FALSE, TRUE, TRUE, 0),
+       (9438, 'SKU-E014-01', 9326, '{"电流": "16A", "颜色": "白色"}'::jsonb, 24.0000, 59.0000, 30.0000, 500.0000, 30.0000, FALSE, FALSE, TRUE, TRUE, 0),
+       (9439, 'SKU-E015-01', 9325, '{"用途": "STC-2000 彩盒"}'::jsonb, 1.8000, 0.0000, 100.0000, 2000.0000, 100.0000, TRUE, FALSE, FALSE, TRUE, 0),
+       (9440, 'SKU-E015-02', 9326, '{"用途": "STC-2000/SP-10 通用"}'::jsonb, 0.1200, 0.0000, 500.0000, 10000.0000, 500.0000, FALSE, FALSE, FALSE, TRUE, 0)
+ON CONFLICT (code) WHERE deleted_at IS NULL DO NOTHING;
+
+-- 条码：20 主条码（EAN13 校验位有效，延续 6901234 前缀）+ 4 辅条码（CODE128）
+INSERT INTO barcodes (id, sku_id, barcode, code_type, is_primary, created_by)
+VALUES (9477, 9421, '6901234000214', 'EAN13', TRUE, 0),
+       (9478, 9422, '6901234000221', 'EAN13', TRUE, 0),
+       (9479, 9423, '6901234000238', 'EAN13', TRUE, 0),
+       (9480, 9424, '6901234000245', 'EAN13', TRUE, 0),
+       (9481, 9425, '6901234000252', 'EAN13', TRUE, 0),
+       (9482, 9426, '6901234000269', 'EAN13', TRUE, 0),
+       (9483, 9427, '6901234000276', 'EAN13', TRUE, 0),
+       (9484, 9428, '6901234000283', 'EAN13', TRUE, 0),
+       (9485, 9429, '6901234000290', 'EAN13', TRUE, 0),
+       (9486, 9430, '6901234000306', 'EAN13', TRUE, 0),
+       (9487, 9431, '6901234000313', 'EAN13', TRUE, 0),
+       (9488, 9432, '6901234000320', 'EAN13', TRUE, 0),
+       (9489, 9433, '6901234000337', 'EAN13', TRUE, 0),
+       (9490, 9434, '6901234000344', 'EAN13', TRUE, 0),
+       (9491, 9435, '6901234000351', 'EAN13', TRUE, 0),
+       (9492, 9436, '6901234000368', 'EAN13', TRUE, 0),
+       (9493, 9437, '6901234000375', 'EAN13', TRUE, 0),
+       (9494, 9438, '6901234000382', 'EAN13', TRUE, 0),
+       (9495, 9439, '6901234000399', 'EAN13', TRUE, 0),
+       (9496, 9440, '6901234000405', 'EAN13', TRUE, 0),
+       (9497, 9421, 'SF-E001-01-A', 'CODE128', FALSE, 0),
+       (9498, 9425, 'SF-E003-01-A', 'CODE128', FALSE, 0),
+       (9499, 9431, 'SF-E008-01-A', 'CODE128', FALSE, 0),
+       (9500, 9436, 'SF-E013-01-A', 'CODE128', FALSE, 0)
+ON CONFLICT (barcode) DO NOTHING;
+
+-- ---- 10.4 供应商 4 / 客户 3（电子产业链画像）----
+INSERT INTO suppliers (id, code, name, contact, phone, email, address, status, remark, created_by)
+VALUES (9504, 'SUP-E001', '深圳市华科达电子科技有限公司', '周华强', '13699880001', 'sup-e001@szhkd.com',
+        '深圳市福田区华强北街道赛格科技园 4 栋', 'ENABLED', 'DEV SEED 国巨/三星电机授权代理, 账期 30 天', 0),
+       (9505, 'SUP-E002', '苏州精连连接器有限公司', '顾精工', '13706210002', 'sup-e002@jsjl.com',
+        '苏州市吴中区精连工业坊 6 号', 'ENABLED', 'DEV SEED 连接器模具厂, MOQ 500', 0),
+       (9506, 'SUP-E003', '深圳市迅捷电路科技有限公司', '罗迅捷', '13823300003', 'sup-e003@sjpcb.com',
+        '深圳市光明区迅捷电路产业园 2 栋', 'ENABLED', 'DEV SEED PCB 快板厂, 48 小时出货', 0),
+       (9507, 'SUP-E004', '昆山恒益包装材料有限公司', '钱恒益', '13912680004', 'sup-e004@kshy.com',
+        '昆山市玉山镇恒益包装工业园 9 号', 'ENABLED', 'DEV SEED 彩盒/说明书印刷, 账期月结', 0)
+ON CONFLICT (code) WHERE deleted_at IS NULL DO NOTHING;
+
+INSERT INTO customers (id, code, name, contact, phone, email, address, shipping_address, status, created_by)
+VALUES (9524, 'CUS-E001', '佛山市顺德区智控电器有限公司', '梁智控', '13929980001', 'cus-e001@sdzk.com',
+        '佛山市顺德区智控电器产业园 1 栋', '佛山市顺德区智控电器产业园 3 号卸货月台', 'ENABLED', 0),
+       (9525, 'CUS-E002', '杭州联物智能科技有限公司', '沈联物', '13957780002', 'cus-e002@hzlw.com',
+        '杭州市余杭区联物智能大厦 5 层', '杭州市余杭区联物智能大厦东侧仓库', 'ENABLED', 0),
+       (9526, 'CUS-E003', '深圳市睿创电子有限公司', '袁睿创', '13926580003', 'cus-e003@szrc.com',
+        '深圳市龙华区睿创科技楼 2 层', '深圳市龙华区睿创科技楼后门收货处', 'ENABLED', 0)
+ON CONFLICT (code) WHERE deleted_at IS NULL DO NOTHING;
+
+-- ---- 10.5 批次 10（含锡膏临期批次：效期 2026-11-10，供效期预警演示）----
+INSERT INTO batches (id, sku_id, batch_no, supplier_id, production_date, inbound_date, expiry_date, cost_price, remark, created_by)
+VALUES (9608, 9421, 'B20260928-E001', 9504, '2026-09-20', '2026-10-02', NULL, 8.5000, 'DEV SEED', 0),
+       (9609, 9421, 'B20261003-E001', 9504, '2026-09-26', '2026-10-05', NULL, 8.5000, 'DEV SEED', 0),
+       (9610, 9422, 'B20260928-E002', 9504, '2026-09-22', '2026-09-28', NULL, 8.5000, 'DEV SEED', 0),
+       (9611, 9423, 'B20261005-E002', 9504, '2026-09-28', '2026-10-05', NULL, 22.0000, 'DEV SEED', 0),
+       (9612, 9425, 'B20260915-E003', 9504, '2026-09-10', '2026-10-02', '2027-09-15', 12.6000, 'DEV SEED MSL3 湿敏, 开封 168h', 0),
+       (9613, 9428, 'B20260926-E006', 9505, '2026-09-18', '2026-10-03', NULL, 0.8500, 'DEV SEED', 0),
+       (9614, 9431, 'B20261004-E008', 0, '2026-10-04', '2026-10-04', NULL, 38.0000, 'DEV SEED SMT 自制半品', 0),
+       (9615, 9433, 'B20260514-E010', 9504, '2026-05-14', '2026-05-20', '2026-11-10', 28.0000, 'DEV SEED 临期演示 (剩余约 35 天)', 0),
+       (9616, 9435, 'B20260918-E012', 9504, '2026-09-10', '2026-09-18', NULL, 9.8000, 'DEV SEED', 0),
+       (9617, 9439, 'B20261002-E015', 9507, '2026-09-25', '2026-10-02', NULL, 1.8000, 'DEV SEED', 0)
+ON CONFLICT (sku_id, batch_no) DO NOTHING;
+
+-- ---- 10.6 电子厂期初库存 18 行（当前存量快照，全 available）与期初流水 1:1 成对（§8 口径）----
+INSERT INTO inventory (id, warehouse_id, zone_id, shelf_id, bin_id, sku_id, batch_id,
+                       total_qty, available_qty, created_by)
+SELECT v.id, w.id, z.id, s.id, b.id, sku.id, COALESCE(bat.id, 0),
+       v.qty, v.qty, 0
+FROM (VALUES (9825, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 30.0000::numeric(18, 4)),
+             (9826, 'WH-E01', 'REEL-01-12', 'SKU-E001-01', 'B20261003-E001', 10.0000::numeric(18, 4)),
+             (9827, 'WH-E01', 'REEL-01-21', 'SKU-E001-02', 'B20260928-E002', 12.0000::numeric(18, 4)),
+             (9828, 'WH-E01', 'REEL-02-11', 'SKU-E002-01', 'B20261005-E002', 25.0000::numeric(18, 4)),
+             (9829, 'WH-E01', 'REEL-02-12', 'SKU-E003-01', 'B20260915-E003', 800.0000::numeric(18, 4)),
+             (9830, 'WH-E01', 'IC-01-11', 'SKU-E004-01', NULL, 500.0000::numeric(18, 4)),
+             (9831, 'WH-E01', 'IC-01-12', 'SKU-E005-01', NULL, 300.0000::numeric(18, 4)),
+             (9832, 'WH-E01', 'PK-01-11', 'SKU-E006-01', 'B20260926-E006', 400.0000::numeric(18, 4)),
+             (9833, 'WH-E01', 'PK-01-12', 'SKU-E006-02', NULL, 260.0000::numeric(18, 4)),
+             (9834, 'WH-E01', 'REEL-02-21', 'SKU-E010-01', 'B20260514-E010', 18.0000::numeric(18, 4)),
+             (9835, 'WH-E01', 'REEL-02-22', 'SKU-E012-01', 'B20260918-E012', 60.0000::numeric(18, 4)),
+             (9836, 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 20.0000::numeric(18, 4)),
+             (9837, 'WH-E02', 'SB-01-11', 'SKU-E001-01', 'B20260928-E001', 5.0000::numeric(18, 4)),
+             (9838, 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 18.0000::numeric(18, 4)),
+             (9839, 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 8.0000::numeric(18, 4)),
+             (9840, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 20.0000::numeric(18, 4)),
+             (9841, 'WH-E03', 'FG-02-11', 'SKU-E015-01', 'B20261002-E015', 500.0000::numeric(18, 4)),
+             (9842, 'WH-E03', 'FR-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (warehouse_id, bin_id, sku_id, batch_id) DO NOTHING;
+
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, COALESCE(bat.id, 0),
+       'INBOUND', '期初', 'DEV-SEED-OPEN-' || v.id::text, 'available', 'available',
+       0, v.qty, v.qty,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED',
+       CASE WHEN v.id <= 9884 THEN '2026-10-02 10:00:00+08'::timestamptz
+            WHEN v.id <= 9889 THEN '2026-10-03 11:30:00+08'::timestamptz
+            WHEN v.id <= 9893 THEN '2026-10-04 15:00:00+08'::timestamptz
+            ELSE '2026-10-05 09:00:00+08'::timestamptz END
+FROM (VALUES (9879, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 30.0000::numeric(18, 4)),
+             (9880, 'WH-E01', 'REEL-01-12', 'SKU-E001-01', 'B20261003-E001', 10.0000::numeric(18, 4)),
+             (9881, 'WH-E01', 'REEL-01-21', 'SKU-E001-02', 'B20260928-E002', 12.0000::numeric(18, 4)),
+             (9882, 'WH-E01', 'REEL-02-11', 'SKU-E002-01', 'B20261005-E002', 25.0000::numeric(18, 4)),
+             (9883, 'WH-E01', 'REEL-02-12', 'SKU-E003-01', 'B20260915-E003', 800.0000::numeric(18, 4)),
+             (9884, 'WH-E01', 'IC-01-11', 'SKU-E004-01', NULL, 500.0000::numeric(18, 4)),
+             (9885, 'WH-E01', 'IC-01-12', 'SKU-E005-01', NULL, 300.0000::numeric(18, 4)),
+             (9886, 'WH-E01', 'PK-01-11', 'SKU-E006-01', 'B20260926-E006', 400.0000::numeric(18, 4)),
+             (9887, 'WH-E01', 'PK-01-12', 'SKU-E006-02', NULL, 260.0000::numeric(18, 4)),
+             (9888, 'WH-E01', 'REEL-02-21', 'SKU-E010-01', 'B20260514-E010', 18.0000::numeric(18, 4)),
+             (9889, 'WH-E01', 'REEL-02-22', 'SKU-E012-01', 'B20260918-E012', 60.0000::numeric(18, 4)),
+             (9890, 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 20.0000::numeric(18, 4)),
+             (9891, 'WH-E02', 'SB-01-11', 'SKU-E001-01', 'B20260928-E001', 5.0000::numeric(18, 4)),
+             (9892, 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 18.0000::numeric(18, 4)),
+             (9893, 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 8.0000::numeric(18, 4)),
+             (9894, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 20.0000::numeric(18, 4)),
+             (9895, 'WH-E03', 'FG-02-11', 'SKU-E015-01', 'B20261002-E015', 500.0000::numeric(18, 4)),
+             (9896, 'WH-E03', 'FR-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (ledger_no) DO NOTHING;
+
+-- 影流水（净零对，供出入库趋势非零形态；端点与库存行现值吻合）
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, COALESCE(bat.id, 0),
+       v.ctype, '演示', 'DEV-SEED-FLOW-' || v.id::text, 'available', 'available',
+       v.q_before, v.q_change, v.q_after,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED', v.at
+FROM (VALUES (9897, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 'INBOUND',  30.0000::numeric(18,4),  10.0000::numeric(18,4),  40.0000::numeric(18,4), '2026-10-05 08:20:00+08'::timestamptz),
+             (9898, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 'OUTBOUND', 40.0000::numeric(18,4), -10.0000::numeric(18,4),  30.0000::numeric(18,4), '2026-10-05 08:50:00+08'::timestamptz),
+             (9899, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'INBOUND',  20.0000::numeric(18,4),  15.0000::numeric(18,4),  35.0000::numeric(18,4), '2026-10-05 09:40:00+08'::timestamptz),
+             (9900, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 35.0000::numeric(18,4), -15.0000::numeric(18,4),  20.0000::numeric(18,4), '2026-10-05 10:10:00+08'::timestamptz)) AS v(id, wh_code, bin_code, sku_code, batch_no, ctype, q_before, q_change, q_after, at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (ledger_no) DO NOTHING;
+
+-- ---- 10.7 电子厂序列号 78 行（PCBA 20 + 白温控器 30 + 黑温控器 8 + 智能插座 40；
+--      已发货部分 status=OUTBOUND 留痕，IN_STOCK 数与期初库存行吻合）----
+INSERT INTO serial_numbers (id, serial_no, sku_id, batch_id, warehouse_id, bin_id, status,
+                            last_source_type, last_source_no, last_event_at, created_by)
+SELECT v.id, v.serial_no, sku.id, COALESCE(bat.id, 0), w.id, b.id, v.status,
+       v.src_type, v.src_no, v.at, 0
+FROM (VALUES
+  (9724, 'SN-PCBA-B1004-0001', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9725, 'SN-PCBA-B1004-0002', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9726, 'SN-PCBA-B1004-0003', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9727, 'SN-PCBA-B1004-0004', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9728, 'SN-PCBA-B1004-0005', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9729, 'SN-PCBA-B1004-0006', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9730, 'SN-PCBA-B1004-0007', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9731, 'SN-PCBA-B1004-0008', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9732, 'SN-PCBA-B1004-0009', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9733, 'SN-PCBA-B1004-0010', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9734, 'SN-PCBA-B1004-0011', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9735, 'SN-PCBA-B1004-0012', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9736, 'SN-PCBA-B1004-0013', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9737, 'SN-PCBA-B1004-0014', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9738, 'SN-PCBA-B1004-0015', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9739, 'SN-PCBA-B1004-0016', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9740, 'SN-PCBA-B1004-0017', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9741, 'SN-PCBA-B1004-0018', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9742, 'SN-PCBA-B1004-0019', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9743, 'SN-PCBA-B1004-0020', 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 11:00:00+08'::timestamptz),
+  (9744, 'SN-STC-W-A0001', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9745, 'SN-STC-W-A0002', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9746, 'SN-STC-W-A0003', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9747, 'SN-STC-W-A0004', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9748, 'SN-STC-W-A0005', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9749, 'SN-STC-W-A0006', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9750, 'SN-STC-W-A0007', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9751, 'SN-STC-W-A0008', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9752, 'SN-STC-W-A0009', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9753, 'SN-STC-W-A0010', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9754, 'SN-STC-W-A0011', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9755, 'SN-STC-W-A0012', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261003-000001', '2026-10-04 16:30:00+08'::timestamptz),
+  (9756, 'SN-STC-W-A0013', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9757, 'SN-STC-W-A0014', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9758, 'SN-STC-W-A0015', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9759, 'SN-STC-W-A0016', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9760, 'SN-STC-W-A0017', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9761, 'SN-STC-W-A0018', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9762, 'SN-STC-W-A0019', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9763, 'SN-STC-W-A0020', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9764, 'SN-STC-W-A0021', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9765, 'SN-STC-W-A0022', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9766, 'SN-STC-W-A0023', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9767, 'SN-STC-W-A0024', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9768, 'SN-STC-W-A0025', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9769, 'SN-STC-W-A0026', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9770, 'SN-STC-W-A0027', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9771, 'SN-STC-W-A0028', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9772, 'SN-STC-W-A0029', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9773, 'SN-STC-W-A0030', 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:00:00+08'::timestamptz),
+  (9774, 'SN-STC-B-A0001', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9775, 'SN-STC-B-A0002', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9776, 'SN-STC-B-A0003', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9777, 'SN-STC-B-A0004', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9778, 'SN-STC-B-A0005', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9779, 'SN-STC-B-A0006', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9780, 'SN-STC-B-A0007', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9781, 'SN-STC-B-A0008', 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261003-000001', '2026-10-03 10:20:00+08'::timestamptz),
+  (9782, 'SN-SP10-A0001', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9783, 'SN-SP10-A0002', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9784, 'SN-SP10-A0003', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9785, 'SN-SP10-A0004', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9786, 'SN-SP10-A0005', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9787, 'SN-SP10-A0006', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9788, 'SN-SP10-A0007', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9789, 'SN-SP10-A0008', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9790, 'SN-SP10-A0009', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9791, 'SN-SP10-A0010', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'OUTBOUND', 'OUTBOUND', 'OUT-20261004-000002', '2026-10-05 11:20:00+08'::timestamptz),
+  (9792, 'SN-SP10-A0011', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9793, 'SN-SP10-A0012', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9794, 'SN-SP10-A0013', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9795, 'SN-SP10-A0014', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9796, 'SN-SP10-A0015', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9797, 'SN-SP10-A0016', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9798, 'SN-SP10-A0017', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9799, 'SN-SP10-A0018', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9800, 'SN-SP10-A0019', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9801, 'SN-SP10-A0020', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9802, 'SN-SP10-A0021', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9803, 'SN-SP10-A0022', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9804, 'SN-SP10-A0023', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9805, 'SN-SP10-A0024', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9806, 'SN-SP10-A0025', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9807, 'SN-SP10-A0026', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9808, 'SN-SP10-A0027', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9809, 'SN-SP10-A0028', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9810, 'SN-SP10-A0029', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz),
+  (9811, 'SN-SP10-A0030', 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'IN_STOCK', 'INBOUND', 'IN-20261004-000001', '2026-10-04 09:30:00+08'::timestamptz)
+) AS v(id, serial_no, wh_code, bin_code, sku_code, batch_no, status, src_type, src_no, at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (serial_no) DO NOTHING;
+
+-- ============ 11) 电子厂单据链（单号走 docnum 真实格式并推进计数器；明细四量/状态机自洽） ============
+
+-- ---- 11.1 采购订单 4（完成 / 部分收货 / 待审核 / 草稿）----
+INSERT INTO purchase_orders (po_no, supplier_id, warehouse_id, total_amount, status, approved_by, approved_at,
+                             received_at, completed_at, remark, created_at, created_by, updated_by)
+SELECT v.po_no, sup.id, w.id, v.total, v.status,
+       CASE WHEN v.status IN ('APPROVED', 'PARTIAL_RECEIVED', 'RECEIVED_ALL', 'COMPLETED') THEN 9901 ELSE 0 END,
+       v.approved_at, v.received_at, v.completed_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('PO-20261002-000001', 'SUP-E001', 'WH-E01', 10970.0000::numeric(18, 4), 'COMPLETED',
+              '2026-10-02 09:10:00+08'::timestamptz, '2026-10-02 14:20:00+08'::timestamptz, '2026-10-03 17:30:00+08'::timestamptz,
+              'SMT 常规补料: 电阻/电容/MCU', '2026-10-02 09:05:00+08'::timestamptz),
+             ('PO-20261003-000002', 'SUP-E002', 'WH-E01', 1404.0000::numeric(18, 4), 'PARTIAL_RECEIVED',
+              '2026-10-03 10:00:00+08'::timestamptz, '2026-10-03 15:40:00+08'::timestamptz, NULL::timestamptz,
+              '连接器分批到货, FPC 待供', '2026-10-03 09:50:00+08'::timestamptz),
+             ('PO-20261004-000003', 'SUP-E003', 'WH-E01', 8740.0000::numeric(18, 4), 'PENDING_APPROVAL',
+              NULL::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              'PCB V1.2 批量板 + 锡膏补库', '2026-10-04 16:00:00+08'::timestamptz),
+             ('PO-20261005-000004', 'SUP-E004', 'WH-E03', 2900.0000::numeric(18, 4), 'DRAFT',
+              NULL::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              '成品包装材料月度采购', '2026-10-05 10:30:00+08'::timestamptz)) AS v(po_no, sup_code, wh_code, total, status, approved_at, received_at, completed_at, remark, created_at)
+JOIN suppliers sup ON sup.code = v.sup_code AND sup.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (po_no) DO NOTHING;
+
+INSERT INTO purchase_order_items (po_id, line_no, sku_id, qty_ordered, qty_received, qty_rejected, qty_putaway,
+                                  price, amount, remark, created_at, created_by)
+SELECT p.id, v.line_no, sku.id, v.qty, v.received, 0, v.putaway, v.price, v.qty * v.price, '', v.created_at, 9901
+FROM (VALUES ('PO-20261002-000001', 1, 'SKU-E001-01', 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), 8.5000::numeric(18, 4), '2026-10-02 09:05:00+08'::timestamptz),
+             ('PO-20261002-000001', 2, 'SKU-E002-01', 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 22.0000::numeric(18, 4), '2026-10-02 09:05:00+08'::timestamptz),
+             ('PO-20261002-000001', 3, 'SKU-E003-01', 800.0000::numeric(18, 4), 800.0000::numeric(18, 4), 800.0000::numeric(18, 4), 12.6000::numeric(18, 4), '2026-10-02 09:05:00+08'::timestamptz),
+             ('PO-20261003-000002', 1, 'SKU-E006-01', 600.0000::numeric(18, 4), 400.0000::numeric(18, 4), 400.0000::numeric(18, 4), 0.8500::numeric(18, 4), '2026-10-03 09:50:00+08'::timestamptz),
+             ('PO-20261003-000002', 2, 'SKU-E006-02', 260.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.9000::numeric(18, 4), '2026-10-03 09:50:00+08'::timestamptz),
+             ('PO-20261003-000002', 3, 'SKU-E007-01', 300.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 2.2000::numeric(18, 4), '2026-10-03 09:50:00+08'::timestamptz),
+             ('PO-20261004-000003', 1, 'SKU-E009-01', 500.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 15.8000::numeric(18, 4), '2026-10-04 16:00:00+08'::timestamptz),
+             ('PO-20261004-000003', 2, 'SKU-E010-01', 30.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 28.0000::numeric(18, 4), '2026-10-04 16:00:00+08'::timestamptz),
+             ('PO-20261005-000004', 1, 'SKU-E015-01', 2000.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 1.1500::numeric(18, 4), '2026-10-05 10:30:00+08'::timestamptz),
+             ('PO-20261005-000004', 2, 'SKU-E015-02', 5000.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.1200::numeric(18, 4), '2026-10-05 10:30:00+08'::timestamptz)) AS v(po_no, line_no, sku_code, qty, received, putaway, price, created_at)
+JOIN purchase_orders p ON p.po_no = v.po_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 11.2 入库单 2（完成全链 / 待上架）+ 收货记录 4（事件型，批号/效期采集）----
+INSERT INTO inbound_orders (inbound_no, source_type, source_no, warehouse_id, status, received_at, inspected_at,
+                            putaway_at, completed_at, remark, created_at, created_by, updated_by)
+SELECT v.inbound_no, 'PURCHASE', v.po_no, w.id, v.status, v.received_at, v.inspected_at, v.putaway_at, v.completed_at,
+       v.remark, v.created_at, 9902, 9902
+FROM (VALUES ('IN-20261002-000001', 'PO-20261002-000001', 'WH-E01', 'COMPLETED',
+              '2026-10-02 14:30:00+08'::timestamptz, '2026-10-03 10:30:00+08'::timestamptz, '2026-10-03 17:00:00+08'::timestamptz, '2026-10-03 17:30:00+08'::timestamptz,
+              'SMT 补料入库（全链走完）', '2026-10-02 14:10:00+08'::timestamptz),
+             ('IN-20261003-000002', 'PO-20261003-000002', 'WH-E01', 'AWAITING_PUTAWAY',
+              '2026-10-03 15:50:00+08'::timestamptz, '2026-10-04 09:40:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              '连接器到货 400, 质检合格待上架', '2026-10-03 15:30:00+08'::timestamptz)) AS v(inbound_no, po_no, wh_code, status, received_at, inspected_at, putaway_at, completed_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (inbound_no) DO NOTHING;
+
+INSERT INTO inbound_items (inbound_id, line_no, sku_id, qty, qty_received, qty_inspected, qty_putaway, remark, created_at, created_by)
+SELECT i.id, v.line_no, sku.id, v.qty, v.received, v.inspected, v.putaway, '', v.created_at, 9902
+FROM (VALUES ('IN-20261002-000001', 1, 'SKU-E001-01', 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), '2026-10-02 14:10:00+08'::timestamptz),
+             ('IN-20261002-000001', 2, 'SKU-E002-01', 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), '2026-10-02 14:10:00+08'::timestamptz),
+             ('IN-20261002-000001', 3, 'SKU-E003-01', 800.0000::numeric(18, 4), 800.0000::numeric(18, 4), 800.0000::numeric(18, 4), 800.0000::numeric(18, 4), '2026-10-02 14:10:00+08'::timestamptz),
+             ('IN-20261003-000002', 1, 'SKU-E006-01', 600.0000::numeric(18, 4), 400.0000::numeric(18, 4), 400.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-03 15:30:00+08'::timestamptz),
+             ('IN-20261003-000002', 2, 'SKU-E006-02', 260.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-03 15:30:00+08'::timestamptz),
+             ('IN-20261003-000002', 3, 'SKU-E007-01', 300.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-03 15:30:00+08'::timestamptz)) AS v(inbound_no, line_no, sku_code, qty, received, inspected, putaway, created_at)
+JOIN inbound_orders i ON i.inbound_no = v.inbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- 收货：一收货单一批号（receipts.batch_no 语义），PO-1 三批三张 + PO-2 一张
+INSERT INTO receipts (receipt_no, inbound_no, warehouse_id, batch_no, expiry_date, production_date,
+                      idempotency_key, operator_id, operator_name, remark, created_at, created_by)
+SELECT v.receipt_no, v.inbound_no, w.id, v.batch_no, v.expiry_date, v.production_date,
+       'dev-seed-' || v.receipt_no, 9902, '李收货', 'DEV SEED', v.created_at, 9902
+FROM (VALUES ('RC-20261002-000001', 'IN-20261002-000001', 'WH-E01', 'B20260928-E001', NULL::date, '2026-09-20'::date, '2026-10-02 14:30:00+08'::timestamptz),
+             ('RC-20261002-000002', 'IN-20261002-000001', 'WH-E01', 'B20261005-E002', NULL::date, '2026-09-28'::date, '2026-10-02 14:50:00+08'::timestamptz),
+             ('RC-20261002-000003', 'IN-20261002-000001', 'WH-E01', 'B20260915-E003', '2027-09-15'::date, '2026-09-10'::date, '2026-10-02 15:10:00+08'::timestamptz),
+             ('RC-20261003-000001', 'IN-20261003-000002', 'WH-E01', 'B20260926-E006', NULL::date, '2026-09-18'::date, '2026-10-03 15:50:00+08'::timestamptz)) AS v(receipt_no, inbound_no, wh_code, batch_no, expiry_date, production_date, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (receipt_no) DO NOTHING;
+
+INSERT INTO receipt_items (receipt_id, line_no, sku_id, qty_good, qty_rejected, exception_ref, remark, created_at, created_by)
+SELECT r.id, v.line_no, sku.id, v.qty_good, 0, '', '', r.created_at, 9902
+FROM (VALUES ('RC-20261002-000001', 1, 'SKU-E001-01', 40.0000::numeric(18, 4)),
+             ('RC-20261002-000002', 1, 'SKU-E002-01', 25.0000::numeric(18, 4)),
+             ('RC-20261002-000003', 1, 'SKU-E003-01', 800.0000::numeric(18, 4)),
+             ('RC-20261003-000001', 1, 'SKU-E006-01', 400.0000::numeric(18, 4))) AS v(receipt_no, line_no, sku_code, qty_good)
+JOIN receipts r ON r.receipt_no = v.receipt_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 11.3 质检 2（抽检合格，已完成）----
+INSERT INTO quality_orders (qc_no, source_type, source_no, warehouse_id, inspection_type, status,
+                            qty_inspected, qty_qualified, qty_defective, result, inspector_id, inspector_name,
+                            inspected_at, remark, created_at, created_by)
+SELECT v.qc_no, 'INBOUND', v.inbound_no, w.id, '抽检', 'COMPLETED',
+       v.qty, v.qty, 0, '合格', 9904, '赵盘点', v.inspected_at, 'DEV SEED IQC 抽检 AQL 0.65', v.created_at, 9901
+FROM (VALUES ('QC-20261002-000001', 'IN-20261002-000001', 'WH-E01', 865.0000::numeric(18, 4), '2026-10-03 10:30:00+08'::timestamptz, '2026-10-02 18:00:00+08'::timestamptz),
+             ('QC-20261003-000001', 'IN-20261003-000002', 'WH-E01', 400.0000::numeric(18, 4), '2026-10-04 09:40:00+08'::timestamptz, '2026-10-03 18:00:00+08'::timestamptz)) AS v(qc_no, inbound_no, wh_code, qty, inspected_at, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (qc_no) DO NOTHING;
+
+INSERT INTO quality_items (qc_id, line_no, sku_id, batch_no, qty_inspected, qty_qualified, qty_defective, remark, created_at, created_by)
+SELECT q.id, v.line_no, sku.id, v.batch_no, v.qty, v.qty, 0, '', q.created_at, 9901
+FROM (VALUES ('QC-20261002-000001', 1, 'SKU-E001-01', 'B20260928-E001', 40.0000::numeric(18, 4)),
+             ('QC-20261002-000001', 2, 'SKU-E002-01', 'B20261005-E002', 25.0000::numeric(18, 4)),
+             ('QC-20261002-000001', 3, 'SKU-E003-01', 'B20260915-E003', 800.0000::numeric(18, 4)),
+             ('QC-20261003-000001', 1, 'SKU-E006-01', 'B20260926-E006', 400.0000::numeric(18, 4))) AS v(qc_no, line_no, sku_code, batch_no, qty)
+JOIN quality_orders q ON q.qc_no = v.qc_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 11.4 上架任务 4（3 完成 + 1 待办）----
+INSERT INTO putaway_tasks (putaway_no, inbound_no, receipt_no, sku_id, batch_id, serial_no, qty, from_state,
+                           target_warehouse_id, target_zone_id, target_shelf_id, target_bin_id, status,
+                           claimed_by, claimed_at, completed_at, remark, created_at, created_by)
+SELECT v.putaway_no, v.inbound_no, v.receipt_no, sku.id, COALESCE(bat.id, 0), '',
+       v.qty, 'available', w.id, b.zone_id, b.shelf_id, b.id, v.status,
+       CASE WHEN v.status = 'COMPLETED' THEN 9902 ELSE 0 END,
+       CASE WHEN v.status = 'COMPLETED' THEN v.done_at ELSE NULL END,
+       CASE WHEN v.status = 'COMPLETED' THEN v.done_at ELSE NULL END,
+       'DEV SEED', v.created_at, 9902
+FROM (VALUES ('PW-20261003-000001', 'IN-20261002-000001', 'RC-20261002-000001', 'SKU-E001-01', 'B20260928-E001', 40.0000::numeric(18, 4), 'COMPLETED', 'WH-E01', 'REEL-01-11', '2026-10-03 16:40:00+08'::timestamptz, '2026-10-03 14:00:00+08'::timestamptz),
+             ('PW-20261003-000002', 'IN-20261002-000001', 'RC-20261002-000002', 'SKU-E002-01', 'B20261005-E002', 25.0000::numeric(18, 4), 'COMPLETED', 'WH-E01', 'REEL-02-11', '2026-10-03 16:50:00+08'::timestamptz, '2026-10-03 14:05:00+08'::timestamptz),
+             ('PW-20261003-000003', 'IN-20261002-000001', 'RC-20261002-000003', 'SKU-E003-01', 'B20260915-E003', 800.0000::numeric(18, 4), 'COMPLETED', 'WH-E01', 'REEL-02-12', '2026-10-03 17:00:00+08'::timestamptz, '2026-10-03 14:10:00+08'::timestamptz),
+             ('PW-20261004-000001', 'IN-20261003-000002', 'RC-20261003-000001', 'SKU-E006-01', 'B20260926-E006', 400.0000::numeric(18, 4), 'PENDING', 'WH-E01', 'PK-01-11', NULL::timestamptz, '2026-10-04 10:00:00+08'::timestamptz)) AS v(putaway_no, inbound_no, receipt_no, sku_code, batch_no, qty, status, wh_code, bin_code, done_at, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (putaway_no) DO NOTHING;
+
+-- ---- 11.5 销售订单 3（完成 / 部分发货 / 待审核）+ 出库执行链 ----
+INSERT INTO sales_orders (so_no, customer_id, warehouse_id, shipping_address, delivery_method, total_amount,
+                          status, approved_by, approved_at, shipped_at, completed_at, remark, created_at, created_by, updated_by)
+SELECT v.so_no, cus.id, w.id, cus.shipping_address, v.delivery_method, v.total, v.status,
+       CASE WHEN v.status IN ('APPROVED', 'PARTIAL_SHIPPED', 'SHIPPED_ALL', 'COMPLETED') THEN 9901 ELSE 0 END,
+       v.approved_at, v.shipped_at, v.completed_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('SO-20261003-000001', 'CUS-E001', 'WH-E03', '物流专线', 1584.0000::numeric(18, 4), 'COMPLETED',
+              '2026-10-03 11:20:00+08'::timestamptz, '2026-10-04 16:30:00+08'::timestamptz, '2026-10-04 16:30:00+08'::timestamptz,
+              '首批温控器订单', '2026-10-03 11:00:00+08'::timestamptz),
+             ('SO-20261004-000002', 'CUS-E002', 'WH-E03', '快递', 2720.0000::numeric(18, 4), 'PARTIAL_SHIPPED',
+              '2026-10-04 10:10:00+08'::timestamptz, '2026-10-05 11:20:00+08'::timestamptz, NULL::timestamptz,
+              '插座现货先发, 黑色温控器等下批补发', '2026-10-04 09:50:00+08'::timestamptz),
+             ('SO-20261005-000003', 'CUS-E003', 'WH-E03', '物流专线', 1554.0000::numeric(18, 4), 'PENDING_APPROVAL',
+              NULL::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              '样机 + 铺货', '2026-10-05 14:00:00+08'::timestamptz)) AS v(so_no, cus_code, wh_code, delivery_method, total, status, approved_at, shipped_at, completed_at, remark, created_at)
+JOIN customers cus ON cus.code = v.cus_code AND cus.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (so_no) DO NOTHING;
+
+INSERT INTO sales_order_items (so_id, line_no, sku_id, qty, price, amount, qty_allocated, qty_shipped, remark, created_at, created_by)
+SELECT so.id, v.line_no, sku.id, v.qty, v.price, v.qty * v.price, v.allocated, v.shipped, '', v.created_at, 9901
+FROM (VALUES ('SO-20261003-000001', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 129.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), '2026-10-03 11:00:00+08'::timestamptz),
+             ('SO-20261003-000001', 2, 'SKU-E015-01', 20.0000::numeric(18, 4), 1.8000::numeric(18, 4), 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), '2026-10-03 11:00:00+08'::timestamptz),
+             ('SO-20261004-000002', 1, 'SKU-E014-01', 40.0000::numeric(18, 4), 39.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), '2026-10-04 09:50:00+08'::timestamptz),
+             ('SO-20261004-000002', 2, 'SKU-E013-02', 8.0000::numeric(18, 4), 145.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-04 09:50:00+08'::timestamptz),
+             ('SO-20261005-000003', 1, 'SKU-E013-01', 6.0000::numeric(18, 4), 129.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-05 14:00:00+08'::timestamptz),
+             ('SO-20261005-000003', 2, 'SKU-E014-01', 20.0000::numeric(18, 4), 39.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-05 14:00:00+08'::timestamptz)) AS v(so_no, line_no, sku_code, qty, price, allocated, shipped, created_at)
+JOIN sales_orders so ON so.so_no = v.so_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO outbound_orders (outbound_no, so_no, type, warehouse_id, status, picked_at, checked_at, packed_at,
+                             shipped_at, remark, created_at, created_by, updated_by)
+SELECT v.outbound_no, v.so_no, '销售出库', w.id, v.status, v.picked_at, v.checked_at, v.packed_at, v.shipped_at,
+       v.remark, v.created_at, 9903, 9903
+FROM (VALUES ('OUT-20261003-000001', 'SO-20261003-000001', 'WH-E03', 'SHIPPED_ALL',
+              '2026-10-04 14:20:00+08'::timestamptz, '2026-10-04 15:10:00+08'::timestamptz, '2026-10-04 15:40:00+08'::timestamptz, '2026-10-04 16:30:00+08'::timestamptz,
+              '全链完成', '2026-10-03 11:30:00+08'::timestamptz),
+             ('OUT-20261004-000002', 'SO-20261004-000002', 'WH-E03', 'PARTIAL_SHIPPED',
+              '2026-10-05 10:00:00+08'::timestamptz, '2026-10-05 10:40:00+08'::timestamptz, '2026-10-05 10:55:00+08'::timestamptz, '2026-10-05 11:20:00+08'::timestamptz,
+              '现货部分先发, 黑色待补', '2026-10-04 10:20:00+08'::timestamptz)) AS v(outbound_no, so_no, wh_code, status, picked_at, checked_at, packed_at, shipped_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (outbound_no) DO NOTHING;
+
+INSERT INTO outbound_items (outbound_id, line_no, sku_id, qty, qty_picked, qty_checked, qty_packed, qty_shipped, remark, created_at, created_by)
+SELECT o.id, v.line_no, sku.id, v.qty, v.picked, v.checked, v.packed, v.shipped, '', v.created_at, 9903
+FROM (VALUES ('OUT-20261003-000001', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), '2026-10-03 11:30:00+08'::timestamptz),
+             ('OUT-20261003-000001', 2, 'SKU-E015-01', 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), '2026-10-03 11:30:00+08'::timestamptz),
+             ('OUT-20261004-000002', 1, 'SKU-E014-01', 40.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), '2026-10-04 10:20:00+08'::timestamptz),
+             ('OUT-20261004-000002', 2, 'SKU-E013-02', 8.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-04 10:20:00+08'::timestamptz)) AS v(outbound_no, line_no, sku_code, qty, picked, checked, packed, shipped, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- 分配记录：OUT-1 两行（FIFO）已完成；OUT-2 已发部分（lock 核销后 lock_id=0）
+INSERT INTO allocation_records (outbound_no, line_no, sku_id, batch_id, warehouse_id, bin_id, qty, strategy, reason, lock_id, created_at, created_by)
+SELECT v.outbound_no, v.line_no, sku.id, COALESCE(bat.id, 0), w.id, b.id, v.qty, v.strategy,
+       jsonb_build_object('hit', v.strategy, 'available_snapshot', v.qty), 0, v.created_at, 9901
+FROM (VALUES ('OUT-20261003-000001', 1, 'SKU-E013-01', NULL, 'WH-E03', 'FG-01-11', 12.0000::numeric(18, 4), 'FIFO', '2026-10-03 11:40:00+08'::timestamptz),
+             ('OUT-20261003-000001', 2, 'SKU-E015-01', 'B20261002-E015', 'WH-E03', 'FG-02-11', 20.0000::numeric(18, 4), 'FIFO', '2026-10-03 11:40:00+08'::timestamptz),
+             ('OUT-20261004-000002', 1, 'SKU-E014-01', NULL, 'WH-E03', 'FG-01-22', 10.0000::numeric(18, 4), 'FIFO', '2026-10-04 10:40:00+08'::timestamptz)) AS v(outbound_no, line_no, sku_code, batch_no, wh_code, bin_code, qty, strategy, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT DO NOTHING;
+
+-- 拣货任务 4（2 完成 + 1 拣货中 + 1 待领）
+INSERT INTO pick_tasks (pick_no, outbound_no, outbound_line_no, sku_id, batch_id, source_warehouse_id,
+                        source_zone_id, source_shelf_id, source_bin_id, qty, picked_qty, status,
+                        assignee_id, assignee_name, claimed_at, picked_at, scanned_code, scan_matched,
+                        warehouse_id, remark, created_at, created_by)
+SELECT v.pick_no, v.outbound_no, v.line_no, sku.id, COALESCE(bat.id, 0), w.id, b.zone_id, b.shelf_id, b.id,
+       v.qty, v.picked, v.status,
+       CASE WHEN v.status IN ('PICKED', 'PICKING') THEN 9903 ELSE 0 END,
+       CASE WHEN v.status IN ('PICKED', 'PICKING') THEN '陈发货' ELSE '' END,
+       CASE WHEN v.status IN ('PICKED', 'PICKING') THEN v.picked_at - interval '20 minutes' ELSE NULL END,
+       CASE WHEN v.status = 'PICKED' THEN v.picked_at ELSE NULL END,
+       CASE WHEN v.status = 'PICKED' THEN v.scan ELSE '' END,
+       CASE WHEN v.status = 'PICKED' THEN TRUE ELSE FALSE END,
+       w.id, 'DEV SEED', v.created_at, 9903
+FROM (VALUES ('PK-20261003-000001', 'OUT-20261003-000001', 1, 'SKU-E013-01', NULL, 'WH-E03', 'FG-01-11', 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 'PICKED', 'SKU-E013-01', '2026-10-04 14:20:00+08'::timestamptz, '2026-10-03 13:00:00+08'::timestamptz),
+             ('PK-20261003-000002', 'OUT-20261003-000001', 2, 'SKU-E015-01', 'B20261002-E015', 'WH-E03', 'FG-02-11', 20.0000::numeric(18, 4), 20.0000::numeric(18, 4), 'PICKED', 'SKU-E015-01', '2026-10-04 14:25:00+08'::timestamptz, '2026-10-03 13:00:00+08'::timestamptz),
+             ('PK-20261004-000001', 'OUT-20261004-000002', 1, 'SKU-E014-01', NULL, 'WH-E03', 'FG-01-22', 40.0000::numeric(18, 4), 10.0000::numeric(18, 4), 'PICKING', 'SKU-E014-01', '2026-10-05 09:40:00+08'::timestamptz, '2026-10-04 14:00:00+08'::timestamptz),
+             ('PK-20261004-000002', 'OUT-20261004-000002', 2, 'SKU-E013-02', NULL, 'WH-E03', 'FG-01-21', 8.0000::numeric(18, 4), 0.0000::numeric(18, 4), 'PENDING', '', NULL::timestamptz, '2026-10-04 14:00:00+08'::timestamptz)) AS v(pick_no, outbound_no, line_no, sku_code, batch_no, wh_code, bin_code, qty, picked, status, scan, picked_at, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (pick_no) DO NOTHING;
+
+-- 复核任务 3（2 完成 + 1 完成；黑行未到复核环节不建）
+INSERT INTO check_tasks (check_no, outbound_no, outbound_line_no, sku_id, batch_id, serial_no, qty, status,
+                         result, assignee_id, assignee_name, claimed_at, done_at, warehouse_id, remark, created_at, created_by)
+SELECT v.check_no, v.outbound_no, v.line_no, sku.id, COALESCE(bat.id, 0), '', v.qty, 'DONE', '',
+       9903, '陈发货', v.done_at - interval '15 minutes', v.done_at, w.id, 'DEV SEED', v.created_at, 9903
+FROM (VALUES ('CH-20261003-000001', 'OUT-20261003-000001', 1, 'SKU-E013-01', NULL, 12.0000::numeric(18, 4), '2026-10-04 15:10:00+08'::timestamptz, '2026-10-03 13:10:00+08'::timestamptz),
+             ('CH-20261003-000002', 'OUT-20261003-000001', 2, 'SKU-E015-01', 'B20261002-E015', 20.0000::numeric(18, 4), '2026-10-04 15:15:00+08'::timestamptz, '2026-10-03 13:10:00+08'::timestamptz),
+             ('CH-20261004-000001', 'OUT-20261004-000002', 1, 'SKU-E014-01', NULL, 10.0000::numeric(18, 4), '2026-10-05 10:40:00+08'::timestamptz, '2026-10-04 14:10:00+08'::timestamptz)) AS v(check_no, outbound_no, line_no, sku_code, batch_no, qty, done_at, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN warehouses w ON w.id = o.warehouse_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (check_no) DO NOTHING;
+
+-- 包裹 2 + 包裹明细 3
+INSERT INTO packing_records (package_no, outbound_no, packing_material, length, width, height, weight, volume,
+                             carrier, tracking_no, warehouse_id, idempotency_key, remark, created_at, created_by)
+SELECT v.package_no, v.outbound_no, v.material, v.len, v.wid, v.hei, v.weight, v.len * v.wid * v.hei / 1000000,
+       v.carrier, v.tracking_no, w.id, 'dev-seed-' || v.package_no, 'DEV SEED', v.created_at, 9903
+FROM (VALUES ('BP-20261003-000001', 'OUT-20261003-000001', '五层瓦楞纸箱 4 号', 35.0000::numeric(18, 4), 25.0000::numeric(18, 4), 15.0000::numeric(18, 4), 2.6000::numeric(18, 4), '顺丰速运', 'SF1380000123456', '2026-10-04 15:40:00+08'::timestamptz),
+             ('BP-20261004-000002', 'OUT-20261004-000002', '五层瓦楞纸箱 3 号', 30.0000::numeric(18, 4), 20.0000::numeric(18, 4), 12.0000::numeric(18, 4), 1.9000::numeric(18, 4), '中通快递', 'ZT7583001234', '2026-10-05 10:55:00+08'::timestamptz)) AS v(package_no, outbound_no, material, len, wid, hei, weight, carrier, tracking_no, created_at)
+JOIN warehouses w ON w.id = (SELECT o.warehouse_id FROM outbound_orders o WHERE o.outbound_no = v.outbound_no)
+ON CONFLICT (package_no) DO NOTHING;
+
+INSERT INTO packing_items (package_id, outbound_id, line_no, qty, remark, created_at, created_by)
+SELECT p.id, o.id, v.line_no, v.qty, '', p.created_at, 9903
+FROM (VALUES ('BP-20261003-000001', 'OUT-20261003-000001', 1, 12.0000::numeric(18, 4)),
+             ('BP-20261003-000001', 'OUT-20261003-000001', 2, 20.0000::numeric(18, 4)),
+             ('BP-20261004-000002', 'OUT-20261004-000002', 1, 10.0000::numeric(18, 4))) AS v(package_no, outbound_no, line_no, qty)
+JOIN packing_records p ON p.package_no = v.package_no
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+ON CONFLICT DO NOTHING;
+
+-- 发货单 2（SHIPPED：发货即 Deduct 正式扣减——存量快照已扣，见 10.6 口径）
+INSERT INTO shipments (shipment_no, outbound_no, carrier, tracking_no, warehouse_id, shipper_id, shipper_name,
+                       package_count, status, shipped_at, idempotency_key, remark, created_at, created_by)
+SELECT v.shipment_no, v.outbound_no, v.carrier, v.tracking_no, w.id, 9903, '陈发货',
+       1, 'SHIPPED', v.shipped_at, 'dev-seed-' || v.shipment_no, 'DEV SEED', v.created_at, 9903
+FROM (VALUES ('SH-20261003-000001', 'OUT-20261003-000001', '顺丰速运', 'SF1380000123456', '2026-10-04 16:30:00+08'::timestamptz, '2026-10-04 16:00:00+08'::timestamptz),
+             ('SH-20261004-000002', 'OUT-20261004-000002', '中通快递', 'ZT7583001234', '2026-10-05 11:20:00+08'::timestamptz, '2026-10-05 11:00:00+08'::timestamptz)) AS v(shipment_no, outbound_no, carrier, tracking_no, shipped_at, created_at)
+JOIN warehouses w ON w.id = (SELECT o.warehouse_id FROM outbound_orders o WHERE o.outbound_no = v.outbound_no)
+ON CONFLICT (shipment_no) DO NOTHING;
+
+-- ---- 11.6 调拨 2（完成 / 待收）----
+INSERT INTO transfer_orders (transfer_no, type, from_warehouse_id, to_warehouse_id, status, approved_by, approved_at,
+                             outbound_at, received_at, remark, created_at, created_by, updated_by)
+SELECT v.transfer_no, 'WAREHOUSE', fw.id, tw.id, v.status, 9901, v.approved_at, v.outbound_at, v.received_at,
+       v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('TR-20261004-000001', 'WH-E01', 'WH-E02', 'COMPLETED',
+              '2026-10-04 10:00:00+08'::timestamptz, '2026-10-04 14:00:00+08'::timestamptz, '2026-10-05 09:00:00+08'::timestamptz,
+              'SMT 产线领料: 电阻拨至半成品仓', '2026-10-04 09:40:00+08'::timestamptz),
+             ('TR-20261005-000002', 'WH-E01', 'WH-E02', 'AWAITING_RECEIPT',
+              '2026-10-05 13:00:00+08'::timestamptz, '2026-10-05 15:00:00+08'::timestamptz, NULL::timestamptz,
+              'MCU 调拨续批', '2026-10-05 12:40:00+08'::timestamptz)) AS v(transfer_no, from_wh, to_wh, status, approved_at, outbound_at, received_at, remark, created_at)
+JOIN warehouses fw ON fw.code = v.from_wh AND fw.deleted_at IS NULL
+JOIN warehouses tw ON tw.code = v.to_wh AND tw.deleted_at IS NULL
+ON CONFLICT (transfer_no) DO NOTHING;
+
+INSERT INTO transfer_items (transfer_id, line_no, sku_id, batch_id, from_warehouse_id, from_zone_id, from_shelf_id,
+                            from_bin_id, to_warehouse_id, to_zone_id, to_shelf_id, to_bin_id, qty, qty_out, qty_in,
+                            created_at, created_by)
+SELECT t.id, v.line_no, sku.id, COALESCE(bat.id, 0), fw.id, fb.zone_id, fb.shelf_id, fb.id,
+       tw.id, tb.zone_id, tb.shelf_id, tb.id, v.qty, v.qty_out, v.qty_in, v.created_at, 9901
+FROM (VALUES ('TR-20261004-000001', 1, 'SKU-E001-01', 'B20260928-E001', 'WH-E01', 'REEL-01-11', 'WH-E02', 'SR-01-11', 5.0000::numeric(18, 4), 5.0000::numeric(18, 4), 5.0000::numeric(18, 4), '2026-10-04 09:40:00+08'::timestamptz),
+             ('TR-20261005-000002', 1, 'SKU-E003-01', 'B20260915-E003', 'WH-E01', 'REEL-02-12', 'WH-E02', 'SR-01-11', 100.0000::numeric(18, 4), 100.0000::numeric(18, 4), 0.0000::numeric(18, 4), '2026-10-05 12:40:00+08'::timestamptz)) AS v(transfer_no, line_no, sku_code, batch_no, from_wh, from_bin, to_wh, to_bin, qty, qty_out, qty_in, created_at)
+JOIN transfer_orders t ON t.transfer_no = v.transfer_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+JOIN warehouses fw ON fw.code = v.from_wh AND fw.deleted_at IS NULL
+JOIN bins fb ON fb.code = v.from_bin AND fb.warehouse_id = fw.id
+JOIN warehouses tw ON tw.code = v.to_wh AND tw.deleted_at IS NULL
+JOIN bins tb ON tb.code = v.to_bin AND tb.warehouse_id = tw.id
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT DO NOTHING;
+
+-- ---- 11.7 盘点 2（待差异审核 / 盘点中）----
+INSERT INTO count_orders (count_no, warehouse_id, scope, status, frozen_at, reviewed_at, completed_at, remark, created_at, created_by)
+SELECT v.count_no, w.id, v.scope, v.status, v.frozen_at, v.reviewed_at, v.completed_at, v.remark, v.created_at, 9904
+FROM (VALUES ('CK-20261004-000001', 'WH-E01', '{"type": "BIN", "bins": ["REEL-01-11", "IC-01-11", "PK-01-11"]}'::jsonb, 'PENDING_REVIEW',
+              '2026-10-04 09:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              '循环盘点: MCU 账实差 -4 待审核（差异必须走调整单）', '2026-10-04 08:40:00+08'::timestamptz),
+             ('CK-20261005-000002', 'WH-E01', '{"type": "BIN", "bins": ["REEL-02-11", "REEL-02-21"]}'::jsonb, 'COUNTING',
+              '2026-10-05 08:30:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz,
+              '电容/锡膏循环盘点中', '2026-10-05 08:20:00+08'::timestamptz)) AS v(count_no, wh_code, scope, status, frozen_at, reviewed_at, completed_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (count_no) DO NOTHING;
+
+INSERT INTO count_items (count_id, inventory_row_id, sku_id, warehouse_id, zone_id, shelf_id, bin_id,
+                         qty_system, qty_counted, counted_by, counted_at, serial_no, created_at, created_by)
+SELECT c.id, i.id, sku.id, i.warehouse_id, i.zone_id, i.shelf_id, i.bin_id,
+       i.available_qty, v.qty_counted,
+       CASE WHEN v.qty_counted IS NOT NULL THEN 9904 ELSE 0 END,
+       v.counted_at, '', c.created_at, 9904
+FROM (VALUES ('CK-20261004-000001', 'REEL-01-11', 'SKU-E001-01', 30.0000::numeric(18, 4), '2026-10-04 10:30:00+08'::timestamptz),
+             ('CK-20261004-000001', 'IC-01-11', 'SKU-E004-01', 796.0000::numeric(18, 4), '2026-10-04 10:50:00+08'::timestamptz),
+             ('CK-20261004-000001', 'PK-01-11', 'SKU-E006-01', 400.0000::numeric(18, 4), '2026-10-04 11:10:00+08'::timestamptz),
+             ('CK-20261005-000002', 'REEL-02-11', 'SKU-E002-01', 25.0000::numeric(18, 4), '2026-10-05 09:10:00+08'::timestamptz),
+             ('CK-20261005-000002', 'REEL-02-21', 'SKU-E010-01', NULL::numeric(18, 4), NULL::timestamptz)) AS v(count_no, bin_code, sku_code, qty_counted, counted_at)
+JOIN count_orders c ON c.count_no = v.count_no
+JOIN inventory i ON i.bin_id = (SELECT b.id FROM bins b WHERE b.code = v.bin_code AND b.warehouse_id = c.warehouse_id)
+                AND i.sku_id = (SELECT sku.id FROM skus sku WHERE sku.code = v.sku_code)
+                AND i.warehouse_id = c.warehouse_id
+JOIN skus sku ON sku.id = i.sku_id
+ON CONFLICT DO NOTHING;
+
+INSERT INTO count_differences (count_id, line_no, sku_id, warehouse_id, bin_id, batch_id, qty_system, qty_counted,
+                               diff_qty, adjust_no, status, remark, created_at, created_by)
+SELECT c.id, 1, sku.id, c.warehouse_id, i.bin_id, i.batch_id, 800.0000::numeric(18, 4), 796.0000::numeric(18, 4),
+       -4.0000::numeric(18, 4), '', 'PENDING', '疑少 4 颗, 待审核后走调整单（inventory-rules §9 禁止直改库存）', c.frozen_at, 9904
+FROM count_orders c
+JOIN skus sku ON sku.code = 'SKU-E004-01'
+JOIN inventory i ON i.warehouse_id = c.warehouse_id
+                AND i.sku_id = sku.id
+                AND i.bin_id = (SELECT b.id FROM bins b WHERE b.code = 'IC-01-11' AND b.warehouse_id = c.warehouse_id)
+WHERE c.count_no = 'CK-20261004-000001'
+ON CONFLICT DO NOTHING;
+
+-- ---- 11.8 打印模板 2 / 打印任务 2（任务行含 data_id 身份快照，000019）----
+INSERT INTO print_templates (id, name, object_type, paper, barcode_symbology, qrcode_enabled, fields,
+                             header_text, status, remark, created_by)
+VALUES (9991, 'SKU 二维码标准标签', 'SKU_LABEL', 'THERMAL_60_40', 'CODE128', TRUE,
+        '{"sku_code": "SKU 编码", "product_name": "商品名称", "spec": "规格", "barcode": "主条码"}'::jsonb,
+        '泰克威电子', 'ENABLED', 'DEV SEED 二维码中心默认模板', 0),
+       (9992, '库位标签', 'BIN_LABEL', 'THERMAL_40_30', 'CODE128', TRUE,
+        '{"bin_code": "库位编码", "warehouse_name": "仓库"}'::jsonb,
+        '', 'ENABLED', 'DEV SEED 库位标识', 0)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO print_tasks (print_no, object_type, template_id, template_snapshot, paper, copies, total_count,
+                         status, result, printed_by, printed_at, created_at, created_by)
+SELECT v.print_no, v.object_type, t.id, jsonb_build_object('name', t.name, 'object_type', t.object_type,
+                       'paper', t.paper, 'barcode_symbology', t.barcode_symbology, 'qrcode_enabled', t.qrcode_enabled,
+                       'fields', t.fields, 'header_text', t.header_text),
+       t.paper, v.copies, v.total, v.status, v.result,
+       CASE WHEN v.result IS NOT NULL THEN 9901 ELSE 0 END,
+       CASE WHEN v.result IS NOT NULL THEN v.printed_at ELSE NULL END,
+       v.created_at, 9901
+FROM (VALUES ('PT-20261004-000001', 'SKU_LABEL', 'SKU 二维码标准标签', 2, 2, 'SUCCESS', 'SUCCESS'::varchar, '2026-10-04 17:00:00+08'::timestamptz, '2026-10-04 16:40:00+08'::timestamptz),
+             ('PT-20261005-000002', 'BIN_LABEL', '库位标签', 1, 3, 'QUEUED', NULL::varchar, NULL::timestamptz, '2026-10-05 16:00:00+08'::timestamptz)) AS v(print_no, object_type, template_name, copies, total, status, result, printed_at, created_at)
+JOIN print_templates t ON t.name = v.template_name
+ON CONFLICT (print_no) DO NOTHING;
+
+INSERT INTO print_task_rows (id, task_id, seq, code, data_id, values, created_at, created_by)
+SELECT v.id, t.id, v.seq, v.code, v.data_id,
+       jsonb_build_object('sku_code', v.code, 'product_name', v.product_name, 'spec', v.spec, 'barcode', v.barcode),
+       t.created_at, 9901
+FROM (VALUES (9995, 'PT-20261004-000001', 1, 'SKU-E013-01', '9436', '智能温控器 STC-2000', '白色, NTC/继电器, 220V', '6901234000368'),
+             (9996, 'PT-20261004-000001', 2, 'SKU-E014-01', '9438', 'WiFi 智能插座 SP-10', '16A, 支持 Alexa/小爱', '6901234000382'),
+             (9997, 'PT-20261005-000002', 1, 'REEL-01-11', '9970', '元器件存储区', '', ''),
+             (9998, 'PT-20261005-000002', 2, 'REEL-02-11', '9974', '元器件存储区', '', ''),
+             (9999, 'PT-20261005-000002', 3, 'FG-01-11', '9992', '成品存储区', '', '')) AS v(id, print_no, seq, code, data_id, product_name, spec, barcode)
+JOIN print_tasks t ON t.print_no = v.print_no
+ON CONFLICT (id) DO NOTHING;
+
+-- ---- 11.9 单号计数器推进（GREATEST 幂等：重跑不回退既有最大值，服务后续取号无缝衔接）----
+INSERT INTO doc_number_counters (prefix, period, next_no, created_at, updated_at, created_by)
+VALUES ('PO', '20261002', 2, now(), now(), 0), ('PO', '20261003', 3, now(), now(), 0),
+       ('PO', '20261004', 4, now(), now(), 0), ('PO', '20261005', 5, now(), now(), 0),
+       ('IN', '20261002', 2, now(), now(), 0), ('IN', '20261003', 3, now(), now(), 0),
+       ('RC', '20261002', 4, now(), now(), 0), ('RC', '20261003', 2, now(), now(), 0),
+       ('QC', '20261002', 2, now(), now(), 0), ('QC', '20261003', 2, now(), now(), 0),
+       ('PW', '20261003', 4, now(), now(), 0), ('PW', '20261004', 2, now(), now(), 0),
+       ('SO', '20261003', 2, now(), now(), 0), ('SO', '20261004', 3, now(), now(), 0),
+       ('SO', '20261005', 4, now(), now(), 0),
+       ('OUT', '20261003', 2, now(), now(), 0), ('OUT', '20261004', 3, now(), now(), 0),
+       ('PK', '20261003', 3, now(), now(), 0), ('PK', '20261004', 3, now(), now(), 0),
+       ('CH', '20261003', 3, now(), now(), 0), ('CH', '20261004', 2, now(), now(), 0),
+       ('BP', '20261003', 2, now(), now(), 0), ('BP', '20261004', 3, now(), now(), 0),
+       ('SH', '20261003', 2, now(), now(), 0), ('SH', '20261004', 3, now(), now(), 0),
+       ('TR', '20261004', 2, now(), now(), 0), ('TR', '20261005', 3, now(), now(), 0),
+       ('CK', '20261004', 2, now(), now(), 0), ('CK', '20261005', 3, now(), now(), 0),
+       ('PT', '20261004', 2, now(), now(), 0), ('PT', '20261005', 3, now(), now(), 0)
+ON CONFLICT (prefix, period) DO UPDATE SET next_no = GREATEST(doc_number_counters.next_no, EXCLUDED.next_no);
+
+-- ---- 11.10 审批记录（document_approvals append-only；NOT EXISTS 防重跑重复）----
+INSERT INTO document_approvals (target_type, target_no, action, result, opinion, operator_id, operator_name, created_at)
+SELECT v.target_type, v.target_no, v.action, v.result, v.opinion, v.operator_id, v.operator_name, v.created_at
+FROM (VALUES ('purchase_order', 'PO-20261002-000001', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-02 09:08:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261002-000001', 'APPROVE', 'APPROVED', '同意, 按预算执行', 9901, '王经理', '2026-10-02 09:10:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261003-000002', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-03 09:55:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261003-000002', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-03 10:00:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261004-000003', 'SUBMIT', '', 'PCB 批量板请审批', 9901, '王经理', '2026-10-04 16:02:00+08'::timestamptz),
+             ('sales_order', 'SO-20261003-000001', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-03 11:05:00+08'::timestamptz),
+             ('sales_order', 'SO-20261003-000001', 'APPROVE', 'APPROVED', '同意, 库存充足', 9901, '王经理', '2026-10-03 11:20:00+08'::timestamptz),
+             ('sales_order', 'SO-20261004-000002', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-04 10:00:00+08'::timestamptz),
+             ('sales_order', 'SO-20261004-000002', 'APPROVE', 'APPROVED', '同意, 部分现货先发', 9901, '王经理', '2026-10-04 10:10:00+08'::timestamptz),
+             ('sales_order', 'SO-20261005-000003', 'SUBMIT', '', '样机单请审批', 9901, '王经理', '2026-10-05 14:05:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261004-000001', 'SUBMIT', '', '产线领料申请', 9901, '王经理', '2026-10-04 09:45:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261004-000001', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-04 10:00:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261005-000002', 'SUBMIT', '', 'MCU 调拨申请', 9901, '王经理', '2026-10-05 12:45:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261005-000002', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-05 13:00:00+08'::timestamptz)) AS v(target_type, target_no, action, result, opinion, operator_id, operator_name, created_at)
+WHERE NOT EXISTS (
+    SELECT 1 FROM document_approvals da
+    WHERE da.target_type = v.target_type AND da.target_no = v.target_no
+      AND da.action = v.action AND da.created_at = v.created_at);
 
 COMMIT;
 

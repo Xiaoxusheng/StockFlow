@@ -3,11 +3,17 @@ package database
 // dev_seed.sql / dev_seed_verify.sql 演示数据交付物的静态自查（不依赖 PostgreSQL/psql，
 // 本环境无 PG——database.md §9 的真库验证须在具备 PG 的环境补做）。
 //
-// 覆盖（本 ask 验收口径）：
+// 覆盖（本 ask 验收口径；2026-10-05 电子厂场景扩容轮随 db/seed/dev_seed.sql §10/§11
+// 同步更新静态契约——§10 场景扩展对主数据/仓储/库存各追加 1 条 INSERT（每表 2 条，
+// inventory_ledgers 期初成对+补影各 2 条=4 条），§11 单据链新增 29 张自然键幂等表）：
 //   - 门禁：is_dev 变量开关、拒绝文案、ON_ERROR_STOP、整体 BEGIN/COMMIT 单事务；
+//   - INSERT-only + 幂等：禁止独立 UPDATE/DELETE/TRUNCATE/DROP/ALTER；幂等守卫三形态
+//     （ON CONFLICT DO NOTHING / doc_number_counters 单调 upsert DO UPDATE+GREATEST /
+//     document_approvals NOT EXISTS）；
+//   - 显式 9xxx 主键（带 id 列的表）与自然键白名单（§11 单据链表）+ 每表 INSERT 条数冻结；
 //   - 实体覆盖：测试账号/角色/仓库绑定、仓库四级结构、商品/SKU 四种三开关组合/条码/供应商/客户；
-//   - 期初库存只写 total/available 两列，且与期初流水同文件同事务 1:1 成对（0→n、期初、DEV SEED）；
-//   - 全部业务行固定显式 9xxx 主键 + ON CONFLICT DO NOTHING（幂等）；
+//   - 期初库存只写 total/available 两列，且与期初流水同文件同事务按段 1:1 成对（0→n、
+//     期初、DEV SEED；§8 基础段与 §10 电子厂段各自成对，合并后键集合仍须一致）；
 //   - 无生产初始化污染：不写 roles/permissions 等生产初始化表、启动路径零引用、Makefile 门禁在位；
 //   - bcrypt 口令哈希可与注释明文互验（cost 12）。
 //
@@ -145,7 +151,10 @@ func parseDevSeedInserts(t *testing.T, sqlText string) []seedInsert {
 	return out
 }
 
-func insertsOf(t *testing.T, ins []seedInsert, table string, want int) seedInsert {
+// mergedInsertsOf 取某表全部 INSERT（条数须恰为 want）并合并为一条：要求各条列清单
+// 完全一致（§10 电子厂扩展段必须与基础段同构），元组串接、文本拼接后供成对/覆盖断言
+// 跨段计算（2026-10-05 §10/§11 扩容后基础段各表 2 条、inventory_ledgers 4 条）。
+func mergedInsertsOf(t *testing.T, ins []seedInsert, table string, want int) seedInsert {
 	t.Helper()
 	var found []seedInsert
 	for _, s := range ins {
@@ -159,7 +168,35 @@ func insertsOf(t *testing.T, ins []seedInsert, table string, want int) seedInser
 	if want == 0 {
 		return seedInsert{}
 	}
-	return found[0]
+	merged := found[0]
+	for _, s := range found[1:] {
+		if strings.Join(s.columns, ",") != strings.Join(merged.columns, ",") {
+			t.Fatalf("表 %s 的多条 INSERT 列清单不一致（扩展段必须与基础段同构）", table)
+		}
+		merged.tuples = append(merged.tuples, s.tuples...)
+		merged.text += "\n" + s.text
+	}
+	return merged
+}
+
+// seedAliasRe SELECT 型插入的 `... FROM (VALUES ...) AS v(col, ...)` 源别名清单。
+var seedAliasRe = regexp.MustCompile(`(?is)AS\s+v\s*\(([^()]*)\)`)
+
+// aliasIndex 解析 INSERT 语句 VALUES 源的 `AS v(col, ...)` 别名清单为 列名→元组下标
+// （元组由 parseDevSeedInserts 从内层 VALUES 提取，与别名一一对应；多条语句同构时
+// 取末次清单即可）。期初成对/补影净零断言按列名定位——§8 与 §10 段元组宽度可不同
+// （如补影段 §10 增加 batch_no 列），位置硬编码跨段不可靠。
+func aliasIndex(t *testing.T, stmt, ctx string) map[string]int {
+	t.Helper()
+	ms := seedAliasRe.FindAllStringSubmatch(stmt, -1)
+	if len(ms) == 0 {
+		t.Fatalf("%s 缺少 AS v(...) VALUES 源别名清单", ctx)
+	}
+	out := map[string]int{}
+	for i, name := range strings.Split(ms[len(ms)-1][1], ",") {
+		out[strings.TrimSpace(name)] = i
+	}
+	return out
 }
 
 func hasCol(cols []string, name string) bool {
@@ -253,45 +290,101 @@ func TestDevSeedGateAndSingleTransaction(t *testing.T) {
 	if begin[0][0] > locs[0][0] || commit[0][0] < locs[len(locs)-1][0] {
 		t.Fatal("存在位于事务外的 INSERT（全部 INSERT 必须在 BEGIN 之后、COMMIT 之前）")
 	}
-	// INSERT-only：seed 禁止破坏性/覆盖性写入
+	// INSERT-only：seed 禁止破坏性/覆盖性写入。唯一豁免：ON CONFLICT DO UPDATE 形态
+	// （doc_number_counters 单号计数单调推进，next_no = GREATEST(现值, EXCLUDED)——
+	// 幂等可重跑且不回退，2026-10-05 §11 引入；剥离该形态后仍禁任何独立 UPDATE）。
 	body := strings.ToUpper(stripSQLComments(content))
+	bodyNoUpsert := strings.ReplaceAll(body, "DO UPDATE", "")
 	for _, bad := range []string{"UPDATE ", "DELETE FROM", "TRUNCATE", "DROP ", "ALTER "} {
-		if strings.Contains(body, bad) {
-			t.Fatalf("dev_seed.sql 含有禁止的写入形态 %q（seed 仅允许 INSERT，防覆盖已有数据）", bad)
+		if strings.Contains(bodyNoUpsert, bad) {
+			t.Fatalf("dev_seed.sql 含有禁止的写入形态 %q（seed 仅允许 INSERT 与单调计数 upsert，防覆盖已有数据）", bad)
 		}
 	}
-	if n1 := strings.Count(body, "ON CONFLICT"); n1 == 0 || n1 != strings.Count(body, "DO NOTHING") {
-		t.Fatalf("每条 INSERT 都应 ON CONFLICT DO NOTHING（幂等），ON CONFLICT=%d DO NOTHING=%d",
-			n1, strings.Count(body, "DO NOTHING"))
+	// 幂等守卫三形态（§11 起）：ON CONFLICT DO NOTHING（一般业务表）/ ON CONFLICT
+	// DO UPDATE（仅计数器，必须伴随 GREATEST 防回退）/ WHERE NOT EXISTS（无自然唯一
+	// 键的 document_approvals 追加留痕）。每条 INSERT 至少落其一：
+	// ON CONFLICT 总数 == DO NOTHING + DO UPDATE；NOT EXISTS 至少 1 条（审批表）。
+	nConflict := strings.Count(body, "ON CONFLICT")
+	nNothing := strings.Count(body, "DO NOTHING")
+	nUpsert := strings.Count(body, "DO UPDATE")
+	if nConflict == 0 || nConflict != nNothing+nUpsert {
+		t.Fatalf("每条 INSERT 都应 ON CONFLICT DO NOTHING（或计数器 DO UPDATE 单调推进），ON CONFLICT=%d DO NOTHING=%d DO UPDATE=%d",
+			nConflict, nNothing, nUpsert)
+	}
+	if nUpsert > 0 && (!strings.Contains(body, "GREATEST(") || !strings.Contains(body, "EXCLUDED.")) {
+		t.Fatalf("DO UPDATE 仅允许计数器单调推进形态（next_no = GREATEST(现值, EXCLUDED)），实际缺 GREATEST/EXCLUDED 防回退守卫")
+	}
+	if strings.Count(body, "NOT EXISTS") == 0 {
+		t.Fatal("document_approvals 追加留痕应以 WHERE NOT EXISTS 防重跑重复（无自然唯一键可 ON CONFLICT）")
 	}
 }
 
-// ---- 显式 9xxx 主键 + 白名单表 ----
+// ---- 显式 9xxx 主键 + 白名单表 + 每表 INSERT 条数冻结 ----
 
-var devSeedAllowedTables = map[string]bool{
-	"departments": true, "users": true, "user_roles": true, "user_warehouses": true,
-	"warehouses": true, "zones": true, "shelves": true, "bins": true,
-	"product_categories": true, "units": true, "products": true, "skus": true, "barcodes": true,
-	"suppliers": true, "customers": true, "batches": true,
-	"inventory": true, "inventory_ledgers": true, "serial_numbers": true,
+// devSeedExpectedCounts 每表 INSERT 条数冻结表（2026-10-05 §10/§11 扩容后契约，
+// 合计 65 条）：§0–§9 基础段每表 1 条；§10 电子厂扩展段对主数据/仓储/库存各追加 1 条
+// （inventory_ledgers 另有期初成对 + 补影各 2 条 = 4 条）；§11 单据链每表 1 条。
+// 任何增删都必须有意识地改本表（防漏写/误写双份——与 routes 冻结端点集同思路）。
+var devSeedExpectedCounts = map[string]int{
+	// 基础段（单条）
+	"departments": 1, "users": 1, "user_roles": 1, "user_warehouses": 1,
+	// 基础段 + §10 电子厂扩展段（各 1 条）
+	"warehouses": 2, "zones": 2, "shelves": 2, "bins": 2,
+	"product_categories": 2, "units": 2, "products": 2, "skus": 2, "barcodes": 2,
+	"suppliers": 2, "customers": 2, "batches": 2,
+	"inventory": 2, "serial_numbers": 2,
+	// 期初成对 ×2 段 + 演示出库补影 ×2 段
+	"inventory_ledgers": 4,
+	// §11 单据链（自然键幂等，每表 1 条）
+	"purchase_orders": 1, "purchase_order_items": 1,
+	"inbound_orders": 1, "inbound_items": 1,
+	"receipts": 1, "receipt_items": 1,
+	"quality_orders": 1, "quality_items": 1,
+	"putaway_tasks": 1,
+	"sales_orders":  1, "sales_order_items": 1,
+	"outbound_orders": 1, "outbound_items": 1,
+	"allocation_records": 1, "pick_tasks": 1, "check_tasks": 1,
+	"packing_records": 1, "packing_items": 1, "shipments": 1,
+	"transfer_orders": 1, "transfer_items": 1,
+	"count_orders": 1, "count_items": 1, "count_differences": 1,
+	"print_templates": 1, "print_tasks": 1, "print_task_rows": 1,
+	"doc_number_counters": 1, "document_approvals": 1,
+}
+
+// devSeedNaturalKeyTables §11 单据链/共享平台中不带显式 id 列的表：以自然键
+// （单号/编号）ON CONFLICT（或 document_approvals 的 WHERE NOT EXISTS）幂等，
+// 不适用 9xxx 显式主键约束（print_templates/print_task_rows 带 id，不在本集）。
+var devSeedNaturalKeyTables = map[string]bool{
+	"purchase_orders": true, "purchase_order_items": true,
+	"inbound_orders": true, "inbound_items": true,
+	"receipts": true, "receipt_items": true,
+	"quality_orders": true, "quality_items": true,
+	"putaway_tasks": true,
+	"sales_orders":  true, "sales_order_items": true,
+	"outbound_orders": true, "outbound_items": true,
+	"allocation_records": true, "pick_tasks": true, "check_tasks": true,
+	"packing_records": true, "packing_items": true, "shipments": true,
+	"transfer_orders": true, "transfer_items": true,
+	"count_orders": true, "count_items": true, "count_differences": true,
+	"print_tasks":         true,
+	"doc_number_counters": true, "document_approvals": true,
 }
 
 func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
-	// 2026-10-05 联调轮：inventory_ledgers 允许第 2 条 INSERT——演示出库形态补影段
-	// （净零对，business_type='演示'；docs/database.md §8.2 扩展，api.md §9 回写），
-	// 其余每表仍恰一条。
-	const extraLedgerInserts = 1
-	if len(ins) != len(devSeedAllowedTables)+extraLedgerInserts {
-		t.Fatalf("INSERT 语句应恰为 %d 条（每表一条 + ledger 补影段 %d 条），实际 %d",
-			len(devSeedAllowedTables)+extraLedgerInserts, extraLedgerInserts, len(ins))
+	wantTotal := 0
+	for _, n := range devSeedExpectedCounts {
+		wantTotal += n
+	}
+	if len(ins) != wantTotal {
+		t.Fatalf("INSERT 语句应恰为 %d 条（每表条数冻结表合计），实际 %d", wantTotal, len(ins))
 	}
 	counts := map[string]int{}
 	seen := map[string]bool{}
 	for _, s := range ins {
 		counts[s.table]++
-		if !devSeedAllowedTables[s.table] {
-			t.Fatalf("dev_seed.sql 出现白名单之外的写入目标 %s（roles/permissions 等生产初始化表禁止写入）", s.table)
+		if _, ok := devSeedExpectedCounts[s.table]; !ok {
+			t.Fatalf("dev_seed.sql 出现冻结契约之外的写入目标 %s（roles/permissions 等生产初始化表禁止写入；新表须更新 devSeedExpectedCounts）", s.table)
 		}
 		isJoin := s.table == "user_roles" || s.table == "user_warehouses"
 		if isJoin {
@@ -304,7 +397,16 @@ func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 			continue
 		}
 		if !hasCol(s.columns, "id") {
-			t.Fatalf("业务表 %s 未显式指定主键 id（要求固定显式主键保证幂等）", s.table)
+			// 自然键幂等表（§11 单据链）：无显式 id，凭单号/编号 ON CONFLICT 幂等
+			if !devSeedNaturalKeyTables[s.table] {
+				t.Fatalf("业务表 %s 未显式指定主键 id，也不在自然键白名单（要求固定显式主键保证幂等）", s.table)
+			}
+			// 纯 SELECT-JOIN 形态（无 VALUES 源，如 count_differences 按 JOIN 现有行
+			// 生成差异行）解析不到元组属预期；VALUES 源形态必须有数据行。
+			if len(s.tuples) == 0 && !strings.Contains(strings.ToUpper(s.text), "SELECT") {
+				t.Fatalf("自然键表 %s 未解析到数据行", s.table)
+			}
+			continue
 		}
 		if s.columns[0] != "id" {
 			t.Fatalf("业务表 %s 的 id 应为第一列，实际 %v", s.table, s.columns)
@@ -324,13 +426,7 @@ func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 			seen[key] = true
 		}
 	}
-	for tbl := range devSeedAllowedTables {
-		// 2026-10-05 联调轮：inventory_ledgers 允许 2 条（期初成对段 + 演示出库补影段，
-		// 见 TestDevSeedOpeningInventoryPairedWithLedger 的分段断言），其余每表 1 条。
-		want := 1
-		if tbl == "inventory_ledgers" {
-			want = 2
-		}
+	for tbl, want := range devSeedExpectedCounts {
 		if counts[tbl] != want {
 			t.Fatalf("表 %s 的 INSERT 语句数应为 %d，实际 %d", tbl, want, counts[tbl])
 		}
@@ -342,7 +438,7 @@ func TestDevSeedExplicitPKsIn9xxxRange(t *testing.T) {
 func TestDevSeedAccountsRolesAndWarehouseBinding(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
 
-	users := insertsOf(t, ins, "users", 1)
+	users := mergedInsertsOf(t, ins, "users", 1)
 	if !hasCol(users.columns, "data_scope") || !hasCol(users.columns, "password_hash") {
 		t.Fatalf("users INSERT 缺少 password_hash/data_scope 列: %v", users.columns)
 	}
@@ -371,7 +467,7 @@ func TestDevSeedAccountsRolesAndWarehouseBinding(t *testing.T) {
 		t.Fatalf("绑定仓库型账号（SPECIFIED_WAREHOUSE）应 ≥2 个以验证数据权限，实际 %d", scoped)
 	}
 
-	uw := insertsOf(t, ins, "user_warehouses", 1)
+	uw := mergedInsertsOf(t, ins, "user_warehouses", 1)
 	userIDs := map[string]bool{}
 	for _, tup := range users.tuples {
 		userIDs[tup[0]] = true
@@ -387,7 +483,7 @@ func TestDevSeedAccountsRolesAndWarehouseBinding(t *testing.T) {
 		t.Fatalf("至少 2 个账号绑定不同仓库（数据权限对照），实际绑定仓库集 %v", whIDs)
 	}
 
-	ur := insertsOf(t, ins, "user_roles", 1)
+	ur := mergedInsertsOf(t, ins, "user_roles", 1)
 	wantRoles := map[string]bool{
 		"warehouse_manager": true, "receiver": true, "shipper": true,
 		"stocktaker": true, "viewer": true,
@@ -409,13 +505,13 @@ func TestDevSeedAccountsRolesAndWarehouseBinding(t *testing.T) {
 
 func TestDevSeedWarehouseStructure(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
-	whs := insertsOf(t, ins, "warehouses", 1)
+	whs := mergedInsertsOf(t, ins, "warehouses", 2)
 	if len(whs.tuples) < 2 {
 		t.Fatalf("演示仓库应 ≥2 个，实际 %d", len(whs.tuples))
 	}
-	zones := insertsOf(t, ins, "zones", 1)
-	shelves := insertsOf(t, ins, "shelves", 1)
-	bins := insertsOf(t, ins, "bins", 1)
+	zones := mergedInsertsOf(t, ins, "zones", 2)
+	shelves := mergedInsertsOf(t, ins, "shelves", 2)
+	bins := mergedInsertsOf(t, ins, "bins", 2)
 
 	zonesPerWH := map[string]int{}
 	zoneWH := map[string]string{}
@@ -435,8 +531,10 @@ func TestDevSeedWarehouseStructure(t *testing.T) {
 		shelfZone[tup[0]] = tup[2]
 	}
 	for z, n := range shelvesPerZone {
-		if n < 2 {
-			t.Fatalf("库区 %s 货架数应 ≥2，实际 %d", z, n)
+		// ≥1：任何库区不得无货架。§10 电子厂扩展的不良品隔离区（NG）按作业形态
+		// 仅 1 组货架，不再要求基础段的 ≥2 密度（仓库级库区 ≥2 下限仍保留）。
+		if n < 1 {
+			t.Fatalf("库区 %s 货架数应 ≥1（不得存在空库区），实际 %d", z, n)
 		}
 	}
 	binsPerShelf := map[string]int{}
@@ -448,8 +546,10 @@ func TestDevSeedWarehouseStructure(t *testing.T) {
 		}
 	}
 	for sh, n := range binsPerShelf {
-		if n < 2 {
-			t.Fatalf("货架 %s 库位数应 ≥2（每货架若干库位），实际 %d", sh, n)
+		// ≥1：任何货架不得无库位。§10 电子厂扩展的半成品仓 SB-01 等作业形态
+		// 仅 1 库位（demo 密度不再强制基础段的 ≥2）。
+		if n < 1 {
+			t.Fatalf("货架 %s 库位数应 ≥1（不得存在空货架），实际 %d", sh, n)
 		}
 	}
 	if len(binsPerShelf) != len(shelves.tuples) {
@@ -462,19 +562,19 @@ func TestDevSeedWarehouseStructure(t *testing.T) {
 func TestDevSeedMasterdataCoverage(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
 
-	cats := insertsOf(t, ins, "product_categories", 1)
+	cats := mergedInsertsOf(t, ins, "product_categories", 2)
 	if len(cats.tuples) < 4 {
 		t.Fatalf("商品分类应 ≥4（含父子两级），实际 %d", len(cats.tuples))
 	}
-	units := insertsOf(t, ins, "units", 1)
+	units := mergedInsertsOf(t, ins, "units", 2)
 	if len(units.tuples) < 3 {
 		t.Fatalf("计量单位应 ≥3，实际 %d", len(units.tuples))
 	}
-	prods := insertsOf(t, ins, "products", 1)
+	prods := mergedInsertsOf(t, ins, "products", 2)
 	if len(prods.tuples) < 10 {
 		t.Fatalf("演示商品应 ≥10，实际 %d", len(prods.tuples))
 	}
-	skus := insertsOf(t, ins, "skus", 1)
+	skus := mergedInsertsOf(t, ins, "skus", 2)
 	if len(skus.tuples) < 20 {
 		t.Fatalf("演示 SKU 应 ≥20，实际 %d", len(skus.tuples))
 	}
@@ -510,7 +610,7 @@ func TestDevSeedMasterdataCoverage(t *testing.T) {
 		}
 	}
 
-	bcs := insertsOf(t, ins, "barcodes", 1)
+	bcs := mergedInsertsOf(t, ins, "barcodes", 2)
 	primaryPerSKU := map[string]int{}
 	for _, tup := range bcs.tuples {
 		code := normLit(tup[2])
@@ -525,12 +625,12 @@ func TestDevSeedMasterdataCoverage(t *testing.T) {
 		t.Fatalf("每个 SKU 都应有主条码：SKU %d 个，有主条码的 %d 个", len(skus.tuples), len(primaryPerSKU))
 	}
 
-	sups := insertsOf(t, ins, "suppliers", 1)
-	cuss := insertsOf(t, ins, "customers", 1)
+	sups := mergedInsertsOf(t, ins, "suppliers", 2)
+	cuss := mergedInsertsOf(t, ins, "customers", 2)
 	if len(sups.tuples) < 3 || len(cuss.tuples) < 3 {
 		t.Fatalf("供应商应 ≥3（实际 %d）、客户应 ≥3（实际 %d）", len(sups.tuples), len(cuss.tuples))
 	}
-	bats := insertsOf(t, ins, "batches", 1)
+	bats := mergedInsertsOf(t, ins, "batches", 2)
 	if len(bats.tuples) < 5 {
 		t.Fatalf("演示批次应 ≥5，实际 %d", len(bats.tuples))
 	}
@@ -545,45 +645,46 @@ func TestDevSeedMasterdataCoverage(t *testing.T) {
 
 func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
-	inv := insertsOf(t, ins, "inventory", 1)
-	// 2026-10-05 联调轮：inventory_ledgers 有两条 INSERT（期初成对段 + 演示出库补影段）。
-	// 成对断言只圈定期初条（含 '期初' 字面口径）；补影条按净零对单独断言（语义与
-	// dev_seed_verify.sql §6 按 business_type='期初' 圈定同口径）。
-	var led, shadow seedInsert
-	shadowCount := 0
+	inv := mergedInsertsOf(t, ins, "inventory", 2)
+	// 2026-10-05 §8+§10：inventory_ledgers 各有期初成对段（含 '期初' 口径字面）与
+	// 演示出库补影段（business_type='演示'）各 1 条。成对断言按段圈定期初条并合并
+	// 计算（两段库存/流水键集合仍须整体一致）；补影条逐条断言净零对（语义与
+	// dev_seed_verify.sql 按 business_type='期初' 圈定同口径）。
+	var ledOpening, shadows []seedInsert
 	for _, s := range ins {
 		if s.table != "inventory_ledgers" {
 			continue
 		}
 		if strings.Contains(s.text, "'期初'") {
-			led = s
+			ledOpening = append(ledOpening, s)
 		} else {
-			shadow = s
-			shadowCount++
+			shadows = append(shadows, s)
 		}
 	}
-	if led.text == "" {
-		t.Fatal("未找到期初流水 INSERT（应含 '期初' 口径字面）")
+	if len(ledOpening) != 2 {
+		t.Fatalf("期初流水 INSERT 应为 2 条（基础段+电子厂段），实际 %d", len(ledOpening))
 	}
-	if shadowCount != 1 {
-		t.Fatalf("补影流水 INSERT 应恰 1 条，实际 %d", shadowCount)
+	if len(shadows) != 2 {
+		t.Fatalf("补影流水 INSERT 应为 2 条（基础段+电子厂段），实际 %d", len(shadows))
 	}
-	if led.text == "" {
-		t.Fatal("未找到期初流水 INSERT（应含 '期初' 口径字面）")
-	}
-	// 补影段净零对：Σ qty_change = 0（不改任何现存量锚点）
-	var shadowNet float64
-	for _, tup := range shadow.tuples {
-		if len(tup) != 9 {
-			t.Fatalf("补影流水 VALUES 元组应为 9 列，实际 %v", tup)
+	// 补影段逐条净零对：Σ qty_change = 0（不改任何现存量锚点）；
+	// qty_change 列按 AS v(...) 别名定位（§8 与 §10 段元组宽度不同：§10 增加 batch_no）
+	for _, sh := range shadows {
+		idx := aliasIndex(t, sh.text, "补影流水")
+		qc, ok := idx["q_change"]
+		if !ok {
+			t.Fatal("补影流水 VALUES 源别名清单缺少 q_change")
 		}
-		shadowNet += parseQty(t, tup[6], "补影流水")
-	}
-	if shadowNet != 0 {
-		t.Fatalf("补影流水净变化应恒为 0（净零对），实际 %v", shadowNet)
+		shadowNet := 0.0
+		for _, tup := range sh.tuples {
+			shadowNet += parseQty(t, tup[qc], "补影流水")
+		}
+		if shadowNet != 0 {
+			t.Fatalf("补影流水净变化应恒为 0（净零对），实际 %v", shadowNet)
+		}
 	}
 
-	// 六列数量中只写 total/available 两列（其余默认 0，恒等式因此成立）
+	// 六列数量中只写 total/available 两列（其余默认 0，恒等式因此成立；两段列清单同构）
 	for _, c := range []string{"total_qty", "available_qty"} {
 		if !hasCol(inv.columns, c) {
 			t.Fatalf("期初库存 INSERT 缺少 %s 列", c)
@@ -597,30 +698,44 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 	if len(inv.tuples) < 10 {
 		t.Fatalf("期初库存行应 ≥10 才够演示，实际 %d", len(inv.tuples))
 	}
-	for _, c := range []string{"change_type", "business_type", "business_no", "status_from", "status_to",
-		"qty_before", "qty_change", "qty_after", "remark"} {
-		if !hasCol(led.columns, c) {
-			t.Fatalf("期初流水 INSERT 缺少 %s 列", c)
+	ledTuples := 0
+	for _, led := range ledOpening {
+		for _, c := range []string{"change_type", "business_type", "business_no", "status_from", "status_to",
+			"qty_before", "qty_change", "qty_after", "remark"} {
+			if !hasCol(led.columns, c) {
+				t.Fatalf("期初流水 INSERT 缺少 %s 列", c)
+			}
 		}
-	}
-	// 流水口径（SELECT 列表内）：0→n、INBOUND、期初、available、DEV SEED 标记
-	for _, want := range []string{"'INBOUND'", "'期初'", "'DEV SEED'", "'available', 'available'"} {
-		if !strings.Contains(led.text, want) {
-			t.Fatalf("期初流水口径缺少 %s", want)
+		// 流水口径（SELECT 列表内）：0→n、INBOUND、期初、available、DEV SEED 标记
+		for _, want := range []string{"'INBOUND'", "'期初'", "'DEV SEED'", "'available', 'available'"} {
+			if !strings.Contains(led.text, want) {
+				t.Fatalf("期初流水口径缺少 %s", want)
+			}
 		}
-	}
-	if !regexp.MustCompile(`0,\s*v\.qty,\s*v\.qty`).MatchString(led.text) {
-		t.Fatal("期初流水应为 qty_before=0、qty_change=qty_after=n（变化前 0 → 变化后 n）")
+		if !regexp.MustCompile(`0,\s*v\.qty,\s*v\.qty`).MatchString(led.text) {
+			t.Fatal("期初流水应为 qty_before=0、qty_change=qty_after=n（变化前 0 → 变化后 n）")
+		}
+		ledTuples += len(led.tuples)
 	}
 
-	// 成对：同一 (仓库, 库位, SKU, 批次) 键集合与数量完全一致（两段 VALUES 同源成对）
-	invQty := map[[3]string]float64{}
-	for _, tup := range inv.tuples {
-		if len(tup) != 6 {
-			t.Fatalf("期初库存 VALUES 元组应为 6 列，实际 %v", tup)
+	// 成对：合并两段后同一 (仓库, 库位, SKU, 批次) 键集合与数量完全一致
+	//（两段 VALUES 源同构：AS v(id, wh_code, bin_code, sku_code, batch_no, qty)，
+	//  列名经 aliasIndex 定位——不依赖元组物理位置）
+	invIdx := aliasIndex(t, inv.text, "期初库存")
+	ledIdx := aliasIndex(t, ledOpening[len(ledOpening)-1].text, "期初流水")
+	pairKey := func(tup []string, idx map[string]int, ctx string) [4]string {
+		for _, c := range []string{"wh_code", "bin_code", "sku_code", "batch_no"} {
+			if _, ok := idx[c]; !ok {
+				t.Fatalf("%s VALUES 源别名清单缺少 %s", ctx, c)
+			}
 		}
-		key := [3]string{normLit(tup[1]), normLit(tup[2]), normLit(tup[3]) + "|" + normLit(tup[4])}
-		q := parseQty(t, tup[5], "期初库存")
+		return [4]string{normLit(tup[idx["wh_code"]]), normLit(tup[idx["bin_code"]]),
+			normLit(tup[idx["sku_code"]]), normLit(tup[idx["batch_no"]])}
+	}
+	invQty := map[[4]string]float64{}
+	for _, tup := range inv.tuples {
+		key := pairKey(tup, invIdx, "期初库存")
+		q := parseQty(t, tup[invIdx["qty"]], "期初库存")
 		if q <= 0 {
 			t.Fatalf("期初库存数量应 >0: %v", tup)
 		}
@@ -629,13 +744,11 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 		}
 		invQty[key] = q
 	}
-	ledQty := map[[3]string]float64{}
-	for _, tup := range led.tuples {
-		if len(tup) != 6 {
-			t.Fatalf("期初流水 VALUES 元组应为 6 列，实际 %v", tup)
+	ledQty := map[[4]string]float64{}
+	for _, led := range ledOpening {
+		for _, tup := range led.tuples {
+			ledQty[pairKey(tup, ledIdx, "期初流水")] = parseQty(t, tup[ledIdx["qty"]], "期初流水")
 		}
-		key := [3]string{normLit(tup[1]), normLit(tup[2]), normLit(tup[3]) + "|" + normLit(tup[4])}
-		ledQty[key] = parseQty(t, tup[5], "期初流水")
 	}
 	if len(invQty) != len(ledQty) {
 		t.Fatalf("期初库存 %d 行与期初流水 %d 行数量不等（必须 1:1 成对）", len(invQty), len(ledQty))
@@ -646,8 +759,8 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 		}
 	}
 	// 流水行数与库存行数相等（元组层面）
-	if len(led.tuples) != len(inv.tuples) {
-		t.Fatalf("期初库存元组 %d 与期初流水元组 %d 不相等", len(inv.tuples), len(led.tuples))
+	if ledTuples != len(inv.tuples) {
+		t.Fatalf("期初库存元组 %d 与期初流水元组 %d 不相等", len(inv.tuples), ledTuples)
 	}
 }
 
@@ -655,31 +768,69 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 
 func TestDevSeedSerialsMatchOpeningInventory(t *testing.T) {
 	ins := parseDevSeedInserts(t, stripSQLComments(readRepoFile(t, devSeedPath)))
-	skus := insertsOf(t, ins, "skus", 1)
+	skus := mergedInsertsOf(t, ins, "skus", 2)
+	// 序列号管理开关按列名定位（两段列清单同构，位置稳定）
+	skuSerialIdx := -1
+	for i, c := range skus.columns {
+		if c == "is_serial_managed" {
+			skuSerialIdx = i
+		}
+	}
+	if skuSerialIdx < 0 {
+		t.Fatal("skus INSERT 缺少 is_serial_managed 列")
+	}
 	serialFlag := map[string]bool{}
 	for _, tup := range skus.tuples {
-		serialFlag[tup[1]] = normLit(tup[11]) == "TRUE"
+		serialFlag[tup[1]] = normLit(tup[skuSerialIdx]) == "TRUE"
 	}
-	inv := insertsOf(t, ins, "inventory", 1)
+	inv := mergedInsertsOf(t, ins, "inventory", 2)
+	invIdx := aliasIndex(t, inv.text, "期初库存")
 	invQty := map[[2]string]float64{}
 	for _, tup := range inv.tuples {
-		key := [2]string{normLit(tup[1]), normLit(tup[3])}
-		invQty[key] += parseQty(t, tup[5], "期初库存")
+		key := [2]string{normLit(tup[invIdx["wh_code"]]), normLit(tup[invIdx["sku_code"]])}
+		invQty[key] += parseQty(t, tup[invIdx["qty"]], "期初库存")
 	}
-	sn := insertsOf(t, ins, "serial_numbers", 1)
-	if !strings.Contains(sn.text, "'IN_STOCK'") {
+	// §9 段无 status 别名（SELECT 恒 'IN_STOCK'）；§10 段带 status（已发货行
+	// status=OUTBOUND 留痕，不计一物一行口径——与期初库存吻合的只是 IN_STOCK 数）。
+	// 两段 VALUES 源宽度不同（6/10 列），别名清单必须逐条解析，不能跨段合并。
+	var snInserts []seedInsert
+	for _, s := range ins {
+		if s.table == "serial_numbers" {
+			snInserts = append(snInserts, s)
+		}
+	}
+	if len(snInserts) != 2 {
+		t.Fatalf("serial_numbers INSERT 应为 2 条（基础段+电子厂段），实际 %d", len(snInserts))
+	}
+	snTexts := make([]string, 0, len(snInserts))
+	for _, s := range snInserts {
+		snTexts = append(snTexts, s.text)
+	}
+	if !strings.Contains(strings.Join(snTexts, "\n"), "'IN_STOCK'") {
 		t.Fatal("演示序列号应为 IN_STOCK 状态")
 	}
 	snCount := map[[2]string]int{}
-	for _, tup := range sn.tuples {
-		if len(tup) != 6 {
-			t.Fatalf("序列号 VALUES 元组应为 6 列，实际 %v", tup)
+	for _, s := range snInserts {
+		idx := aliasIndex(t, s.text, "序列号")
+		for _, c := range []string{"serial_no", "wh_code", "sku_code"} {
+			if _, ok := idx[c]; !ok {
+				t.Fatalf("序列号 VALUES 源别名清单缺少 %s", c)
+			}
 		}
-		key := [2]string{normLit(tup[2]), normLit(tup[4])}
-		if !serialFlag[tup[4]] {
-			t.Fatalf("序列号 %s 挂在未启用序列号管理的 SKU %s 上（inventory-rules §8）", tup[1], tup[4])
+		for _, tup := range s.tuples {
+			status := "IN_STOCK"
+			if j, ok := idx["status"]; ok {
+				status = normLit(tup[j])
+			}
+			if status != "IN_STOCK" {
+				continue
+			}
+			key := [2]string{normLit(tup[idx["wh_code"]]), normLit(tup[idx["sku_code"]])}
+			if !serialFlag[tup[idx["sku_code"]]] {
+				t.Fatalf("序列号 %s 挂在未启用序列号管理的 SKU %s 上（inventory-rules §8）", tup[idx["serial_no"]], tup[idx["sku_code"]])
+			}
+			snCount[key]++
 		}
-		snCount[key]++
 	}
 	if len(snCount) < 3 {
 		t.Fatalf("序列号演示应覆盖 ≥3 组 仓库×SKU，实际 %d", len(snCount))
@@ -699,7 +850,7 @@ func TestDevSeedBcryptPasswordHashes(t *testing.T) {
 		t.Fatal("dev_seed.sql 缺少明文密码注释及“仅 dev 测试”标记")
 	}
 	ins := parseDevSeedInserts(t, stripSQLComments(content))
-	users := insertsOf(t, ins, "users", 1)
+	users := mergedInsertsOf(t, ins, "users", 1)
 	plaintexts := map[string]string{
 		"dev_manager": "DevMg#2026", "dev_receiver": "DevRc#2026", "dev_shipper": "DevSp#2026",
 		"dev_stocktaker": "DevSt#2026", "dev_viewer": "DevVw#2026",
@@ -867,8 +1018,19 @@ func TestDevSeedSQLBalance(t *testing.T) {
 		if strings.Count(content, "'")%2 != 0 {
 			t.Fatalf("%s 单引号数量为奇数（引号不配对）", path)
 		}
-		if strings.Contains(content, "''") {
-			t.Fatalf("%s 使用了转义引号（本文件约定避免，保障静态校验可靠）", path)
+		// '' 仅允许作为独立空串字面量（如 remark 列占位 ''——§11 单据链大量使用）：
+		// 前后均为分隔符时静态解析器按引号两两配对仍可靠；字面量内部的转义
+		//（如 'it''s'）会使引号感知解析歧义，仍然禁止。
+		for i := 0; i+1 < len(content); i++ {
+			if content[i] != '\'' || content[i+1] != '\'' {
+				continue
+			}
+			prevOK := i == 0 || strings.ContainsRune(" (,\t\n\r=", rune(content[i-1]))
+			nextOK := i+2 == len(content) || strings.ContainsRune(" ),;\t\n\r", rune(content[i+2]))
+			if prevOK && nextOK {
+				continue
+			}
+			t.Fatalf("%s 位置 %d 存在字面量内部转义引号（'' 仅允许独立空串字面量，保障静态校验可靠）", path, i)
 		}
 	}
 }
