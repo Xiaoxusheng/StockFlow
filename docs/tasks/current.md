@@ -299,3 +299,52 @@
 - **门禁（交付提交工程师本会话实测，工作区终态含并行会话收尾的 SfInventorySummary/StockListPage）**：后端 `go build ./... && go vet ./... && go vet -tags integration ./... && go test -count=1 ./...` 退出码 0（24 包 ok 零 FAIL）；前端 `npm run lint` 0 错误（1 条 PadReceivePage.tsx:349 exhaustive-deps 存量警告）、`npm run build`（tsc -b && vite build）退出码 0（built in 37.92s）；复扫 `grep -rn "Math.random" web/src` 零命中。终局门禁全绿。
 - **真实空态清单（随 changelog 同日终局条目入册）**：库存分析 TOP10 与周转趋势、仓库分析作业量、入/出库分析待端点位、出库分析完成率与商品排行、ReportFlowStats 超限降级、MonitorPage 队列未注入、Dashboard 预警空态、SfChart 内核空数据统一 SfEmpty（Sparkline 等高占位）——零假数据零随机数。
 - **遗留（非本轮可完成，维持既有挂账）**：采购/销售分析页与库存 TOP10/周转时序、采购三聚合端点（见「六域图表轮收口」挂账节）；其余列表页 Cell 级换装逐页精修、列设置拖拽维持不做、实机 Pad 触控验收待环境（见表格轮遗留）；浏览器渲染实测本轮未新增自动化截图（沿用既有记录点位）；main 领先 origin/main 未推送（本 ask 明确不推送）。
+
+## 2026-10-05 已完成：表格动效体系核心（8 类动画组件能力层；页面接入属阶段B）
+
+- **交付**：令牌双轨（tokens.css 增 `--sf-motion-spin:560ms`/`--sf-motion-feedback:480ms` + 新建 styles/motion.ts SF_MOTION_MS）；global.css「表格动效体系」节（作用域限 .sf-table/.sf-table-toolbar/.sf-search-form__applied，零 transition:all）+ reduced-motion 媒体查询扩展（三档归零保留 + 循环/进场/反馈动画显式 none）；SfTable 扩展（data-loading 类/骨架行数随 pageSize/loading 三态接管去 Spin 蒙层/刷新图标绑定 loading 起停+450ms 最短保持/rowClassName 合成 --selected·--feedback-·--removing/删除行 260ms 视图层过滤 total 分页不动/批量面板 bulkActions 自动驱动/操作列注入先于 align 早退/emptyAction）；SfToolbar 批量双面板（独立使用三页零改动）；SfSearchForm 已筛选行进场；SfEmpty 增 title/action/className（Pad 11 引用文件零影响）；cells.tsx SfRowActions；SfBatchBar className 透传 + marginBottom 迁 .sf-batch-bar（值不变）；新 hook useTableRowFeedback（先 API 后反馈）。
+- **生效口径（如实）**：#1/2/3/5/6/8 全站 66 个 SfTable/SfInventoryTable 消费文件零改动自动生效；**#7 行反馈/删除行/批量工具栏为组件能力交付、页面接入未完成（阶段B）**——本任务硬约束「不动业务页面」，方案 G1（QrCodeCenterPage）随 G2a/b/c 约 18~20 个页面一并顺延阶段B（方案 §6 清单）。
+- **规范**：docs/frontend.md 新增 §31（令牌/类名/8 类落点/接入 API/硬性约束）+ §23 登记 SfRowActions。
+- **门禁（本轮实跑，分工=全局构建留统一门禁脚本）**：`node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit` EXIT=0；`node node_modules/eslint/bin/eslint.js`（8 个触及 TS/TSX 文件）EXIT=0；`npm run build` 本轮未跑不虚报；无 test 脚本。改动未提交（留提交阶段）。
+- 影响范围：web/src/styles/{tokens.css, global.css, motion.ts(新)}、web/src/components/table/{SfTable, SfToolbar, SfSearchForm, SfBatchBar, cells}.tsx、web/src/components/common/SfEmpty.tsx、web/src/hooks/useTableRowFeedback.ts(新)、docs/frontend.md、docs/changelog.md、docs/tasks/current.md。
+
+## 2026-10-05 构建收口：后端两批共享文件改动落实（api.md §9 收口披露 + workbench 口径修正）
+
+- **后端两批共享改动请求 4 条逐条落实**：
+  - **① 三条跨批次口径显式披露**：docs/api.md §9 末尾新增「2026-10-05 收口披露」节——/purchases|sales 六端点挂域列表码 + 平移路径（routes.go:103-108 实读）；outbounds/product-rank 一切 OUTBOUND 扣减 + 前端副标题披露义务（workbench.go:237 + service.go:657 全仓唯一非测试 OUTBOUND 写入点）；sales trend 订单金额口径标注义务。
+  - **② workbench 四计数共享裁决入册**：Σ = pendingTaskCount + approval_count（pendingTask=receive+六作业块+exception 不含 approval，dashboard.go:613）——api.md 收口披露节④ + tooltip 义务 + queryKey 不变即通接线面（WorkbenchPage.tsx:31 / PadHomePage.tsx:33 均经 taskApi.summary）。
+  - **③ /api/tasks 前端契约修订清单入册**：统一五值 status（exception 第五值=picking/checking 原态 EXCEPTION 映射，workbench.go:763/774 + 迁移 000008:190/:229）+ raw_status（workbench.go:730）——task.ts 待前端批次同步三项：TaskType 收窄 putaway|picking|checking、TaskStatus 扩 exception、TaskItem 补 raw_status。
+  - **④ 并发会话收编冲突（上报 orchestrator）**：changelog「平台批·并发冲突合并」条已记录收编（口径不同 + transfer_orders/exceptions 误用 warehouse_id）；mtime 证据 workbench_summary.go 18:56 / workbench.go 18:58 / api.md 18:51 / changelog 19:12，收口运行期（19:55 起）无新写入——并发会话静默近 1 小时，二次冲突风险窗口基本关闭；若仍存活由 orchestrator 仲裁。
+- **收口附带修正（真库复算为据）**：① changelog「平台批」curl 记录「pendingTaskCount 9」笔误改 5（19:57 真库复算：四计数 3/3/2/0、pendingTaskCount=5、dashboard/tasks 九块逐块对账一致，9 疑为九块数误记）；② workbench_summary.go:18-19 注释方向写反（原文「pendingTask 含 approval」）修正（纯注释零行为）。
+- **前端批次待消费清单**（开工前必读 docs/api.md §9「收口披露」节）：workbench tooltip 披露、task.ts 三项契约修订、product-rank 副标题口径披露、sales trend 口径标注、frontendWiring 10 项原清单（仅后端报告持有、docs/ 零命中，向 orchestrator 索取）。
+- 验证：真库复算 curl（admin 登录 → workbench/summary + dashboard/today + dashboard/tasks）；`go build ./... && go vet ./... && go test ./...` 退出码 0（24 包 ok，internal/reports 0.834s 非缓存实跑，本会话实测）；前端零改动、web 门禁未跑（web 在途属前端批次）。
+- 影响范围：docs/api.md、docs/changelog.md、docs/tasks/current.md、internal/reports/workbench_summary.go（注释一行）。改动未提交（留提交阶段）。
+
+## 2026-10-05 已完成：表格动效体系页面接入（阶段B四批）+ 文档收口
+
+**做什么**：核心轮（见上节「表格动效体系核心」）内建的 #7 行反馈/删除行/批量工具栏组件能力接入业务页面并补空态 CTA；文档更新者同步收口 docs/frontend.md §31、changelog 与本文件（页面代码由四批并行位交付，收口位未触碰任何页面/组件文件）。
+
+**做到哪（四批全部交付；合计 68 个页面文件纳入接入清单，路径全部实存——收口位逐一核对）**：
+
+| 批次 | 范围 | 接入要点 | 状态 |
+|---|---|---|---|
+| 第1批（17 文件，7 改 + 10 零改） | masterdata 7 页 + 库存中心 10 页 | useTableRowFeedback（停用/启停 fb.trigger、删除 fb.triggerRemove + invalidate）+ feedbackRowKey/feedbackTone/removingRowKeys 接 SfTable；方案 G1=QrCodeCenterPage bulkActions 批量工具栏接入（销项）；inventory 10 页无删除/多选场景，零改动自动生效 | ✅ |
+| 第2批（19 文件，8 改 + 11 零改） | 盘点/入库/出库/采购/销售 11 页 | emptyAction 空态 CTA（新建盘点单/新建入库单等真实跳转）；#1/2/3/5/6/8 组件内建零改动生效 | ✅ |
+| 第3批（21 文件，12 改 + 9 零改） | sales退货抽屉/warehouse 6 文件/quality 3 页/reports 5 页/system 6 页 | 同上口径 | ✅ |
+| 第4批（11 文件，6 改 + 5 零改） | system 余量（Backup）/data（FileCenter/ExportTask/ImportWizard）/device（两页）/exception/task/printing/DashboardMovements/PadInventory | fb 反馈/删除 + emptyAction；DashboardMovements 维持 showToolbar={false}（紧凑预览既定设计，刷新走 Dashboard 层查询），未为动效改设计 | ✅ |
+
+**收口位复核（本会话实跑）**：68 个清单路径 `[ -f ]` 全部实存；`grep -rln useTableRowFeedback web/src/views`=18 文件（feedbackRowKey 18、removingRowKeys 7）、`grep -rln bulkActions web/src/views`=QrCodeCenterPage 1 文件、`grep -rln emptyAction web/src/views`=17 文件；68 页与 `git status` 交集=33 文件含改动、35 文件零改动核对通过；第4批 11 页 grep 均无 rowSelection——#3 勾选缩放/#4 批量Toolbar 属「不适用」而非未接（无多选业务场景，能力仍内建于 SfTable/SfToolbar，未来页面加受控 rowSelection+bulkActions 即自动生效）。
+
+**docs 收口（文档更新者，只增量不改写既有内容）**：frontend.md §2.1 补登 `--sf-motion-spin/-feedback` 两令牌（唯一定义清单此前缺登）、§6.1 nested「刷新走 Spin 覆盖层」过时描述更正为 data-loading 压暗/淡入口径（对齐 SfTable loading 三态接管）、§31 导语补阶段B完成注记、§31.4 接入 API 补 `onClearSelection`（缺省 `rowSelection.onChange([], [], { type: 'none' })`，SfTable/SfToolbar 同名 prop）；changelog 追加同日「表格动效体系页面接入（阶段B四批）收口」条目；本节追加于此。
+
+**门禁（收口位本会话实跑，工作区终态含四批全部改动）**：`node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit` EXIT=0；`npm run lint` EXIT=0（0 错误、1 警告=PadReceivePage.tsx:349 exhaustive-deps 存量警告，与既有记录一致）；`npm run build`（tsc -b && vite build）EXIT=0（built in 47.09s）。
+
+**遗留什么（如实挂账）**：浏览器渲染实测未执行（无浏览器自动化工具链，与既往轮口径一致）——行反馈/删除行/批量面板/自旋的视觉走查与 reduced-motion、暗色下动效人工核验待联调/真机轮；未接 fb 的页面后续出现删除/停用场景时按 frontend.md §31.4 API 增量接入即可（能力已在组件层）；全部改动未提交（留提交阶段，与核心轮条目按归属拆分）。
+
+## 2026-10-05 已完成：缺失接口补齐轮终局——文档回写 + 全轮 Conventional Commits 落库（交付提交位）
+
+- **本轮全貌**：后端 16 新端点全量落库（聚合分析批 14 + 平台批 2，internal/reports + swag 重生成）；前端点亮全量接真数据（api/analytics.ts 收口、采购/销售分析页四件套接线、四既有分析页真数据卡片、WorkbenchPage 真数据 + 口径 tooltip、MyTasks/PadTasks 契约修订消费、我的任务菜单码归一、异常取证图片视图层接线）+ 非超管侧边栏两缺陷修复 + 表格动效体系（组件能力层 + 阶段B 68 页接入）+ 图表减重与轴向/日期收敛修正 + 分析域 time_to 右边界修复 + dev_seed 电子厂扩容与其静态契约同步；逐项细节见 changelog 同日各条目（本节只作状态索引，不重复）。
+- **文档回写（交付提交位，只增量不改写既有内容）**：changelog 追加「缺失接口补齐轮收口」终局条目（新端点清单 + 口径要点 + 前端点亮 + 实测与门禁结论）；本节追加于此。
+- **门禁（交付提交位本会话在提交前最终工作树实跑复验，期间并发修复轮写入已静默 6 分钟以上、文件清单稳定 88 项不变）**：后端 `go build ./... && go vet ./... && go test -count=1 ./...` 全过（24 包 ok 零 FAIL）；前端 `npm run lint` EXIT=0（0 错误、1 警告=PadReceivePage.tsx:349 exhaustive-deps 存量警告，与既有记录一致）、`npm run build`（tsc -b && vite build）EXIT=0（built in 44.93s）——终局门禁全绿，与 ask 交付口径一致。
+- **提交记录**：全轮改动按逻辑拆 5 个 Conventional Commits 落库（feat(server) 缺失接口补齐 16 端点 / test(server) dev_seed 契约同步与数据修正 / feat(web) 前端点亮与修复 / feat(web) 表格动效体系与图表修正 / docs 本轮收口记录）；不推送（ask 明确），main 领先 origin/main 维持既有状态。
+- **遗留（如实挂账）**：端到端实测 2/3 通过（本轮交付口径；未过项明细未随交付入册，不杜撰）；浏览器渲染视觉走查与 reduced-motion 真机核验维持上节挂账；采购/销售六端点权限挂载若立项裁决改挂 reports:report:read 按收口披露节①平移（不改契约形状）。

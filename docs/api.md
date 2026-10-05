@@ -24,6 +24,9 @@ API 按业务领域划分：
 
 —— 仓库空间 ——
 /api/warehouses    仓库
+/api/warehouses/workload  仓库作业量（单量/行量双指标，reports 实现、warehouses 前缀
+                          挂载；权限挂 inventory:inventory:list——仓库分析页既有
+                          端点同码，2026-10-05 分析卡片轮）
 /api/zones         库区
 /api/shelves       货架
 /api/bins          库位
@@ -34,13 +37,30 @@ API 按业务领域划分：
 
 —— 采购与入库 ——
 /api/purchases     采购
+/api/purchases/analytics/trend  采购订单金额趋势（reports 实现、purchases 前缀挂载；
+                                权限挂 purchase:purchase:list，2026-10-05 分析卡片轮）
+/api/purchases/supplier-rank    供应商采购排行（reports 实现、挂载与权限口径同上）
+/api/purchases/status-composition 采购单状态构成（reports 实现、挂载与权限口径同上）
 /api/inbounds      入库
+/api/inbounds/status-composition  入库单状态构成（reports 实现、inbounds 前缀挂载；
+                                  权限挂 reports:report:read——与所在入库分析页
+                                  既有趋势端点同码，2026-10-05 分析卡片轮）
+/api/inbounds/supplier-rank       供应商入库排行（reports 实现、挂载与权限口径同上）
 /api/receipts      收货
 /api/putaway       上架
 
 —— 销售与出库 ——
 /api/sales         销售
+/api/sales/analytics/trend      销售订单金额趋势（reports 实现、sales 前缀挂载；
+                                权限挂 sales:sales:list，2026-10-05 分析卡片轮；
+                                订单金额口径，非流水估值）
+/api/sales/product-rank         商品销售排行（reports 实现、挂载与权限口径同上）
+/api/sales/status-composition   销售单状态构成（reports 实现、挂载与权限口径同上）
 /api/outbounds     出库
+/api/outbounds/completion-rate   出库订单完成率（reports 实现、outbounds 前缀挂载；
+                                 权限挂 reports:report:read——出库分析页既有趋势
+                                 端点同码，2026-10-05 分析卡片轮）
+/api/outbounds/product-rank      商品出库排行（reports 实现、挂载与权限口径同上）
 /api/allocations   库存分配
 /api/picks         拣货
 /api/checks        复核
@@ -54,6 +74,14 @@ API 按业务领域划分：
                               与 Dashboard，2026-10-04 裁决，reports:report:read 易致
                               仅持报表列表权限的角色恒 403）
 /api/inventory/alerts         库存预警（reports 实现、inventory 前缀挂载；权限口径同上）
+/api/inventory/analytics      库存分析（reports 实现、inventory 前缀挂载；权限同上，
+                              见 §9 2026-10-05 联调轮）
+/api/inventory/sku-top        SKU 库存 TOP N（reports 实现、inventory 前缀挂载；权限
+                              同上，2026-10-05 分析卡片轮）
+/api/inventory/turnover-trend 库存周转趋势（reports 实现、inventory 前缀挂载；权限
+                              同上，2026-10-05 分析卡片轮）
+/api/reports/flow-trend       出入库流水趋势（免分页日粒度序列，报表域端点，
+                              2026-10-05 分析卡片轮——销 report-flowstats-trend-cap）
 /api/inventory-ledgers   库存流水
 /api/batches             批次
 /api/serials             序列号
@@ -93,6 +121,11 @@ API 按业务领域划分：
 /api/devices       设备注册/激活/绑定/配置下发/心跳/健康监控/App 版本（devices.md §6–7）
 
 —— 平台 ——
+/api/workbench/summary  工作台四块入口计数（reports 实现、inventory:inventory:list——
+                        Dashboard/tasks 同信息面先例；2026-10-05 平台批）
+/api/tasks              我的任务列表（上架/拣货/复核 UNION 分页明细化，reports 实现、
+                        inventory:inventory:list 同上；assignee 恒=当前用户；
+                        2026-10-05 平台批）
 /api/notifications 通知
 /api/logs          日志
 /api/system        系统配置/监控/定时任务
@@ -430,3 +463,207 @@ GET /api/inventory、/api/inventory-ledgers、/api/serials
 "先入后出"净零对补影流水（id 9875-9878，business_no DEV-SEED-FLOW-*，Σ 净变化
 为 0——现存量锚点不变、恒等式不变），趋势/出库统计/周转率获得非零真实值。
 ```
+
+### 2026-10-05 分析卡片轮（聚合分析端点批——14 个新端点，全部 internal/reports 实现）
+
+兑现前端先行契约（web/src 各分析页空态卡 + ReportFlowStats 趋势换端点，2026-10-05
+契约蓝图立项）。落点与工程约束：全部只读参数化 SELECT（guard-readonly 红线内，不做
+汇总表）；数据范围一律会话仓库快照（scopeOf），禁收前端范围参数；全部免分页直出
+（TopN≤50、时序≤366 行、状态构成≤8 行——不走 ParsePage/OKPage；长窗口趋势免分页即
+report-flowstats-trend-cap 销项方式）；GET /api/reports 目录 Catalog() 不动（数据域
+前缀端点不入目录，同 /api/inventory/summary 先例）。
+
+```text
+—— 库存域（reports 实现、inventory 前缀挂载；权限挂 inventory:inventory:list，
+   同 /api/inventory/analytics 先例）——
+GET /api/inventory/sku-top         SKU 库存 TOP N（metric=qty|value 缺省 qty；
+                                   limit 缺省 10、1–50；warehouse_id 可选；
+                                   HAVING SUM(total_qty)>0；金额=批次成本价优先、
+                                   非批次 SKU 成本价——与 inventory-summary 同源）
+GET /api/inventory/turnover-trend  库存周转趋势（days 缺省 30、1–366；日粒度连续
+                                   序列 generate_series 补零；日末=现存量锚点回推
+                                   （同 dashboard/trend 口径），日初=日末−当日净变化；
+                                   outbound_qty=当日 Σ|OUTBOUND 流水量|；
+                                   turnover_rate=outbound_qty/avg_inventory（avg≤0→0））
+
+—— 入库/出库/仓库（reports 实现、数据域前缀挂载；权限挂 reports:report:read——
+   与所在分析页既有趋势端点同码，页面同权限面"菜单可见⟺数据可达"；
+   warehouses/workload 例外挂 inventory:inventory:list——仓库分析页既有
+   warehouse-stock 同码）——
+GET /api/inbounds/status-composition   入库单状态构成（无参数全量现状分布；
+                                       items 仅含 count>0 态，total=全量单据数）
+GET /api/inbounds/supplier-rank        供应商入库排行（time_from/time_to 缺省近 30 天
+                                       上限 366；limit 缺省 10、1–50；仅 source_type=
+                                       'PURCHASE' 经 source_no=po_no 关联 PO→供应商，
+                                       OTHER 来源不入榜；received_qty=Σ inbound_items
+                                       .qty_received；窗口按 inbound_orders.created_at）
+GET /api/outbounds/completion-rate     出库订单完成率（分母=status≠CANCELLED 出库单数，
+                                       分子=SHIPPED_ALL+CLOSED（差额关闭视为完成出库
+                                       流程）；in_progress=分母−分子；
+                                       completion_rate=分子/分母×100，分母 0→0）
+GET /api/outbounds/product-rank        商品出库排行（OUTBOUND 流水 GROUP BY sku：
+                                       qty=Σ|qty_change|、amount=Σ|qty_change|×SKU
+                                       sale_price——估值口径 valuation.basis=sale_price
+                                       随响应披露，含采购退货出库等一切 OUTBOUND 扣减，
+                                       与 outbound-stats 同口径可对账）
+GET /api/warehouses/workload           仓库作业量（inventory_ledgers 按仓 GROUP BY：
+                                       *_order_count=COUNT(DISTINCT business_no)、
+                                       *_qty=Σ|qty_change|（INBOUND/OUTBOUND）；
+                                       可见仓全集 LEFT JOIN，零作业仓返回零行；
+                                       排序两 qty 之和 DESC）
+GET /api/reports/flow-trend            出入库流水趋势（type=inbound|outbound 必填；
+                                       time_from/time_to 同 requireRange；flowStats
+                                       同一参数化 SQL 去 LIMIT/OFFSET——估值口径
+                                       inbound→cost_price、outbound→sale_price 与
+                                       既有出入库统计一致；stat_date JSONTime 同
+                                       FlowStatRow 行形）
+
+—— 采购/销售（reports 实现、数据域前缀挂载；权限挂域列表读权限——新分析页独立
+   权限面，current.md 挂账口径；立项若裁决改挂 reports:report:read 可平移不改形状）——
+GET /api/purchases/analytics/trend     采购订单金额趋势（status NOT IN
+                                       ('DRAFT','CANCELLED')；amount=Σ total_amount
+                                       订单金额口径，metric 字段显式披露≠inbound-stats
+                                       流水估值）
+GET /api/purchases/supplier-rank       供应商采购排行（状态过滤同上；排序 total_amount DESC）
+GET /api/purchases/status-composition  采购单状态构成（无参数全量现状分布）
+GET /api/sales/analytics/trend         销售订单金额趋势（status NOT IN
+                                       ('DRAFT','REJECTED','CANCELLED')；订单金额
+                                       口径——页面须标注"订单金额口径，非流水估值"）
+GET /api/sales/product-rank            商品销售排行（items qty=Σ items.qty 下单量、
+                                       amount=Σ items.amount 行金额（下单金额非估值）；
+                                       sort=qty|amount 缺省 qty）
+GET /api/sales/status-composition      销售单状态构成（无参数全量现状分布）
+```
+
+实现与契约细节（同轮裁决）：① 软删一致性——purchase_orders/inbound_orders/inbound_items
+聚合 SQL 显式 `deleted_at IS NULL`（000016 补列、域模型 gorm.DeletedAt 自动过滤，
+原始 SQL 须同口径对齐列表页可见集）；sales 域单据表无 deleted_at（000016 注明显式
+字段域不涉及）。② 趋势行 date 字段为字符串 YYYY-MM-DD（dashboardTrendRepo/
+analyticsTrendRow 先例）；flow-trend 的 stat_date 沿用 database.JSONTime（与既有
+FlowStatRow 行形逐字段一致，RFC3339 收敛口径不变）。③ 状态构成 items 排序 count
+DESC（图表友好；契约未冻结顺序）。④ status-composition/supplier-rank/trend 等聚合
+的金额/数量字段 snake_case、SKUID 类字段显式 gorm:"column:sku_id"（sk_uid 映射缺陷
+教训）、items 预置空 slice（nil→null 教训）。⑤ routes_test 冻结端点集同步 +14；
+swag 全量重生成（269→283 操作）。
+
+### 2026-10-05 平台批（工作台汇总 + 我的任务明细化——2 个新端点 + 既有端点接线回对）
+
+```text
+GET /api/workbench/summary   工作台四块入口计数（无参数；data={todo_count,approval_count,
+                             task_count,exception_count}，与 web/src/api/task.ts
+                             WorkbenchSummary 逐字段回对）。计数复用 dashboardTodayRepo
+                             同源聚合：todo_count=PO 待收货（APPROVED/PARTIAL_RECEIVED
+                             单据型待办）、approval_count=五单据待审聚合（purchase/sales/
+                             transfer/inventory_adjustments PENDING_APPROVAL + count_orders
+                             PENDING_REVIEW）、task_count=六作业块活动任务（上架
+                             PENDING/IN_PROGRESS/PAUSED + 拣货 ALLOCATED/PICKING +
+                             复核 PICKED + 打包 CHECKED + 发货 PACKED + 盘点
+                             COUNTING/PENDING_REVIEW）、exception_count=异常未闭环
+                             （NOT IN ('RESOLVED','CLOSED')，无仓库列全量口径）。四块
+                             互斥拆分，Σ≠Dashboard pendingTaskCount（差 approval 一项），
+                             前端 tooltip 如实披露。权限 inventory:inventory:list
+                             （Dashboard/tasks 计数版已在同码暴露同一信息面）。
+GET /api/tasks               我的任务列表（assignee 恒=当前用户，未领取任务不入）。
+                             query：page/pageSize（ParsePage 缺省 1/20 上限 100）、
+                             task_type=putaway|picking|checking（可选；packing/moving/
+                             counting 不映射传值 400）、status=pending|in_progress|
+                             completed|cancelled|exception（统一五值过滤，可选）、
+                             warehouse_code（可选，warehouses.code 等值）。
+                             行形 {id, task_no, task_type, source_no, warehouse_name,
+                             total_qty, completed_qty, status(统一五值), raw_status
+                             (原表态), assignee_name, created_at, completed_at|null}。
+                             UNION ALL 三任务表 ORDER BY created_at DESC 分页：
+                             putaway→putaway_tasks（claimed_by=me JOIN users 取姓名；
+                             PAUSED→in_progress；completed_qty=COMPLETED?qty:0）；
+                             picking→pick_tasks（assignee_id=me；CLAIMED/PICKING→
+                             in_progress、PICKED→completed；completed_qty=picked_qty
+                             进度列）；checking→check_tasks（assignee_id=me；
+                             DONE→completed、EXCEPTION→exception 第五统一值；
+                             completed_qty=DONE?qty:0）。权限 inventory:inventory:list
+                             （dashboard/tasks 计数版已在同码暴露同一信息面，明细化
+                             不抬高敏感面；不新增 task:* 域权限码——避免 seed 扩容与
+                             DOMAIN_BOUND_RESOURCES 限定 fail-closed 恒隐身复发）。
+POST /api/exceptions/{id}/images   既有端点接线回对（零后端改动；d314103 已交付
+                             ——file_ids 校验存在/未过期/image/* → 追加 image_refs
+                             去重累计≤20 + 处理记录 + 审计同事务；OPEN..PENDING_REVIEW
+                             可挂、RESOLVED/CLOSED 拒绝 409；权限 returns:exception:execute
+                             既有；image_refs 存 download URL 形态 '/api/files/{id}/
+                             download'，展示走 /api/files/{id}/preview）。
+                             接线状态（2026-10-05 端到端复核实测后明确）：后端已在位
+                             （上传→挂接→去重→CLOSED 拒绝→持久化 e2e 实测通过）；
+                             API 层已接（web/src/api/exception.ts
+                             exceptionApi.attachImages）；视图层（异常中心页『挂接
+                             图片』动作：先 POST /api/files multipart 上传取文件 ID
+                             再提交、RESOLVED/CLOSED 状态按钮禁用）归前端批次落地
+                             ——后端批次硬性范围禁改 web/，非后端缺口；创建流程遵循
+                             『创建后挂接』裁决（创建入参无 image_refs）。
+```
+
+datax BY_FILTER 说明：internal/inventory/datax_export.go applyFilters 已按白名单处理
+warehouse_id/zone_id/shelf_id/sku_id/bin_id/batch_id 六键（2026-10-04 补齐），zone_id/
+shelf_id 过滤为已修复项非缺口——零端点零改动，既有导出契约不变。
+
+### 2026-10-05 收口披露（后端两批跨批次口径汇总——前端批次消费清单，构建收口位落盘）
+
+> 后端两批（分析卡片轮/平台批）提出的共享口径钉桩于此：端点形状以上文「分析卡片轮」
+> 「平台批」两节为准，本节只披露跨批次口径与前端义务，前端批次消费前必读。
+
+```text
+① 权限挂载口径（/purchases/*、/sales/* 六端点）：
+   挂域列表码 purchase:purchase:list / sales:sales:list（internal/reports/routes.go:103-108；
+   current.md 挂账口径——新分析页独立权限面）。立项若裁决改挂 reports:report:read，
+   可平移不改契约形状（routes.go:101-102 注释同文）——前端契约形状不受裁决结果影响。
+② 出库估值口径（GET /api/outbounds/product-rank）：
+   OUTBOUND 流水 GROUP BY sku（workbench.go:237 WHERE l.change_type='OUTBOUND'）；
+   inventory Deduct 恒写 OUTBOUND（internal/inventory/service.go:611 Deduct → :657
+   buildLedger，全仓唯一非测试 OUTBOUND 流水写入点），故采购退货出库等一切出库扣减
+   全部入榜，与 outbound-stats 同口径可对账；amount=Σ|qty_change|×SKU sale_price，
+   valuation.basis=sale_price 随响应披露。前端商品出库排行卡片副标题须如实披露估值
+   口径（含采购退货等全部出库扣减、按售价估值），不得仅标"出库"造成口径误读。
+③ 销售金额口径（GET /api/sales/analytics/trend）：
+   订单金额口径（Σ total_amount，status NOT IN ('DRAFT','REJECTED','CANCELLED')），
+   ≠ inbound/outbound-stats 的流水估值——前端页面须标注「订单金额口径，非流水估值」。
+④ workbench 四计数口径（GET /api/workbench/summary，共享裁决）：
+   四块互斥，Σ(todo+approval+task+exception) ≠ Dashboard pendingTaskCount——
+   pendingTask（dashboard.go:613）= receive + 六作业块 + exception，不含 approval，
+   即 Σ = pendingTaskCount + approval_count；task_count 为六作业块（putaway/pick/
+   check/pack/ship/count）不含 approval。前端 WorkbenchPage/PadHomePage tooltip 须
+   如实披露该差异（收口位 2026-10-05 19:57 真库复算：四计数 3/3/2/0，Σ=8，
+   pendingTaskCount=5，dashboard/tasks 九块逐块对账一致）。接线面（WorkbenchPage.tsx:31
+   queryKey ['workbench','summary']、PadHomePage.tsx:33 ['pad','home','workbench-summary']，
+   均经 taskApi.summary）：端点路径与 WorkbenchSummary 字段零变化，queryKey 不变即通。
+⑤ /api/tasks 统一五值 status + raw_status：
+   status 统一五值 pending|in_progress|completed|cancelled|exception，exception 为
+   第五值——picking（pick_tasks 原态 EXCEPTION，迁移 000008_create_sales_tables.up.sql:190）
+   与 checking（check_tasks 原态 EXCEPTION，同文件 :229）的原态映射（workbench.go:763/774）；
+   raw_status 随行下发原表态（workbench.go:730）。前端 web/src/api/task.ts 契约修订
+   待前端批次同步：TaskType 收窄为 putaway|picking|checking 三值（packing/moving/
+   counting 传值 400——无独立任务表不映射）、TaskStatus 扩 exception 第五值、
+   TaskItem 补 raw_status；现前端契约（六值/四值/无 raw_status）与后端形状的差异面
+   即为修订面。
+⑥ 前端接线清单（后端两批报告 frontendWiring 10 项）：
+   清单原文未随批落盘 docs/（收口位 grep docs/ 零命中，仅后端报告持有）——前端批次
+   开工前经 orchestrator 取原清单为准；收口位从 api.md §1/§9 可证实的接线面至少含：
+   workbench 四计数两页（/workbench、/pad/home）、/api/tasks 我的任务页、采购三分析
+   端点、销售三分析端点、outbounds/product-rank 副标题披露（见②）、sales trend 口径
+   标注（见③）。
+```
+
+⑦ 日界时区口径（2026-10-05 独立复核发现②，dev 验证发现冻结前入册披露——待裁决项）：
+   全部日粒度聚合端点（/api/reports/flow-trend、/api/inventory/turnover-trend 及既有
+   inbound/outbound-stats、inventory/analytics trend、purchases/sales trend 等）的
+   `created_at::date` 分桶依赖 **DB 会话时区**；本项目 DSN 统一 `TimeZone=UTC`
+   （internal/config/config.go:116），故日界为 UTC 00:00——Asia/Shanghai（+08）
+   00:00–07:59 的流水/订单计入 **前一日** 桶。dev 真库实测：种子 2026-10-05
+   00:30/01:10+08 的 OUTBOUND 流水在 flow-trend 中落 2026-10-04 桶（psql 同 DSN
+   会话 SHOW timezone=UTC 复现；Asia/Shanghai 会话则单桶 10-05 合计）。该行为为
+   全局既有口径（各端点同 SQL 面，非本批引入、批内"与既有端点同口径"声明成立），
+   与 valuation.basis 同级的显式披露义务在此补齐：**前端日期标注/区间选择须按 UTC
+   日界理解**。若裁决改为 Asia/Shanghai 日界，须改 DSN TimeZone 并全量回归日粒度
+   端点与演示种子锚点回推恒等式（另行立项，本批不动全局配置）。
+⑧ 前端接线移交（2026-10-05 独立复核发现③，交收口）：
+   采购/销售分析两页组件（PurchaseAnalyticsPage.tsx / SalesAnalyticsPage.tsx，含
+   analyticsApi 六函数真实调用与三态）已由前端批次落盘，但路由注册（router/index.tsx）、
+   菜单项（config/menu.tsx，码 purchase:view / sales:view）与 lazy import 三件未接线，
+   页面不可达——后端 6 端点已交付且实测 200（routes.go:103-108）。属 web/ 范围，
+   后端批次硬性禁改，移交收口位/前端批次完成"四件套"接线。

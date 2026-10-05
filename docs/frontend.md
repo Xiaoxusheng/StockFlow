@@ -100,7 +100,8 @@ AI 风格 Dashboard、大量渐变、玻璃拟态、大面积彩色卡片
 --sf-radius-sm / -md / -lg   圆角（6 / 8 / 10px；Card=8、Modal=10）
 --sf-shadow-sm / -md         阴影（Light 克制轻阴影；Dark 减淡，以边框+分层替代）
 --sf-space-1 ~ --sf-space-7  间距（4/8/12/16/20/24/32px）
---sf-motion-fast / -normal / -slow / -ease   动效（120/180/240ms + cubic-bezier(0.2, 0, 0, 1)）
+--sf-motion-fast / -normal / -slow / -ease   动效（120/180/220ms + cubic-bezier(0.2, 0, 0, 1)）
+--sf-motion-spin / -feedback   动效档位外时长（560/480ms；表格动效体系 §31 专用，主题无关，不进 dark 块，TS 镜像见 web/src/styles/motion.ts）
 --sf-chart-primary / -secondary / -success / -warning / -danger / -info / -muted / -axis / -grid / -tooltip-bg / -tooltip-border / -tooltip-text / -legend-text   图表配色（SfChart 主题唯一取值来源，Light/Dark 各一套，共 13 枚同名同集合）
 --sf-header-height / --sf-sider-width / --sf-sider-collapsed-width   布局尺寸
 ```
@@ -235,7 +236,7 @@ Dashboard
 `SfTable` 两种形态（variant）：
 
 - `page`（默认）：独立列表页，含工具栏/三档密度（默认紧凑）/列显示隐藏/全屏/刷新/统一分页（`共 x 条` + 条/页 + 快跳）。
-- `nested`：详情页/抽屉内嵌表——无工具栏无分页（除非显式传 pagination），仍统一密度、空态、错误态与首载骨架（loading 且无数据时以骨架条占位保持表头结构；刷新走 Spin 覆盖层）。
+- `nested`：详情页/抽屉内嵌表——无工具栏无分页（除非显式传 pagination），仍统一密度、空态、错误态与首载骨架（loading 且无数据时以骨架条占位保持表头结构；dataSource 传入时首载与刷新不再叠加 Spin 蒙层，统一走 data-loading 压暗/淡入，见 §31）。
 
 ### 6.2 表格视觉
 
@@ -727,6 +728,7 @@ Scan 顶部固定：扫码设备状态（设备正常/设备异常）+ 网络状
 
 ```text
 SfTable            统一表格（§6）
+SfRowActions       行操作区包裹（§31 #2：hover 渐显/触摸端恒显；「操作」列由 SfTable 自动注入，无需包裹）
 SfSearchForm       查询表单
 SfToolbar          列表工具栏
 SfPageHeader       页面头
@@ -895,3 +897,88 @@ Excel 按钮下载假文件          打印按钮直接 window.print
 设备页面只有静态卡片          所有状态颜色随便定义
 所有页面使用巨大 Card         大量留白、大量渐变、复杂动画
 ```
+
+---
+
+## 31. 表格动效体系（Global Table Motion System，2026-10-05）
+
+> 8 类核心动画全部内建于 SfTable/SfToolbar/SfSearchForm/SfEmpty + global.css 作用域类（「表格动效体系」节）。
+> 全站 66 个 SfTable/SfInventoryTable 消费文件**零改动自动获得 #1/2/3/5/6/8**；
+> #7 行反馈、删除行动效、批量工具栏为组件能力，页面按需接入（API 见 31.4）——页面接入（阶段B）
+> 已于 2026-10-05 完成（四批并行，逐批清单与接入形态见 docs/tasks/current.md 同日节）。
+
+### 31.1 令牌（CSS + TS 双轨）
+
+- tokens.css 动效块：既有 `--sf-motion-fast/normal/slow = 120/180/220ms`（slow 由 240ms 收敛至规格 ≈220ms）+ `--sf-motion-ease` 不变；
+  新增 `--sf-motion-spin: 560ms`（刷新图标 360° 自旋周期，规格 500~700ms）、
+  `--sf-motion-feedback: 480ms`（行反馈淡色底时长，规格 400~700ms）——均主题无关，不进 dark 块。
+- TS 镜像 `web/src/styles/motion.ts`（SF_MOTION_MS）：仅 JS 定时器消费——refreshMinHold=450（刷新图标最短自旋
+  保持）、feedbackCleanup=540（反馈类清除）、rowRemoveCollapse=260（删除行过滤 DOM）、rowRemoveFallback=2500
+  （删除行兜底自清）；CSS 一律 `var(--sf-motion-*)`，改时长与 tokens.css 同 commit 同步。
+
+### 31.2 类名体系（global.css）
+
+| 类名 | 挂载点 | 用途 |
+|---|---|---|
+| `.sf-table` | SfTable 根 div | 全部子样式作用域锚点 |
+| `.sf-table-data-loading` | `.sf-table` 修饰符，loading 为真即挂 | #1 数据返回淡入 + #6 Body 压暗（首载骨架与刷新共用） |
+| `.sf-table-row` + `--selected` / `--feedback-success` / `--feedback-error` / `--removing` | rowClassName 注入每个 tr | 行级语义：选中镜像（底色仍归 antd token）/ 行反馈 / 删除行 |
+| `.sf-table-actions-cell` | 「操作」列 td 自动注入（注入先于 align 早退，显式 `align:'right'` 同样生效） | #2 操作区 hover 渐显 |
+| `.sf-table-actions` | SfRowActions 显式包裹 div | 同上，页面显式声明时用 |
+| `.sf-table-toolbar` + `--selected`（含 `__panes` / `__pane(--hidden)` / `__batch`） | SfToolbar 根与左区双面板 | #4 常规 ⇄ 批量面板切换 |
+| `.sf-table-empty` / `.sf-table-refresh` / `.sf-table-refresh__icon--spin` | SfEmpty / 刷新 Button / Reload 图标 | #8 空态进场 / #5 图标自旋 |
+| `.sf-search-form__applied` | SfSearchForm「已筛选 N 项」行 | 附带进场 |
+
+### 31.3 8 类动画落点
+
+| # | 动画 | 实现 |
+|---|---|---|
+| 1 | Skeleton→数据 | 骨架在 emptyText 路径（表头保留），行数=min(当前 pageSize, 20)；`sf-table-data-loading` 首载即挂（tbody 0.8），数据到达摘除 → 0.8→1 过渡 180ms；无 translate/scale |
+| 2 | Row Hover | 行底色 antd rowHoverBg（浅灰）+ td `background-color 120ms` 过渡，行级禁 transform；操作区 opacity 0.72→1（120ms，`focus-within` 兜键盘，`@media (hover:none)` 恒 1） |
+| 3 | Checkbox 选中 | `.sf-table .ant-checkbox-checked`（antd 6.6.5 `-checked` 挂 rc 根 span，无 `-inner`）一次性 scale 0.96→1（180ms，禁弹跳）；选中底 antd rowSelectedBg（Light alpha 0.06；Dark alpha 0.08 合规 0.04~0.08 上限，hover 同相 0.12）+ 选中态 td 过渡 180ms 与勾选 pop 同节奏 |
+| 4 | 批量 Toolbar | SfToolbar grid 双面板恒占 `grid-area:1/1`（容器高度=max(两态) 不跳变）；进入 180ms / 退出 220ms（--sf-motion-slow），opacity+translateY(-4px→0)，visibility 延迟退场；selectedRowKeys>0 自动切换，页面只传 `bulkActions` |
+| 5 | Refresh | 仅 Reload 图标 `sf-rotate` 560ms linear infinite；TS 绑定归一化 loading 起停 + 450ms 最短保持；整按钮零旋转 |
+| 6 | 数据更新 | Header/Toolbar/分页静态；请求中 tbody 压暗 0.8（规格 0.72~0.85）+ usePagedList keepPreviousData 不清空，180ms 过渡与 #1 复用；排序图标色过渡 120ms（覆盖 antd 自带 240ms 慢档）；禁逐行 stagger |
+| 7 | Row Feedback | `useTableRowFeedback.trigger`（仅 onSuccess/onError 后调）→ `--feedback-success/error` → td animation 480ms from `color-mix(--sf-success/--sf-danger 12%, transparent)` 回落；先 API 后反馈 |
+| 8 | Empty State | `.sf-table-empty` fade-up 180ms（backwards，不常驻 transform）+ 图标 scale 0.98→1；图标+标题+说明+操作，高度由既有 padding 24px + SIMPLE 插图自然撑出，`min-height:180px` 兜底（实测纯文案空态 166px 低于规格下限） |
+| 删除行 | fade→收缩→移除 | 两段式：`sf-row-fade` 0~120ms（内容+边线 opacity 归零）→ `sf-row-shrink` 120~240ms（padding/行高/边线收拢）→ 260ms 后 SfTable 过滤 DOM；多行并行删除逐 key 独立定时互不中断；服务器 total/分页不动，refetch 自愈提前清 / hook 2.5s 兜底恢复 |
+
+### 31.4 页面接入 API
+
+```tsx
+import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
+import { SfRowActions } from '@/components/table/cells'
+
+const fb = useTableRowFeedback()
+
+<SfTable
+  rowKey="id"                        // 全站约定；行反馈/删除动效按此匹配
+  dataSource={list.items}            // 必传：内部据此区分 骨架首载/压暗刷新
+  loading={list.isFetching}          // 语义不变；loading 为真即压暗，数据到达淡入
+  bulkActions={<Button ... />}       // 可选：选中>0 工具栏自动切批量面板（需受控 rowSelection）
+  emptyAction={<Button ... />}       // 可选：空态 CTA
+  feedbackRowKey={fb.rowKey}         // 可选：行反馈 key（API 成功/失败后）
+  feedbackTone={fb.tone}             // 可选：'success'（默认）| 'error'
+  removingRowKeys={fb.removingRowKeys} // 可选：删除行 fade→收缩→隐藏（多行并行安全，传数组）
+  onClearSelection={...}             // 可选：批量面板「清空」覆盖实现（缺省调 rowSelection.onChange([], [], { type: 'none' })，
+                                     //   antd 6 RowSelectMethod 含 'none'；SfTable 与 SfToolbar 均有同名 prop）
+/>
+
+// 删除场景：onSuccess 里 fb.triggerRemove(id) + invalidate；onError 里 fb.trigger(id, 'error')
+// 停用/启用等状态切换：onSuccess 里 fb.trigger(record.id, 'success')
+// 行操作区（可选显式包裹；「操作」列已自动注入，无需包裹）：
+render: (_, r) => <SfRowActions><Button>编辑</Button><Button>删除</Button></SfRowActions>
+```
+
+### 31.5 硬性约束
+
+- **零 `transition: all`**：逐属性声明（background-color/color/opacity/transform 等）；时长/缓动一律
+  `var(--sf-motion-*)`；颜色一律 Token / antd token，零新增颜色令牌（行反馈色由既有语义色 color-mix 派生）。
+- **reduced-motion（CSS 媒体查询，非 JS）**：三档时长归零使 transition/一次性 animation 即时完成；
+  无限循环动画（自旋）与进场/反馈类动画在媒体查询内显式 `animation: none`（0ms×infinite 会高频闪烁）；
+  hover/选中/压暗/操作区 opacity 即时切换，保留必要 color/opacity 反馈；TS 定时器照常运行无副作用。
+- **Dark Mode**：行反馈色随 dark 块语义色自动切换，无白闪；Body 压暗 0.8 主题无关；删除 antd Spin 蒙层叠加后暗色更干净。
+- **Pad/触摸端**：体系作用域限 `.sf-table` / `.sf-table-toolbar` / `.sf-search-form__applied`，Pad 卡片流零影响；
+  SfEmpty 新 props 全可选（Pad 11 个引用文件渲染与现状一致）；`@media (hover:none)` 操作区恒 1。
+- **时序纪律**：先 API 后反馈（trigger/triggerRemove 仅在回调内调用）；动画只在视觉层，不阻塞业务操作；
+  动效三层：微交互 120~180ms / 组件 180~250ms / 反馈 220~700ms，无 1s 以上长动画。
