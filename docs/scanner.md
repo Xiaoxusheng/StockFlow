@@ -1,6 +1,6 @@
 # StockFlow 扫码枪 / 条码设备深度接入规范
 
-> 版本：v1.0 ｜ 本文档是扫码领域（设备接入、解析、交互、业务场景）的唯一依据 ｜ 关联文档：[devices](devices.md)（设备生命周期/StockFlow Scan 应用/离线/监控）、[frontend](frontend.md)、[printing](printing.md)、[inventory-rules](inventory-rules.md)、[business-flow](business-flow.md)
+> 版本：v1.0 ｜ 本文档是扫码领域（设备接入、解析、交互、业务场景）的唯一依据 ｜ 关联文档：[devices](devices.md)（设备生命周期/StockFlow Scan 应用/离线/监控）、[frontend](frontend.md)、[printing](printing.md)、[qr-code](qr-code.md)（SFQR 商品二维码协议唯一契约）、[inventory-rules](inventory-rules.md)、[business-flow](business-flow.md)
 
 ---
 
@@ -290,9 +290,21 @@ QR Code、DataMatrix
 原始条码 → BarcodeResolver → 识别类型 → 查询对象
 ```
 
-识别映射：
+**第 0 段：SFQR 商品二维码分支（2026-10-05 新增，优先级最高）**。扫描内容以 `SFQR|` 前缀自标识即锁定类型，先于单号前缀与全部条码匹配器执行（协议唯一契约见 [qr-code.md](qr-code.md)）：
 
 ```text
+SFQR|1|SKU|<sku_code>  → SKU（载荷 = SKU 编码）
+```
+
+- `HasPrefix("SFQR|")` 即锁型 → 协议解析 → 按载荷查 SKU；格式/版本/类型错误显式返回 `SFQR_INVALID` / `SFQR_VERSION_UNSUPPORTED` / `SFQR_TYPE_UNSUPPORTED`，**失败不落回**后续匹配器（禁止把残缺 SFQR 当普通条码静默处理）。
+- 载荷合法但 SKU 不存在/软删/停用 → `SKU_NOT_FOUND`（与 SKU 条码分支同口径）。
+- 同一字符串即使被注册为 SKU 条码也走 SFQR 分支（`SFQR|` 为协议保留命名空间，条码注册侧已拒绝该前缀，见 qr-code.md §3.2）。
+- type=BIN/BOX/PALLET 为协议预留未实现，显式返回 `SFQR_TYPE_UNSUPPORTED`。
+
+识别映射（第 1 段起，顺序冻结）：
+
+```text
+单号前缀      → 各域单据/任务（前缀命中即锁型，不落回）
 SKU 条码      → SKU
 库位条码      → Bin
 箱码          → Package/Box
@@ -314,6 +326,19 @@ POST /api/scanner/resolve
 请求：{ "code": "SKU001234" }
 响应：{ "type": "sku", "id": "xxx", "code": "SKU001234", "name": "xxx" }
 ```
+
+SFQR 商品二维码走同一端点（前端零自研解析）：
+
+```text
+请求：{ "code": "SFQR|1|SKU|SKU-001" }
+响应：{ "type": "sku", "id": "42", "code": "SKU-001", "name": "商品名" }
+```
+
+**响应实现超集（2026-10-05 依实现回写）**：
+
+- 多命中：库位码/批次码等跨对象命中时响应携带 `items` 全量列表由前端选择，顶层 `id=0` 表示未定位（如 `{type, id:0, code, name, items:[...]}`）。
+- 去重注记：响应恒含 `duplicate` 布尔字段（scanner.md §6.6 去重窗口标记，不抑制识别、scan_logs 照常落库）。
+- 错误响应为统一信封业务错误码（§6.1），SFQR_* 与 NOT_FOUND 类均先落 scan_logs 审计再返回。
 
 **硬性约束**：不能把所有业务逻辑塞进 resolve API。解析与业务执行必须分离：
 
@@ -345,6 +370,14 @@ SERIAL_USED            序列号已使用/已出库
 INVENTORY_NOT_ENOUGH   库存不足
 TASK_COMPLETED         任务已完成
 ORDER_COMPLETED        单据已完成
+```
+
+SFQR 商品二维码分支错误码（2026-10-05 新增，识别类 13→16；格式/触发条件唯一依据见 [qr-code.md §5](qr-code.md)）：
+
+```text
+SFQR_INVALID             SFQR 载荷格式非法（段数错误/载荷空/超 64 字符）
+SFQR_VERSION_UNSUPPORTED SFQR 协议版本不支持（version ≠ 1，明确拒绝不降级）
+SFQR_TYPE_UNSUPPORTED    SFQR 类型已预留未实现（BIN/BOX/PALLET 及未知类型）
 ```
 
 **前端禁止只显示"操作失败"**，必须说明四要素：

@@ -10,6 +10,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router'
 import {
+  isLabelObjectType,
   printingApi,
   resolveObjectTypeLabel,
   resolvePaper,
@@ -21,7 +22,8 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { PrintContentRenderer } from '@/components/print/PrintContentRenderer'
+import { PrintContentRenderer, PrintLabelGrid } from '@/components/print/PrintContentRenderer'
+import { chunkLabelRows, isGridLabelPaper, labelSheetPaddingMm } from '@/components/print/labelSheet'
 import { PrintPaperSheet } from '@/components/print/PrintPaperSheet'
 import { SfPrintButton } from '@/components/print/SfPrintButton'
 
@@ -41,6 +43,9 @@ function resolvePages(task: { rows?: PrintContentRow[] }): PrintContentRow[] {
  * 按任务 ID 取详情（GET /api/prints/tasks/{id}，internal/printing/handler.go:137），
  * 用任务冻结的模板快照 + 内容行线下渲染（真实数据，前端不造数据）；支持缩放、
  * 上一页/下一页、react-to-print 打印（SfPrintButton，禁用 window.print）。
+ * A4/A5 标签纸经 labelSheet.chunkLabelRows 网格分片渲染（每片一张纸、分页不截断标签，
+ * qr-code.md §7.3），热敏纸维持一码一页、单据类维持一单一页；页码/翻页按分片计数，
+ * 头部明示总张数 = 内容行数 × 份数。
  * 后端打印域不产出任务 PDF（无 /api/prints/{id}/pdf 端点）——下载按钮如实置灰提示，
  * 不调用不存在的端点、不前端伪造 PDF 文件。
  */
@@ -66,12 +71,16 @@ export default function PrintPreviewPage() {
   })
 
   const task = taskQuery.data
-  const pages: PrintContentRow[] = task ? resolvePages(task) : []
+  const rows: PrintContentRow[] = task ? resolvePages(task) : []
   const paperSpec = task ? resolvePaper(task.paper) : undefined
   const template: PrintTemplateSnapshot | undefined = task?.template
+  // A4/A5 标签纸按网格容量分片（每片一张纸、固定行高、分页不截断标签，qr-code.md §7.3）；
+  // 热敏纸维持一码一页、单据类维持一单一页（既有口径不变）
+  const gridded = Boolean(template && isLabelObjectType(template.object_type) && isGridLabelPaper(task?.paper))
+  const sheets: PrintContentRow[][] = gridded ? chunkLabelRows(rows, task?.paper) : rows.map((row) => [row])
 
   const gotoPage = (index: number) => {
-    const clamped = Math.min(Math.max(index, 0), Math.max(pages.length - 1, 0))
+    const clamped = Math.min(Math.max(index, 0), Math.max(sheets.length - 1, 0))
     setPageIndex(clamped)
     pageRefs.current[clamped]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
@@ -107,7 +116,7 @@ export default function PrintPreviewPage() {
         />
       )
     }
-    if (pages.length === 0) {
+    if (sheets.length === 0) {
       return <SfEmpty description="任务尚未装配内容行，无法渲染预览" />
     }
 
@@ -135,21 +144,29 @@ export default function PrintPreviewPage() {
           {/* 缩放仅作用于屏幕预览容器，位于打印目标之外，不影响打印输出 */}
           <div style={{ zoom: zoomPercent / 100, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, padding: 16, minWidth: 'fit-content' }}>
             <div ref={contentRef}>
-              {pages.map((row, index) => (
+              {sheets.map((chunk, index) => (
                 <div
-                  key={row.id}
+                  key={chunk[0]?.id ?? index}
                   ref={(el) => {
                     pageRefs.current[index] = el
                   }}
                   style={{ scrollMarginTop: 16 }}
                 >
-                  <PrintPaperSheet paper={paperSpec} paddingMm={6} pageBreak={index < pages.length - 1}>
-                    <PrintContentRenderer
-                      template={template}
-                      row={row}
-                      printedAt={task.printed_at ?? task.created_at}
-                      printedBy={task.created_by}
-                    />
+                  <PrintPaperSheet
+                    paper={paperSpec}
+                    paddingMm={labelSheetPaddingMm(task.paper)}
+                    pageBreak={index < sheets.length - 1}
+                  >
+                    {chunk.length > 1 ? (
+                      <PrintLabelGrid template={template} rows={chunk} />
+                    ) : (
+                      <PrintContentRenderer
+                        template={template}
+                        row={chunk[0]}
+                        printedAt={task.printed_at ?? task.created_at}
+                        printedBy={task.created_by}
+                      />
+                    )}
                   </PrintPaperSheet>
                 </div>
               ))}
@@ -160,7 +177,7 @@ export default function PrintPreviewPage() {
     )
   }
 
-  const previewReady = Boolean(task && template && paperSpec && pages.length > 0)
+  const previewReady = Boolean(task && template && paperSpec && sheets.length > 0)
   const pageStyle = paperSpec ? `@page { size: ${paperSpec.widthMm}mm ${paperSpec.heightMm}mm; margin: 0; }` : undefined
 
   return (
@@ -175,6 +192,15 @@ export default function PrintPreviewPage() {
         onBack={() => navigate('/data/printing')}
         extra={
           <Space wrap size={8}>
+            {/* 总张数 = 内容行数 × 份数，头部加粗明示（qr-code.md §7.3；份数沿 PrintTask 既有语义） */}
+            {task && (
+              <Text strong style={{ fontSize: 13 }}>
+                总张数 {task.total_count * (task.copies || 1)}
+                <Text type="secondary" style={{ marginLeft: 4, fontWeight: 400 }}>
+                  （{task.total_count} 行 × {task.copies || 1} 份）
+                </Text>
+              </Text>
+            )}
             <Space.Compact>
               <Button
                 icon={<ZoomOutOutlined />}
@@ -197,10 +223,10 @@ export default function PrintPreviewPage() {
                 上一页
               </Button>
               <Button style={{ pointerEvents: 'none' }}>
-                第 {Math.min(pageIndex + 1, Math.max(pages.length, 1))} / 共 {pages.length} 页
+                第 {Math.min(pageIndex + 1, Math.max(sheets.length, 1))} / 共 {sheets.length} 页
               </Button>
               <Button
-                disabled={!previewReady || pageIndex >= pages.length - 1}
+                disabled={!previewReady || pageIndex >= sheets.length - 1}
                 onClick={() => gotoPage(pageIndex + 1)}
               >
                 下一页

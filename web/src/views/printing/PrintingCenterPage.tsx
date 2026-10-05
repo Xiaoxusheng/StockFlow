@@ -55,6 +55,8 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
@@ -753,11 +755,70 @@ function TaskTab() {
 
 function HistoryTab() {
   const [params, setParams] = useState<PrintHistoryQuery>({})
+  /** 正在重打的历史行 ID（重打为 detail→create 两段请求，行级 loading 防重复触发） */
+  const [reprintingId, setReprintingId] = useState<string | null>(null)
+  const [messageApi, contextHolder] = message.useMessage()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  // 重打入口 fail-closed（约束 7）：无 printing:task:create 权限不显示按钮（frontend.md §13.2）
+  const canCreatePrintTask = canAccess(user, 'printing:task:create')
 
   const list = usePagedList<PrintHistoryItem, PrintHistoryQuery>({
     queryKey: ['printing', 'history'],
     fetch: (query) => printingApi.history.list(query),
     params,
+  })
+
+  // 历史筛选模板下拉：一次取全且不限状态——历史行可能引用其后被停用的模板，
+  // 仅列启用项会使这部分历史无法按模板筛选（约束 11：历史复用现有体系只加筛选）。
+  // 拉取失败时下拉为空如实呈现，不阻塞其余筛选
+  const templates = useQuery({
+    queryKey: ['printing', 'templates', 'options', 'history'],
+    queryFn: () => printingApi.templates.list({ page: 1, pageSize: PRINT_OPTIONS_PAGE_SIZE }),
+  })
+  const templateOptions = (templates.data?.items ?? []).map((item) => ({
+    label: `${item.name}（${resolveObjectTypeLabel(item.object_type)}）`,
+    value: String(item.id),
+  }))
+
+  // 重打 = 以行快照 data_id 创建新任务，不修改历史（约束 11 / qr-code.md §7.4）。
+  // fail-closed（frontend.md §13.2）：任务任一行缺 data_id（含 0 行）即中止，不发创建请求；
+  // 全部行有 data_id 方可 tasks.create（all-or-nothing，禁止部分行静默重打）。
+  // data_ids 通道纪律（qr-code.md §8）：恒为行快照 data_id = SKU 数字 ID 十进制文本
+  const reprintMutation = useMutation({
+    mutationFn: async (history: PrintHistoryItem) => {
+      const task = await printingApi.tasks.detail(String(history.id))
+      const rows = task.rows ?? []
+      if (rows.length === 0 || rows.some((row) => !row.data_id)) {
+        return { outcome: 'no-data-id' as const }
+      }
+      if (!history.template_id) {
+        return { outcome: 'no-template' as const }
+      }
+      const created = await printingApi.tasks.create({
+        template_id: Number(history.template_id),
+        data_ids: rows.map((row) => row.data_id as string),
+        copies: 1,
+      })
+      return { outcome: 'created' as const, task: created }
+    },
+    onSuccess: (result) => {
+      if (result.outcome === 'created') {
+        messageApi.success(`重打任务 ${result.task.print_no} 已创建，即将进入预览`)
+        void queryClient.invalidateQueries({ queryKey: ['printing', 'tasks'] })
+        void queryClient.invalidateQueries({ queryKey: ['printing', 'history'] })
+        navigate(`/data/printing/preview?taskId=${result.task.id}`)
+        return
+      }
+      // 提示文案逐字对齐 frontend.md §13.2 冻结口径
+      messageApi.warning(
+        result.outcome === 'no-data-id'
+          ? '该任务创建于身份快照能力之前，无法自动重打，请到商品二维码中心按 SKU 重选打印'
+          : '该历史记录缺少模板信息，无法自动重打，请到商品二维码中心按 SKU 重选打印',
+      )
+    },
+    onError: (error) => messageApi.error(resolveErrorMessage(error)),
   })
 
   const columns: ColumnsType<PrintHistoryItem> = [
@@ -783,40 +844,72 @@ function HistoryTab() {
       width: 100,
       render: (value: string, record: PrintHistoryItem) => renderPrintResult(value, record.error_message),
     },
+    {
+      title: '操作',
+      key: 'actions',
+      fixed: 'right',
+      width: 90,
+      render: (_: unknown, record: PrintHistoryItem) => {
+        // 仅 SKU 标签行可重打（qr-code.md §7.4 重打口径；其余标签/单据走既有任务模型重建）
+        if (record.object_type !== 'SKU_LABEL' || !canCreatePrintTask) return '-'
+        return (
+          <SfConfirm
+            title="确认重打该任务？"
+            description="重打 = 以行快照身份创建新打印任务，不修改本条历史记录。"
+            okText="重打"
+            confirming={reprintingId === String(record.id) && reprintMutation.isPending}
+            onConfirm={() => {
+              setReprintingId(String(record.id))
+              reprintMutation.mutate(record, { onSettled: () => setReprintingId(null) })
+            }}
+          >
+            <Button type="link" size="small" loading={reprintingId === String(record.id) && reprintMutation.isPending}>
+              重打
+            </Button>
+          </SfConfirm>
+        )
+      },
+    },
   ]
 
   return (
-    <Card size="small">
-      <SfSearchForm
-        fields={[
-          // 后端 keyword 仅按 print_no ILIKE 检索（internal/printing/repository.go:197）——
-          // 占位如实标注「打印单号」，不夸大为打印人/模板名称检索
-          { name: 'keyword', label: '关键词', control: 'input', placeholder: '打印单号' },
-          // 业务类型筛选键走 snake_case 线格式（后端 handler.go:344 c.Query("object_type")）
-          { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
-          { name: 'result', label: '打印结果', control: 'select', options: RESULT_OPTIONS },
-        ]}
-        onSearch={(values) => {
-          setParams(values as PrintHistoryQuery)
-          list.resetToFirstPage()
-        }}
-      />
-      <SfTable<PrintHistoryItem>
-        storageKey="printing-history"
-        rowKey="id"
-        columns={columns}
-        dataSource={list.items}
-        loading={list.isFetching}
-        error={list.error}
-        onRetry={list.refetch}
-        onRefresh={list.refetch}
-        pagination={list.pagination}
-        total={list.total}
-        onPageChange={list.onPageChange}
-        emptyText="暂无打印历史；打印记录由后端在任务执行确认时写入（printing.md §6 打印记录入操作日志）"
-        scrollX={880}
-      />
-    </Card>
+    <>
+      {contextHolder}
+      <Card size="small">
+        <SfSearchForm
+          fields={[
+            // 后端 keyword 仅按 print_no ILIKE 检索（internal/printing/repository.go:197）——
+            // 占位如实标注「打印单号」，不夸大为打印人/模板名称检索
+            { name: 'keyword', label: '关键词', control: 'input', placeholder: '打印单号' },
+            // 业务类型筛选键走 snake_case 线格式（后端 handler.go:427 c.Query("object_type")）；
+            // 「SKU 标签」即其中 SKU_LABEL 选项
+            { name: 'object_type', label: '业务类型', control: 'select', options: PRINT_OBJECT_TYPE_OPTIONS },
+            // 模板筛选（handler.go:432-438 c.Query("template_id")，正整数字符串）
+            { name: 'template_id', label: '打印模板', control: 'select', options: templateOptions },
+            { name: 'result', label: '打印结果', control: 'select', options: RESULT_OPTIONS },
+          ]}
+          onSearch={(values) => {
+            setParams(values as PrintHistoryQuery)
+            list.resetToFirstPage()
+          }}
+        />
+        <SfTable<PrintHistoryItem>
+          storageKey="printing-history"
+          rowKey="id"
+          columns={columns}
+          dataSource={list.items}
+          loading={list.isFetching}
+          error={list.error}
+          onRetry={list.refetch}
+          onRefresh={list.refetch}
+          pagination={list.pagination}
+          total={list.total}
+          onPageChange={list.onPageChange}
+          emptyText="暂无打印历史；打印记录由后端在任务执行确认时写入（printing.md §6 打印记录入操作日志）"
+          scrollX={980}
+        />
+      </Card>
+    </>
   )
 }
 
@@ -824,6 +917,8 @@ function HistoryTab() {
  * 打印中心（/data/printing，frontend.md §13：打印模板 / 打印任务 / 打印历史 / 打印预览）。
  * 模板 CRUD/复制/启停、任务创建、历史三页签全部接 /api/prints 契约端点（snake_case 视图，
  * internal/printing/service.go:113-249）；任务 PDF 下载端点后端未交付，下载按钮如实置灰提示。
+ * 历史支持模板筛选与 SKU 标签重打（frontend.md §13.2：重打=创建新任务不碰历史，
+ * 行快照 data_id 任一缺失即 fail-closed 中止，all-or-nothing）。
  * 预览在独立页面 /data/printing/preview（printing.md §5 禁止点击直接打印当前网页）。
  */
 export default function PrintingCenterPage() {

@@ -82,10 +82,12 @@ API 按业务领域划分：
 /api/files              文件中心（上传/下载/预览/列表/删除；异常图片等附件挂接的数据源）
 /api/data-tasks         数据任务详情/任务卡刷新（GET /api/data-tasks/{kind}/{id}，
                         kind=IMPORT/EXPORT）
-/api/prints             打印
+/api/prints             打印（历史列表支持 template_id 筛选，见 §9 2026-10-05
+                        二维码闭环段；打印域全量端点契约补账另行挂账）
 
 —— 扫码 ——
 /api/scanner       扫码解析 /api/scanner/resolve、扫码设备管理、扫码日志
+                   （resolve 管线第 0 段支持 SFQR 商品二维码，见 §9 与 qr-code.md）
 
 —— 设备（多终端） ——
 /api/devices       设备注册/激活/绑定/配置下发/心跳/健康监控/App 版本（devices.md §6–7）
@@ -253,6 +255,53 @@ release:{exception_no}:{lock_id}                             异常解冻
 ---
 
 ## 9. 契约变更与补齐记录
+
+### 2026-10-05 二维码闭环轮（SFQR 商品二维码——契约增量，协议唯一契约见 qr-code.md）
+
+> 本轮为文档先行契约增量：打印任务链、模板、条码渲染等端点全部**复用既有端点**，零新增路由（swag 路由表不变）；仅以下行为与校验增量。
+
+筛选与错误码增量（打印域）：
+
+```text
+GET /api/prints/history   新增 template_id 筛选（正整数，可选；与既有 keyword/
+                          object_type/result 并列，历史列表只加参数不加端点）。
+POST /api/prints/tasks    新增错误码 PRINT_SKU_DISABLED（409，打印对象中存在已停用
+                          SKU；details.disabled_ids 逐条列出停用 SKU 编码）——创建
+                          装配时整体拒绝，前端可「仅打印可用」降级重提。既有
+                          PRINT_TOO_MANY_DATA_IDS（data_ids ≤500）口径不变。
+```
+
+行为变更说明：SKU_LABEL 装配开始拒绝停用 SKU——「打印中心手输 ID 打停用 SKU」路径从成功变为 409（依据：商品已停用为不可打印原因，qr-code.md §9）。
+
+字段与形态增量（打印域）：
+
+```text
+打印任务行（GET /api/prints/tasks/{id} 的 rows[].* 与 /api/prints/history 行）
+     新增 data_id（string，可选 omitempty）——任务创建时持久化的行业务身份快照
+     （SKU 数字 ID 十进制文本），历史重打取数唯一依据；存量行无该值为空，
+     凡缺 data_id 的行一律不可自动重打（fail-closed，qr-code.md §7.4）。
+```
+
+扫码解析（resolve）SFQR 分支：
+
+```text
+POST /api/scanner/resolve  管线第 0 段（优先级最高，先于单号前缀与条码匹配器）：
+     HasPrefix("SFQR|") 即锁型，载荷解析失败显式返回新错误码且不落回——
+     SFQR_INVALID（400，段数/载荷空/超 64 字符）、
+     SFQR_VERSION_UNSUPPORTED（400，version ≠ 1）、
+     SFQR_TYPE_UNSUPPORTED（400，BIN/BOX/PALLET 预留未实现及未知类型）；
+     载荷合法但 SKU 不存在/软删/停用 → 既有 SKU_NOT_FOUND（404）。
+     命中响应形态复用 {type:"sku",id,code,name}；scan_logs 照常落库（错误也落）。
+     格式 BNF、黄金向量表逐字冻结于 qr-code.md §4。
+```
+
+入参校验增量（基础资料域）：
+
+```text
+POST/PUT /api/skus 的 barcodes 入参：新增校验——条码值含 "SFQR|" 前缀 → 400
+     invalidParam（"条码保留 SFQR 协议前缀，禁止注册（qr-code.md 命名空间）"）。
+     封死条码注册侧写入协议保留字造成一码两义的通路；存量数据不清洗。
+```
 
 ### 2026-10-04 后端补齐轮（前端先行契约立项 + 一致性修复）
 

@@ -1,6 +1,6 @@
 # StockFlow 打印中心规范
 
-> 版本：v1.0 ｜ 关联文档：[excel.md](excel.md)、[frontend.md](frontend.md)
+> 版本：v1.0 ｜ 关联文档：[excel.md](excel.md)、[frontend.md](frontend.md)、[qr-code.md](qr-code.md)（SFQR 商品二维码协议唯一契约）
 
 ---
 
@@ -84,6 +84,12 @@ A-01-03-05
 
 批量打印前必须显示影响数量并支持预览确认。
 
+批量打印前必须做**不可打印校验**（创建任务装配时执行）：
+
+- 打印对象中存在**已停用 SKU** → 整体拒绝创建，返回 `PRINT_SKU_DISABLED`（409；details 携 `disabled_ids` 逐条列出），前端弹窗逐条展示「{code}：商品已停用」并提供「仅打印可用」降级按钮（剔除停用后重新提交）。
+- 可打印对象数超过单任务上限（data_ids ≤500）→ 既有 `PRINT_TOO_MANY_DATA_IDS` 拒绝，前端预先禁用。
+- 规则详见 [qr-code.md §9](qr-code.md)。
+
 ---
 
 ## 4. 二维码与条码
@@ -111,6 +117,8 @@ SKU 条码
 单据二维码
 ```
 
+> **SKU 二维码内容口径（SFQR 协议，2026-10-05 定案）**：模板 `object_type=SKU_LABEL` 且 `qrcode_enabled=true` 时，标签二维码内容 = SFQR 载荷 `SFQR|1|SKU|<sku_code>`（格式/黄金向量/纸张布局唯一依据见 [qr-code.md](qr-code.md)）；QR 由 SKU 身份 + 协议**动态生成、不持久化**。旧任务快照无 sku_code 值时维持主条码原文渲染（扫码走条码匹配器，仍可扫码，行为不变）。标签上 QR（SFQR 协议身份）与一维主条码（物流扫码存量习惯）双身份并存，分工见 qr-code.md §2.5。前端构造唯一点 web/src/utils/qrPayload.ts，禁止第二处拼串。
+
 ### 4.3 扫码直达业务
 
 扫码后能够直接打开对应业务对象，例如：
@@ -122,6 +130,8 @@ SKU 条码
 ```
 
 统一扫码路由协议：码内容携带业务类型 + 业务 ID（或编码），由前端扫码入口统一解析分发（见 frontend.md §10）。
+
+> SFQR 商品二维码扫入后经 `POST /api/scanner/resolve` 识别（管线第 0 段，优先级最高，见 [qr-code.md §6](qr-code.md)），PC 端直达 `/qr-codes?code={code}` 二维码中心预览抽屉；前端不做任何本地协议解析。
 
 ---
 
@@ -148,3 +158,9 @@ SKU 条码
 - 条码/二维码矢量或高分辨率渲染，确保扫码枪可识别。
 - 中文字体正确渲染，长表格自动分页，多页保持页眉页脚。
 - 打印记录入操作日志（谁、何时、用什么模板、打了什么）。
+
+> **SKU 标签纸张适配（SFQR 闭环，详见 [qr-code.md §7.3](qr-code.md)）**：
+> - 二维码渲染统一 margin=4（Quiet Zone），黑码白底、SVG 矢量；QR 尺寸按纸张 mm 计算——40×30→20mm、60×40→28mm、100×50→34mm、A4/A5 网格单元→22mm（mm×3.7795 转 px）；尺寸 <24mm 纠错级别升 Q，否则 M。
+> - 热敏 40×30 采用**极简布局**：只放 QR + SKU 编码 + 商品名（超长省略号截断），不渲染一维条码与其它字段。
+> - A4/A5 网格分片：最小标签单元 50×30mm，cols=floor((纸宽−12)/50)、rows=floor((纸高−12)/30)——A4=3×9=27 张/页、A5=2×6=12 张/页，热敏纸一律 1 张/页；每片固定行高、break-inside:avoid，分页不截断标签。
+> - SKU 标签装配 ContentRow.Values **恒含 `sku_code`**（不依赖模板字段绑定——SFQR 载荷构造依据）；重打取数依据为任务行快照 data_id（fail-closed，见 qr-code.md §7.4）。

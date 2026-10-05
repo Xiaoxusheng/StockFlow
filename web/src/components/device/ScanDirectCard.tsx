@@ -39,10 +39,17 @@ const DOC_KIND_DETAIL_PATH: Partial<Record<ScanDocKind, (id: string) => string>>
   CK: (id) => `/counts/${id}`,
 }
 
-/** 单个识别对象的可直达路由：单据类且 PC 有详情页时返回路径，否则 undefined */
+/**
+ * 单个识别对象的可直达路由：单据类且 PC 有详情页时返回详情路径；
+ * SKU（含 SFQR 扫入命中，qr-code.md §7.5）直达商品二维码中心预览抽屉；
+ * 其余类型 undefined（如实展示识别结果，不硬造跳转目标）。
+ */
 function resolveTarget(item: ScanResolveItem): string | undefined {
   if (item.type === 'doc' && item.doc_kind && item.id) {
     return DOC_KIND_DETAIL_PATH[item.doc_kind]?.(String(item.id))
+  }
+  if (item.type === 'sku' && item.code) {
+    return `/qr-codes?code=${encodeURIComponent(item.code)}`
   }
   return undefined
 }
@@ -133,7 +140,8 @@ export function ScanDirectCard() {
       {contextHolder}
       <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
         使用 USB/蓝牙 HID 扫码枪扫入或手工键入条码 / 单号，回车识别并直达对应对象（scanner.md §5.3 /
-        printing.md §4.3）；单据类 PO / IN / SO / OUT / CK 自动打开详情，库位与批次多命中时列出候选。
+        printing.md §4.3）；单据类 PO / IN / SO / OUT / CK 自动打开详情，SKU（含 SFQR 二维码）直达
+        商品二维码中心，库位与批次多命中时列出候选。
       </Text>
       <Input.Search
         placeholder="扫入条码 / 单号，如 PO-20261004-0001"
@@ -182,7 +190,8 @@ export function ScanDirectCard() {
                 )}
                 {!resolveTarget(result) && (
                   <Text type="secondary">
-                    PC 端暂无该对象类型的详情路由（仅 PO / IN / SO / OUT / CK 单据有行详情页），已如实展示识别结果。
+                    PC 端暂无该对象类型的直达路由（单据 PO / IN / SO / OUT / CK 与 SKU 已有直达，
+                    库位 / 批次 / 序列号暂无页面直达），已如实展示识别结果。
                   </Text>
                 )}
               </Flex>

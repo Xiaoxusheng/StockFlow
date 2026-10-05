@@ -300,7 +300,7 @@ export interface PrintTaskQuery extends PageQuery {
   id?: string
 }
 
-/** 任务内容行（RowView，service.go:160-166：主码内容 + 字段绑定取值 + 单据明细行） */
+/** 任务内容行（RowView，service.go:160-166：主码内容 + 行业务身份快照 + 字段绑定取值 + 单据明细行） */
 export interface PrintContentRow {
   /** 行序 */
   seq: number
@@ -308,6 +308,10 @@ export interface PrintContentRow {
   id: string
   /** 主码内容：SKU 条码 / 库位编码 / 箱码 / 托盘码 / 单据号 */
   code: string
+  /** 行业务身份快照（迁移 000019 data_id 列；SKU 标签 = SKU 数字 ID 十进制文本，
+   * 历史重打的唯一取数依据，qr-code.md §7.4/§8 通道纪律）。
+   * 000019 之前的旧行为空且缺省（service.go:165 omitempty）——重打 fail-closed 判据 */
+  data_id?: string
   /** 模板字段绑定取值（键对齐 PRINT_TEMPLATE_FIELD_PRESETS，值由后端按业务数据填充） */
   values?: Record<string, string>
   /** 单据类明细行（键对齐 PRINT_LINE_FIELD_LABELS；仅单据模板返回） */
@@ -358,6 +362,9 @@ export interface PrintHistoryQuery extends PageQuery {
   result?: string
   /** 仅按打印单号模糊匹配（repository.go:197 print_no ILIKE——打印人/模板名不参与检索） */
   keyword?: string
+  /** 模板 ID 精确筛选（handler.go:432-438 c.Query("template_id")；正整数字符串，
+   * 非法值按参数错误 400——历史筛选只加查询参数不加端点，qr-code.md 闭环） */
+  template_id?: string
 }
 
 export interface PrintHistoryItem {
