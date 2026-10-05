@@ -413,6 +413,9 @@ func (f *fakeRepo) ListTasks(ctx context.Context, flt TaskFilter) ([]*PrintTask,
 		if flt.ID > 0 && t.ID.Int64() != flt.ID {
 			continue
 		}
+		if flt.TemplateID > 0 && t.TemplateID != flt.TemplateID {
+			continue
+		}
 		if flt.ObjectType != "" && t.ObjectType != flt.ObjectType {
 			continue
 		}

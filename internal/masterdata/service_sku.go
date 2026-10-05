@@ -25,6 +25,11 @@ import (
 // maxBarcodesPerSKU 单 SKU 条码上限（防御性业务上限，防误传大数组）。
 const maxBarcodesPerSKU = 50
 
+// sfqrReservedPrefix SFQR 协议保留命名空间前缀（docs/qr-code.md §3.2）：barcodes
+// 注册侧拒绝写入，封死「条码值以 SFQR| 开头造成一码两义」的通路——resolve 管线
+// 第 0 段前缀锁型优先于条码匹配器，协议命名空间必须独占。存量数据不清洗。
+const sfqrReservedPrefix = "SFQR|"
+
 // ---- 视图 DTO ----
 
 // BarcodeView 条码视图。
@@ -188,7 +193,8 @@ func hasControlChar(s string) bool {
 }
 
 // buildBarcodes 条码入参校验与构建：非空 ≤128、无控制字符、类型缺省 CODE128、
-// 列表内不重复、主条码至多一个（一码一 SKU，uk_barcodes_barcode）。
+// 列表内不重复、主条码至多一个（一码一 SKU，uk_barcodes_barcode）；拒绝 SFQR
+// 协议保留前缀（qr-code.md §3.2 命名空间保留——Create/Update 两调用点经本函数全覆盖）。
 func buildBarcodes(in []BarcodeInput) ([]*Barcode, error) {
 	if len(in) > maxBarcodesPerSKU {
 		return nil, invalidParam("barcodes", "最多 "+itoa(maxBarcodesPerSKU)+" 个")
@@ -201,6 +207,9 @@ func buildBarcodes(in []BarcodeInput) ([]*Barcode, error) {
 		at := "第 " + itoa(i+1) + " 项"
 		if code == "" {
 			return nil, invalidParam("barcodes", at+"条码为空")
+		}
+		if strings.HasPrefix(code, sfqrReservedPrefix) {
+			return nil, invalidParam("barcodes", at+"条码保留 SFQR 协议前缀，禁止注册（qr-code.md 命名空间）")
 		}
 		if len(code) > 128 {
 			return nil, invalidParam("barcodes", at+"条码超过 128 字符")

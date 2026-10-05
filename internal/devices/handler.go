@@ -138,6 +138,7 @@ func deviceScopeOf(c *gin.Context) WarehouseScope {
 //
 //	WithWarehouseChecker(warehouse.NewChecker(db))   仓库存在性校验（创建/绑定校验）
 //	WithSKUBarcodes/WithBins/WithSerials/WithBatches resolve 匹配器 2–5（各域 devices_resolve.go）
+//	WithSfqrSkus                                     匹配器 0（SFQR 载荷 SKU 读取，qr-code.md §6）
 //	WithPurchaseDocs/WithSalesDocs/WithStockopsDocs/WithReturnsDocs 匹配器 1（前缀分派）
 //	WithDeviceAPI(gin 路由组)                         设备端挂载组——必须不含 auth.AuthRequired
 //	                                                  （设备令牌与用户 JWT 并行，plan §8.2）
@@ -168,9 +169,9 @@ func RegisterRoutes(protected *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, 
 	if o.whChecker == nil {
 		panic("devices 装配失败: 仓库校验器未注入（router 必须传 WithWarehouseChecker(warehouse.NewChecker(db))，plan §3.1 规则①）")
 	}
-	if o.skuBarcodes == nil || o.bins == nil || o.serials == nil || o.batches == nil ||
+	if o.skuBarcodes == nil || o.bins == nil || o.serials == nil || o.batches == nil || o.sfqrSkus == nil ||
 		o.purchaseDocs == nil || o.salesDocs == nil || o.stockopsDocs == nil || o.returnsDocs == nil {
-		panic("devices 装配失败: resolve 匹配器窄接口未注入（router 必须传 WithSKUBarcodes/WithBins/WithSerials/WithBatches/WithPurchaseDocs/WithSalesDocs/WithStockopsDocs/WithReturnsDocs，plan §3.1 规则①）")
+		panic("devices 装配失败: resolve 匹配器窄接口未注入（router 必须传 WithSKUBarcodes/WithBins/WithSerials/WithBatches/WithSfqrSkus/WithPurchaseDocs/WithSalesDocs/WithStockopsDocs/WithReturnsDocs，plan §3.1 规则①）")
 	}
 	if o.deviceAPI == nil {
 		panic("devices 装配失败: 设备端挂载组未注入（router 必须传 WithDeviceAPI(不含 AuthRequired 的 /api 组)，plan §8.2 设备令牌与用户 JWT 并行）")

@@ -18,7 +18,8 @@ import (
 )
 
 // SKUBarcodeResolveService SKU 条码解析读取实现（barcodes 表唯一索引精确命中——
-// scanner.md §5.2 匹配器 2，uk_barcodes_barcode 一码一 SKU）。
+// scanner.md §5.2 匹配器 2，uk_barcodes_barcode 一码一 SKU；SFQR 载荷查证共用本
+// 实现——qr-code.md §6 同一实现双接口）。
 type SKUBarcodeResolveService struct {
 	db *gorm.DB
 }
@@ -52,6 +53,42 @@ func (s *SKUBarcodeResolveService) FindByBarcode(ctx context.Context, code strin
 			return devices.Hit{}, false, nil
 		}
 		return devices.Hit{}, false, fmt.Errorf("按条码 %s 查询 SKU 失败: %w", code, err)
+	}
+	status := "ENABLED"
+	if !row.IsEnabled {
+		status = "DISABLED"
+	}
+	return devices.Hit{
+		ID:     row.ID,
+		Code:   row.SKUCode,
+		Name:   row.ProductName,
+		Status: status,
+	}, true, nil
+}
+
+// FindBySkuCode 按 SKU 编码取命中（resolve 管线第 0 段 SFQR 载荷查证——qr-code.md §6；
+// devices.SfqrSkuReader 实现，router 装配 WithSfqrSkus 与 WithSKUBarcodes 同一实现双接口）：
+// skus.code 精确命中（uk_skus_code 部分唯一索引）JOIN products，双 deleted_at IS NULL
+// 对齐既有 FindByBarcode 口径；软删未命中 → found=false。Hit.Status 携带 SKU 启用位
+// （ENABLED/DISABLED）：停用由消费方转 SKU_NOT_FOUND（与条码分支同口径）。
+func (s *SKUBarcodeResolveService) FindBySkuCode(ctx context.Context, code string) (devices.Hit, bool, error) {
+	var row struct {
+		ID          int64  `gorm:"column:id"`
+		SKUCode     string `gorm:"column:sku_code"`
+		ProductName string `gorm:"column:product_name"`
+		IsEnabled   bool   `gorm:"column:is_enabled"`
+	}
+	err := s.db.WithContext(ctx).
+		Table("skus").
+		Select("skus.id AS id, skus.code AS sku_code, products.name AS product_name, skus.is_enabled").
+		Joins("JOIN products ON products.id = skus.product_id AND products.deleted_at IS NULL").
+		Where("skus.code = ? AND skus.deleted_at IS NULL", code).
+		Take(&row).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return devices.Hit{}, false, nil
+		}
+		return devices.Hit{}, false, fmt.Errorf("按 SKU 编码 %s 查询失败: %w", code, err)
 	}
 	status := "ENABLED"
 	if !row.IsEnabled {

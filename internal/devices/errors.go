@@ -57,6 +57,17 @@ var (
 	// ErrCodeInvalid 扫码解析请求的 code 非法（空/超长——raw_code varchar(255)）。
 	ErrCodeInvalid = response.Register("SCANNER_CODE_INVALID", "条码内容非法", http.StatusBadRequest)
 
+	// ---- SFQR 协议识别类（docs/qr-code.md §5 字面冻结，均 400；解析唯一点 sfqr.go）----
+
+	// ErrSfqrInvalid SFQR 载荷格式非法（段数错误 / payload 空或超 64 字符——§4 向量 11-14）。
+	ErrSfqrInvalid = response.Register("SFQR_INVALID", "SFQR 载荷格式非法", http.StatusBadRequest)
+	// ErrSfqrVersionUnsupported SFQR 协议版本不支持（version ≠ "1"——明确拒绝不降级，
+	// qr-code.md §3.1 版本策略）。
+	ErrSfqrVersionUnsupported = response.Register("SFQR_VERSION_UNSUPPORTED", "SFQR 协议版本不支持", http.StatusBadRequest)
+	// ErrSfqrTypeUnsupported SFQR 类型已预留未实现（BIN/BOX/PALLET 及未知 type，
+	// 大小写敏感——qr-code.md §2.2 段表）。
+	ErrSfqrTypeUnsupported = response.Register("SFQR_TYPE_UNSUPPORTED", "SFQR 类型已预留未实现", http.StatusBadRequest)
+
 	// ErrCheckerRequired 仓库存在性校验器未注入（plan §3.1 规则① fail-closed：
 	// router 装配缺位拒绝执行，杜绝静默跳过 warehouse_id 校验）。
 	ErrCheckerRequired = response.Register("DEVICE_CHECKER_MISSING", "仓库校验器未装配", http.StatusInternalServerError)

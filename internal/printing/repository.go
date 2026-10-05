@@ -24,9 +24,11 @@ type TemplateFilter struct {
 
 // TaskFilter 打印任务列表过滤（前端 PrintTaskQuery：objectType/status/id；
 // ConfirmedOnly=true 供打印历史（print_tasks 已确认子集，plan §7.2），
-// Result 为历史执行结果筛选 SUCCESS/FAILED）。
+// Result 为历史执行结果筛选 SUCCESS/FAILED，TemplateID 为历史按模板筛选
+// （qr-code.md 闭环——GET /api/prints/history 只加查询参数不加端点）。
 type TaskFilter struct {
 	ID            int64  // 精确过滤（前端预览页回对取单条）
+	TemplateID    int64  // 模板精确过滤（历史页；0=全部）
 	Keyword       string // 单号 ILIKE
 	ObjectType    string
 	Status        string
@@ -192,6 +194,9 @@ func (r *gormRepository) ListTasks(ctx context.Context, f TaskFilter) ([]*PrintT
 	q := r.db.WithContext(ctx).Model(&PrintTask{})
 	if f.ID > 0 {
 		q = q.Where("id = ?", f.ID)
+	}
+	if f.TemplateID > 0 {
+		q = q.Where("template_id = ?", f.TemplateID)
 	}
 	if f.Keyword != "" {
 		q = q.Where("print_no ILIKE ?", "%"+f.Keyword+"%")

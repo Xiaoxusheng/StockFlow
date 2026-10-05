@@ -15,6 +15,9 @@ import (
 // 统一条码解析（scanner.md §5、backend-m3-plan §8.3——只识别不执行业务）。
 //
 // 匹配器管线（顺序冻结）：
+//  0. SFQR 协议码（qr-code.md §6：前缀 "SFQR|" 即锁型 → parseSfqr——格式/版本/类型
+//     错误显式返回 SFQR_*，失败不落回；载荷合法按 sku_code 查 SKU，未命中/软删/
+//     停用 → SKU_NOT_FOUND。优先级最高：同一字符串即使被注册为条码/单号也走本分支）
 //  1. 单据号（docnum frozenRules 业务前缀 15 值分派 4 域 DocFinder——docPrefixOwners
 //     单一映射表；LED/ADJ/IMP/EXP/PT 不可扫，不入映射表）
 //  2. SKU 条码（barcodes 唯一索引）
@@ -106,8 +109,31 @@ func (s *Service) Resolve(ctx context.Context, ident ResolveIdentity, in Resolve
 	return res, resErr
 }
 
-// resolvePipeline 匹配器管线（顺序冻结，plan §8.3）。
+// resolvePipeline 匹配器管线（顺序冻结，plan §8.3 + qr-code.md §6 第 0 段）。
 func (s *Service) resolvePipeline(ctx context.Context, code string) (*ResolveResult, error) {
+	// 0. SFQR 协议码（qr-code.md §6）：前缀命中即锁型——格式/版本/类型错误显式返回
+	// SFQR_*，禁止把残缺 SFQR 当普通条码静默落回后续匹配器（约束 2）；载荷合法按
+	// sku_code 查 SKU，未命中/软删/停用 → SKU_NOT_FOUND（与条码分支同口径）。
+	// 优先级最高：同一字符串即使被注册为 SKU 条码/单号前缀也走本分支（§3.2
+	// 命名空间保留的运行时保证）。scan_logs 审计照常（错误也落，errorCodeOf 通用）。
+	if IsSfqrCode(code) {
+		if s.sfqrSkus == nil {
+			return nil, response.NewError(ErrReaderRequired, ginH{"matcher": "sfqr"})
+		}
+		skuCode, err := parseSfqr(code)
+		if err != nil {
+			return nil, err
+		}
+		hit, found, err := s.sfqrSkus.FindBySkuCode(ctx, skuCode)
+		if err != nil {
+			return nil, err
+		}
+		if !found || (hit.Status != "" && hit.Status != "ENABLED") {
+			return nil, response.NewError(ErrSKUNotFound, ginH{"code": skuCode})
+		}
+		return singleResult(hitToItem("sku", hit)), nil
+	}
+
 	// 1. 单据号：前缀命中冻结映射即锁定类型——对象不存在也按 *_NOT_FOUND 返回
 	// （不落回后续匹配器：单号前缀是类型信号，plan §8.3 条 1/6）。
 	if prefix, ok := docPrefixOf(code); ok {

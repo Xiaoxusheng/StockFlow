@@ -82,6 +82,10 @@ func (s *Service) readerFor(objectType string) (ContentReader, bool) {
 // ParseIDs 对象标识解析：十进制文本 → int64（域包 reader 共用；非数字/越界标识
 // 归入缺失列表，由调用方统一报 PRINT_DATA_NOT_FOUND——标识形态对用户输入宽容，
 // 不产生 500）。
+//
+// 通道纪律（docs/qr-code.md §8）：本通道恒为 SKU 数字 ID 的十进制文本（String(sku.id)），
+// SKU 编码/SFQR 协议载荷绝不混入——SKU 编码正则允许纯数字，编码 "42" 混入会被装配成
+// skus.id=42 的另一 SKU 标签（静默错绑打错货）。
 func ParseIDs(ids []string) (parsed []int64, missing []string) {
 	for _, id := range ids {
 		n, err := strconv.ParseInt(id, 10, 64)

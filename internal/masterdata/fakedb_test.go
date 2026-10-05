@@ -46,16 +46,16 @@ func (fakeDriver) Open(string) (driver.Conn, error) { return &fakeConn{}, nil }
 
 type fakeConn struct{}
 
-func (c *fakeConn) Prepare(string) (driver.Stmt, error) { return &fakeStmt{}, nil }
-func (c *fakeConn) Close() error                        { return nil }
-func (c *fakeConn) Begin() (driver.Tx, error)           { return fakeTx{}, nil }
+func (c *fakeConn) Prepare(query string) (driver.Stmt, error) { return &fakeStmt{query: query}, nil }
+func (c *fakeConn) Close() error                              { return nil }
+func (c *fakeConn) Begin() (driver.Tx, error)                 { return fakeTx{}, nil }
 
 type fakeTx struct{}
 
 func (fakeTx) Commit() error   { return nil }
 func (fakeTx) Rollback() error { return nil }
 
-type fakeStmt struct{}
+type fakeStmt struct{ query string }
 
 func (s *fakeStmt) Close() error  { return nil }
 func (s *fakeStmt) NumInput() int { return -1 } // 不校验参数个数
@@ -63,7 +63,38 @@ func (s *fakeStmt) Exec([]driver.Value) (driver.Result, error) {
 	return driver.RowsAffected(1), nil
 }
 func (s *fakeStmt) Query([]driver.Value) (driver.Rows, error) {
+	// 可编程查询夹具（见 fakeQueryFixture）：按 SQL 文本路由返回配置行；
+	// 未命中夹具回退默认单行 id=1 行为（既有 Create/RETURNING 路径不受影响）。
+	if fakeQueryFixture != nil {
+		if cols, rows := fakeQueryFixture(s.query); cols != nil {
+			return &fakeQueryRows{cols: cols, rows: rows}, nil
+		}
+	}
 	return &fakeRows{}, nil
+}
+
+// fakeQueryFixture 可编程查询夹具（nil=默认单行 id=1 行为）：devices_resolve.go /
+// printing_content.go 的 reader 直接走 Raw SELECT（不经 Repository 接口，内存替身
+// 无法拦截）——经本钩子按 SQL 文本路由返回配置行，使 Raw 装配路径在无 PostgreSQL
+// 环境可测（ask 约束：单测不依赖真实数据库）。同包测试串行执行，无并发竞争。
+var fakeQueryFixture func(query string) (cols []string, rows [][]driver.Value)
+
+// fakeQueryRows 多列配置行（Raw SELECT 装配路径的投影承载）。
+type fakeQueryRows struct {
+	cols []string
+	rows [][]driver.Value
+	i    int
+}
+
+func (r *fakeQueryRows) Columns() []string { return r.cols }
+func (r *fakeQueryRows) Close() error      { return nil }
+func (r *fakeQueryRows) Next(dest []driver.Value) error {
+	if r.i >= len(r.rows) {
+		return io.EOF
+	}
+	copy(dest, r.rows[r.i])
+	r.i++
+	return nil
 }
 
 // fakeRows 单行单列（id=1）：支撑 RETURNING 的 Create 路径。

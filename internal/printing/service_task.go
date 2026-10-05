@@ -176,7 +176,9 @@ func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInpu
 	return &v, nil
 }
 
-// taskRows 装配结果 → 渲染数据包行（seq 1 起与入参序一致；values/lines 快照冻结）。
+// taskRows 装配结果 → 渲染数据包行（seq 1 起与入参序一致；values/lines 快照冻结；
+// DataID=行对象业务身份十进制文本（迁移 000019，qr-code.md §7.4）——重打唯一取数
+// 依据，修复 ContentRow.ID 在落库时丢失的建模缺口；旧行 data_id 为 NULL → 空串）。
 func taskRows(taskID int64, rows []ContentRow, by int64) []*PrintTaskRow {
 	out := make([]*PrintTaskRow, 0, len(rows))
 	for i, r := range rows {
@@ -186,6 +188,7 @@ func taskRows(taskID int64, rows []ContentRow, by int64) []*PrintTaskRow {
 			Code:      r.Code,
 			Values:    marshalJSONB(r.Values),
 			Lines:     marshalJSONB(r.Lines),
+			DataID:    r.ID,
 			CreatedBy: by,
 			UpdatedBy: by,
 		})

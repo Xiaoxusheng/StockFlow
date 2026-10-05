@@ -156,11 +156,13 @@ func templateView(t *PrintTemplate) TemplateView {
 }
 
 // RowView 渲染数据行（print_task_rows 读视图；id=主码内容——行身份在渲染数据包内
-// 以主码承载，print_task_rows 无业务 ID 列（000012 冻结 DDL））。
+// 以主码承载（000012 冻结 DDL）；data_id=行业务身份快照（000019，重打取数依据，
+// qr-code.md §7.4；旧行 NULL → 空串，凡空即不可自动重打——前端 fail-closed）。
 type RowView struct {
 	Seq    int                 `json:"seq"`
 	ID     string              `json:"id"`
 	Code   string              `json:"code"`
+	DataID string              `json:"data_id,omitempty"`
 	Values map[string]string   `json:"values,omitempty"`
 	Lines  []map[string]string `json:"lines,omitempty"`
 }
@@ -171,6 +173,7 @@ func rowView(r *PrintTaskRow) RowView {
 		Seq:    r.Seq,
 		ID:     r.Code,
 		Code:   r.Code,
+		DataID: r.DataID,
 		Values: r.RowValues(),
 		Lines:  r.RowLines(),
 	}

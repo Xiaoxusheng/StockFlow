@@ -575,6 +575,22 @@ func (c *fakeChecker) ExistsActive(_ context.Context, warehouseID int64) (bool, 
 	return c.exists[warehouseID], nil
 }
 
+// ---- fakeSfqrSkus：SfqrSkuReader 内存实现（qr-code.md §6 匹配器 0 替身；
+// 命中/停用/未命中/错误注入四态，仿 fakeSKUBarcodes 表驱动）----
+
+type fakeSfqrSkus struct {
+	hits map[string]Hit
+	err  error // 注入读失败（fail-closed 断言）
+}
+
+func (f *fakeSfqrSkus) FindBySkuCode(_ context.Context, code string) (Hit, bool, error) {
+	if f.err != nil {
+		return Hit{}, false, f.err
+	}
+	h, ok := f.hits[code]
+	return h, ok, nil
+}
+
 // ---- 测试环境 ----
 
 type testEnv struct {

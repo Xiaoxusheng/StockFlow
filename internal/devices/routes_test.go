@@ -28,6 +28,7 @@ func fullOptions(api *gin.RouterGroup) []namedOption {
 		{"WithBins", WithBins(&fakeBins{byCode: map[string][]Hit{}})},
 		{"WithSerials", WithSerials(&fakeSerials{hits: map[string]Hit{}})},
 		{"WithBatches", WithBatches(&fakeBatches{byNo: map[string][]Hit{}})},
+		{"WithSfqrSkus", WithSfqrSkus(&fakeSfqrSkus{hits: map[string]Hit{}})},
 		{"WithPurchaseDocs", WithPurchaseDocs(&fakeDocs{found: map[string]Hit{}})},
 		{"WithSalesDocs", WithSalesDocs(&fakeDocs{found: map[string]Hit{}})},
 		{"WithStockopsDocs", WithStockopsDocs(&fakeDocs{found: map[string]Hit{}})},
@@ -129,6 +130,7 @@ func TestRegisterRoutesFailFast(t *testing.T) {
 		{"WithWarehouseChecker", "仓库校验器未注入"},
 		{"WithDeviceAPI", "设备端挂载组未注入"},
 		{"WithSKUBarcodes", "resolve 匹配器窄接口未注入"},
+		{"WithSfqrSkus", "resolve 匹配器窄接口未注入"},
 		{"WithReturnsDocs", "resolve 匹配器窄接口未注入"},
 	}
 	for _, tc := range cases {

@@ -42,6 +42,9 @@ var (
 	ErrCopiesInvalid = response.Register("PRINT_COPIES_INVALID", "打印份数非法", http.StatusBadRequest)
 	// ErrDataNotFound 打印数据不存在（ContentReader 装配时逐对象校验，details 携带缺失 ID）。
 	ErrDataNotFound = response.Register("PRINT_DATA_NOT_FOUND", "打印数据不存在", http.StatusBadRequest)
+	// ErrDataDisabled 打印对象中存在已停用 SKU（qr-code.md §9 不可打印校验——约束 10
+	// 「商品已停用」；409 语义对齐 ErrTemplateDisabled 先例；details 携 disabled_ids）。
+	ErrDataDisabled = response.Register("PRINT_SKU_DISABLED", "打印对象中存在已停用 SKU", http.StatusConflict)
 	// ErrDataIDsInvalid 打印对象标识非法（空串/超出长度等）。
 	ErrDataIDsInvalid = response.Register("PRINT_DATA_IDS_INVALID", "打印对象标识非法", http.StatusBadRequest)
 
@@ -62,4 +65,11 @@ var (
 // 各域 printing_content.go 经本函数返回同一域内错误码，避免跨包借用或重复注册）。
 func NewDataNotFoundError(missing []string) *response.Error {
 	return response.NewError(ErrDataNotFound, map[string]any{"missing_ids": missing})
+}
+
+// NewDataDisabledError 构造停用拒绝错误（details.disabled_ids = 不可打印 SKU 编码
+// 列表——qr-code.md §9 逐条「{code}：商品已停用」；形态镜像 NewDataNotFoundError，
+// 各域 reader 经本函数返回同一域内错误码）。
+func NewDataDisabledError(disabled []string) *response.Error {
+	return response.NewError(ErrDataDisabled, map[string]any{"disabled_ids": disabled})
 }

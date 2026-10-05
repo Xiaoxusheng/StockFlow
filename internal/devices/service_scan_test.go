@@ -59,9 +59,10 @@ func (f *fakeDocs) FindByNo(_ context.Context, docNo string) (Hit, bool, error) 
 	return h, ok, nil
 }
 
-// resolveEnv 组装带全套匹配器替身的环境（data 覆盖缺省值）。
+// resolveEnv 组装带全套匹配器替身的环境（data 覆盖缺省值；sfqr 为管线第 0 段
+// 替身——qr-code.md §6，nil 则空命中表）。
 func resolveEnv(t *testing.T, sku *fakeSKUBarcodes, bins *fakeBins, serials *fakeSerials, batches *fakeBatches,
-	purchase, sales, stockops, returns *fakeDocs) *testEnv {
+	purchase, sales, stockops, returns *fakeDocs, sfqr *fakeSfqrSkus) *testEnv {
 	t.Helper()
 	if sku == nil {
 		sku = &fakeSKUBarcodes{hits: map[string]Hit{}}
@@ -87,8 +88,12 @@ func resolveEnv(t *testing.T, sku *fakeSKUBarcodes, bins *fakeBins, serials *fak
 	if returns == nil {
 		returns = &fakeDocs{found: map[string]Hit{}}
 	}
+	if sfqr == nil {
+		sfqr = &fakeSfqrSkus{hits: map[string]Hit{}}
+	}
 	return newTestEnv(t,
 		WithSKUBarcodes(sku), WithBins(bins), WithSerials(serials), WithBatches(batches),
+		WithSfqrSkus(sfqr),
 		WithPurchaseDocs(purchase), WithSalesDocs(sales), WithStockopsDocs(stockops), WithReturnsDocs(returns),
 	)
 }
@@ -110,11 +115,21 @@ func deviceIdent(e *testEnv) (ResolveIdentity, DeviceContext) {
 }
 
 // TestResolveMatcherMatrix 匹配器矩阵：类型识别/命中编码/名称（scanner.md §5.2、
-// plan §8.3 顺序冻结——doc 前缀 → SKU 条码 → 库位 → 序列号 → 批次 → UNKNOWN）。
+// plan §8.3 顺序冻结——SFQR 第 0 段 → doc 前缀 → SKU 条码 → 库位 → 序列号 → 批次
+// → UNKNOWN；SFQR 分支语义另见 qr-code.md §4/§5/§6）。
 func TestResolveMatcherMatrix(t *testing.T) {
 	sku := &fakeSKUBarcodes{hits: map[string]Hit{
 		"6901234567890": {ID: 11, Code: "SKU001", Name: "iPhone 256G", Status: "ENABLED"},
 		"BAD-SKU":       {ID: 12, Code: "SKU002", Name: "停用商品", Status: "DISABLED"},
+		// 命名空间保留的运行时保证（qr-code.md §3.2/§6）：同一字符串注册为条码，
+		// SFQR 分支优先级更高——仍走第 0 段而非条码匹配器（错误用例的不落回证据）。
+		"SFQR|1|SKU|SKU-001": {ID: 71, Code: "BAR-SKU-001", Name: "条码身份商品", Status: "ENABLED"},
+		"SFQR|2|SKU|X":       {ID: 72, Code: "BAR-SKU-002", Name: "条码身份商品2", Status: "ENABLED"},
+	}}
+	sfqr := &fakeSfqrSkus{hits: map[string]Hit{
+		"SKU-001":            {ID: 61, Code: "SKU-001", Name: "二维码商品", Status: "ENABLED"},
+		"SKU-OFF":            {ID: 62, Code: "SKU-OFF", Name: "停用商品", Status: "DISABLED"},
+		"PO-20261002-000001": {ID: 63, Code: "SKU-PO", Name: "协议优先商品", Status: "ENABLED"},
 	}}
 	bins := &fakeBins{byCode: map[string][]Hit{
 		"A-01-03-05": {{ID: 21, Code: "A-01-03-05", Name: "WH-A-A-01-03-05", WarehouseID: 1, Status: "ENABLED"}},
@@ -130,7 +145,7 @@ func TestResolveMatcherMatrix(t *testing.T) {
 		"PW-20261002-000003": {ID: 52, Code: "PW-20261002-000003", Name: "上架任务 PW-20261002-000003", WarehouseID: 1, Status: "PENDING"},
 	}}
 
-	e := resolveEnv(t, sku, bins, serials, batches, purchase, nil, nil, nil)
+	e := resolveEnv(t, sku, bins, serials, batches, purchase, nil, nil, nil, sfqr)
 	ctx := context.Background()
 	ident := userIDent()
 
@@ -147,6 +162,10 @@ func TestResolveMatcherMatrix(t *testing.T) {
 		{"库位码", "A-01-03-05", "bin", 21, "A-01-03-05"},
 		{"序列号", "SN0001", "serial", 31, "SN0001"},
 		{"批次码", "B20261001", "batch", 41, "B20261001"},
+		// SFQR 第 0 段：命中启用 SKU（响应复用 {type:"sku",id,code,name} 形态）。
+		{"SFQR命中", "SFQR|1|SKU|SKU-001", "sku", 61, "SKU-001"},
+		// 优先级高于单号前缀（qr-code.md §6）：sku_code 段即使形如单号也走 SFQR 分支。
+		{"SFQR优先于单号前缀", "SFQR|1|SKU|PO-20261002-000001", "sku", 63, "SKU-PO"},
 	}
 	for _, tc := range cases {
 		res, err := e.svc.Resolve(ctx, ident, ResolveInput{Code: tc.code})
@@ -157,16 +176,46 @@ func TestResolveMatcherMatrix(t *testing.T) {
 			t.Fatalf("%s: 期望 %s/%d/%s，得到 %s/%d/%s", tc.name, tc.wantType, tc.wantID, tc.wantCode, res.Type, res.ID, res.Code)
 		}
 	}
-	// 扫码审计：6 次成功落 6 行。
+	// 扫码审计：8 次成功落 8 行。
 	if logs, total, _ := e.svc.ListScanLogs(ctx, ScanLogFilter{UserID: 9, AllWarehouses: true}); total != int64(len(cases)) || len(logs) != len(cases) {
 		t.Fatalf("scan_logs 落库数期望 %d，得到 %d", len(cases), total)
+	}
+
+	// —— SFQR 错误矩阵（失败不落回：同串已注册为条码仍显式返回 SFQR_*，
+	// 禁止把残缺 SFQR 当普通条码静默处理——qr-code.md §5/§6）——
+	_, err := e.svc.Resolve(ctx, ident, ResolveInput{Code: "SFQR|1|SKU|SKU-OFF"})
+	assertCode(t, err, "SKU_NOT_FOUND") // 命中但停用（与条码分支同口径）
+	_, err = e.svc.Resolve(ctx, ident, ResolveInput{Code: "SFQR|1|SKU|NO-SUCH"})
+	assertCode(t, err, "SKU_NOT_FOUND") // 载荷合法但未命中
+	_, err = e.svc.Resolve(ctx, ident, ResolveInput{Code: "SFQR|2|SKU|X"})
+	assertCode(t, err, "SFQR_VERSION_UNSUPPORTED") // 未知版本明确拒绝（不降级到条码匹配器）
+	_, err = e.svc.Resolve(ctx, ident, ResolveInput{Code: "SFQR|1|BIN|A-01"})
+	assertCode(t, err, "SFQR_TYPE_UNSUPPORTED") // 预留类型显式不支持
+	_, err = e.svc.Resolve(ctx, ident, ResolveInput{Code: "SFQR|1|SKU|A|B"})
+	assertCode(t, err, "SFQR_INVALID") // 格式非法（5 段）
+
+	// scan_logs 落库含原始码与 SFQR 错误码（错误也落——errorCodeOf 通用）。
+	allLogs, _, _ := e.svc.ListScanLogs(ctx, ScanLogFilter{UserID: 9, AllWarehouses: true})
+	wantCodes := map[string]bool{
+		"SKU_NOT_FOUND": false, "SFQR_VERSION_UNSUPPORTED": false,
+		"SFQR_TYPE_UNSUPPORTED": false, "SFQR_INVALID": false,
+	}
+	for _, l := range allLogs {
+		if !l.Success {
+			wantCodes[l.ErrorCode] = true
+		}
+	}
+	for code, seen := range wantCodes {
+		if !seen {
+			t.Fatalf("scan_logs 缺 SFQR 错误码 %s", code)
+		}
 	}
 }
 
 // TestResolveDocPrefixSemantics 单据前缀语义：命中但单据不存在 → ORDER/TASK_NOT_FOUND；
 // 不可扫前缀（LED/IMP）落后续匹配器；错误码字面（scanner.md §6.1 / plan §8.3 条 6）。
 func TestResolveDocPrefixSemantics(t *testing.T) {
-	e := resolveEnv(t, nil, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 	ident := userIDent()
 
@@ -201,7 +250,7 @@ func TestResolveAmbiguity(t *testing.T) {
 			{ID: 42, Code: "B20261001", Name: "批次 B20261001（SKU002）"},
 		},
 	}}
-	e := resolveEnv(t, nil, bins, nil, batches, nil, nil, nil, nil)
+	e := resolveEnv(t, nil, bins, nil, batches, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 	ident := userIDent()
 
@@ -231,14 +280,14 @@ func TestResolveDisabledSKU(t *testing.T) {
 	sku := &fakeSKUBarcodes{hits: map[string]Hit{
 		"6901234567890": {ID: 12, Code: "SKU002", Name: "停用商品", Status: "DISABLED"},
 	}}
-	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil, nil)
 	_, err := e.svc.Resolve(context.Background(), userIDent(), ResolveInput{Code: "6901234567890"})
 	assertCode(t, err, "SKU_NOT_FOUND")
 }
 
 // TestResolveUnknownAndInvalid 全未命中/入参校验（scanner.md §6.1 UNKNOWN_BARCODE）。
 func TestResolveUnknownAndInvalid(t *testing.T) {
-	e := resolveEnv(t, nil, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 	ident := userIDent()
 
@@ -265,7 +314,7 @@ func TestResolveReaderMissing(t *testing.T) {
 // go-dev-standard：不隐藏错误）。
 func TestResolveReaderError(t *testing.T) {
 	purchase := &fakeDocs{found: map[string]Hit{}, err: errors.New("db down")}
-	e := resolveEnv(t, nil, nil, nil, nil, purchase, nil, nil, nil)
+	e := resolveEnv(t, nil, nil, nil, nil, purchase, nil, nil, nil, nil)
 	_, err := e.svc.Resolve(context.Background(), userIDent(), ResolveInput{Code: "PO-20261002-000001"})
 	if err == nil || errorCodeOf(err) == "UNKNOWN_BARCODE" {
 		t.Fatalf("读失败应透传而非按未命中: %v", err)
@@ -276,7 +325,7 @@ func TestResolveReaderError(t *testing.T) {
 // + devices.last_scan_at 挂接；Web 用户端 → user 归因、device 列空。
 func TestResolveScanLogAttribution(t *testing.T) {
 	sku := &fakeSKUBarcodes{hits: map[string]Hit{"690": {ID: 11, Code: "SKU001", Name: "x", Status: "ENABLED"}}}
-	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 	e.seedDevice("SF-SCAN-001", 2)
 
@@ -317,7 +366,7 @@ func TestResolveScanLogAttribution(t *testing.T) {
 // 降级放行"——ask"方案偏离6"）：识别结果与错误码不受影响。
 func TestResolveScanLogDegrade(t *testing.T) {
 	sku := &fakeSKUBarcodes{hits: map[string]Hit{"690": {ID: 11, Code: "SKU001", Name: "x", Status: "ENABLED"}}}
-	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil, nil)
 	e.repo.scanLogFail = true
 	ctx := context.Background()
 
@@ -335,7 +384,7 @@ func TestResolveScanLogDegrade(t *testing.T) {
 // 换页面/换来源/跨窗口 → 非重复；重复事件不抑制识别、scan_logs 照常落库。
 func TestDedupWindow(t *testing.T) {
 	sku := &fakeSKUBarcodes{hits: map[string]Hit{"690": {ID: 11, Code: "SKU001", Name: "x", Status: "ENABLED"}}}
-	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil)
+	e := resolveEnv(t, sku, nil, nil, nil, nil, nil, nil, nil, nil)
 	ctx := context.Background()
 	ident := userIDent()
 

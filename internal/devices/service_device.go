@@ -58,6 +58,7 @@ type Service struct {
 	bins         BinCodeReader
 	serials      SerialReader
 	batches      BatchReader
+	sfqrSkus     SfqrSkuReader // 管线第 0 段（qr-code.md §6）
 	purchaseDocs DocFinder
 	salesDocs    DocFinder
 	stockopsDocs DocFinder
@@ -83,6 +84,7 @@ func NewService(repo Repository, opts ...Option) *Service {
 		bins:         o.bins,
 		serials:      o.serials,
 		batches:      o.batches,
+		sfqrSkus:     o.sfqrSkus,
 		purchaseDocs: o.purchaseDocs,
 		salesDocs:    o.salesDocs,
 		stockopsDocs: o.stockopsDocs,

@@ -203,10 +203,12 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 	// 设备端 /api/devices/activate|heartbeat|self/*、/api/devices/app/versions/latest、
 	// /api/scanner/resolve 挂 deviceAPI 组（设备令牌，plan §8.2/§8.3）。
 	// resolve 匹配器 1–5 窄接口（§12.2）：单据号分派 4 域 DocFinder（docnum 冻结前缀映射）、
-	// SKU 条码/库位码/序列号/批次码各域 devices_resolve.go。
+	// SKU 条码/库位码/序列号/批次码各域 devices_resolve.go；第 0 段 SFQR 载荷查证
+	// （qr-code.md §6）复用 masterdata.NewSKUBarcodeReader——同一实现双接口。
 	devices.RegisterRoutes(protected, db, rdb,
 		devices.WithWarehouseChecker(warehouse.NewChecker(db)),
 		devices.WithSKUBarcodes(masterdata.NewSKUBarcodeReader(db)),
+		devices.WithSfqrSkus(masterdata.NewSKUBarcodeReader(db)),
 		devices.WithBins(warehouse.NewBinCodeReader(db)),
 		devices.WithSerials(inventory.NewSerialReader(db)),
 		devices.WithBatches(inventory.NewBatchReader(db)),

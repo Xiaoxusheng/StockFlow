@@ -401,6 +401,91 @@ func TestListTasks_IDExactFilter(t *testing.T) {
 	}
 }
 
+// TestCreateTask_DisabledSKURejected 装配层返回停用拒绝 → 整体拒绝原样透传
+// PRINT_SKU_DISABLED + details.disabled_ids（qr-code.md §9 不可打印校验——约束 10
+// 「商品已停用」；409 语义），不落任务不入队。
+func TestCreateTask_DisabledSKURejected(t *testing.T) {
+	env := newTestEnv(t)
+	tpl := env.seedTemplate(t, ObjectSKULabel, true)
+	env.reader.err = NewDataDisabledError([]string{"SKU-OFF"})
+
+	_, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+		TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"},
+	})
+	de := asPrintErr(t, err, "PRINT_SKU_DISABLED")
+	details, ok := de.Details.(map[string]any)
+	if !ok {
+		t.Fatalf("停用错误必须带 details.disabled_ids: %+v", de.Details)
+	}
+	disabled, ok := details["disabled_ids"].([]string)
+	if !ok || len(disabled) != 1 || disabled[0] != "SKU-OFF" {
+		t.Fatalf("disabled_ids 不符: %+v", details["disabled_ids"])
+	}
+	if len(env.queue.all()) != 0 {
+		t.Fatalf("装配拒绝不得入队")
+	}
+}
+
+// TestTaskRowDataID_PersistedAndReadBack 行业务身份快照（迁移 000019，qr-code.md
+// §7.4）：CreateTask 落库行 data_id=装配行 ID；详情回读一致；旧行 NULL → 空串
+// （凡空即前端 fail-closed 不可自动重打）。
+func TestTaskRowDataID_PersistedAndReadBack(t *testing.T) {
+	env := newTestEnv(t)
+	tpl := env.seedTemplate(t, ObjectSKULabel, true)
+	env.reader.rowsByID["42"] = ContentRow{ID: "42", Code: "BC-42"}
+	env.reader.rowsByID["43"] = ContentRow{ID: "43", Code: "BC-43"}
+
+	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+		TemplateID: tpl.ID.Int64(), DataIDs: []string{"42", "43"},
+	})
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	taskID := mustParse(t, view.ID)
+	detail, err := env.svc.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("详情失败: %v", err)
+	}
+	if detail.Rows[0].DataID != "42" || detail.Rows[1].DataID != "43" {
+		t.Fatalf("data_id 持久化/回读不符: %+v", detail.Rows)
+	}
+	// 模拟 000019 之前的旧行（data_id NULL → 空串）。
+	env.repo.rows[taskID][0].DataID = ""
+	detail, err = env.svc.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("旧行详情失败: %v", err)
+	}
+	if detail.Rows[0].DataID != "" {
+		t.Fatalf("旧行 data_id 应为空串: %+v", detail.Rows[0])
+	}
+}
+
+// TestListHistory_TemplateIDFilter 历史按模板筛选（只加查询参数不加端点——
+// qr-code.md 闭环；命中/过滤空两例）。
+func TestListHistory_TemplateIDFilter(t *testing.T) {
+	env := newTestEnv(t)
+	tplA := env.seedTemplate(t, ObjectSKULabel, true)
+	tplB := env.seedTemplate(t, ObjectBinLabel, true)
+	ctx := context.Background()
+	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC1"}
+	for _, tpl := range []*PrintTemplate{tplA, tplB} {
+		view, err := env.svc.CreateTask(ctx, actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
+		if err != nil {
+			t.Fatalf("创建失败: %v", err)
+		}
+		if _, err := env.svc.ExecuteTask(ctx, actor(), mustParse(t, view.ID), ExecuteInput{Result: ResultSuccess}); err != nil {
+			t.Fatalf("确认失败: %v", err)
+		}
+	}
+
+	if _, total, _ := env.svc.ListHistory(ctx, TaskFilter{Page: 1, PageSize: 20, TemplateID: tplA.ID.Int64()}); total != 1 {
+		t.Fatalf("模板 A 筛选应命中 1 条，得到 %d", total)
+	}
+	if _, total, _ := env.svc.ListHistory(ctx, TaskFilter{Page: 1, PageSize: 20, TemplateID: 999}); total != 0 {
+		t.Fatalf("不存在模板应过滤为空，得到 %d", total)
+	}
+}
+
 // ---- render handler 状态机（QUEUED→PROCESSING→SUCCESS/FAILED，plan §4.2/§13.2）----
 
 func renderPayloadBytes(printNo string) []byte {

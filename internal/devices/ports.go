@@ -72,6 +72,16 @@ type BatchReader interface {
 	FindBatch(ctx context.Context, batchNo string) ([]Hit, error)
 }
 
+// SfqrSkuReader SFQR 载荷 SKU 读取（resolve 管线第 0 段——docs/qr-code.md §6；
+// 实现 masterdata/devices_resolve.go：skus.code 精确命中 JOIN products，双
+// deleted_at IS NULL 对齐 FindByBarcode 口径。沿 plan §12.2「新增匹配 = 接口 +
+// 实现 + Option + 装配」四点模式）。
+type SfqrSkuReader interface {
+	// FindBySkuCode 按 SKU 编码取命中；found=false 表示未命中/软删
+	// （Hit.Status 携带 SKU 启用位，停用由消费方转 SKU_NOT_FOUND）。
+	FindBySkuCode(ctx context.Context, code string) (Hit, bool, error)
+}
+
 // docPrefixOwners 单据前缀 → DocFinder 槽位单一冻结映射（plan §8.3 条 1/§12.2：
 // purchase=IN/PO/QC/RC/PW、sales=SO/OUT/PK/CH/BP/SH、stockops=TR/CK、returns=RT/EX；
 // LED/ADJ 不可扫（M1 存量前缀承接），IMP/EXP/PT 为任务号不可扫——均不入本表，
@@ -105,6 +115,7 @@ type options struct {
 	bins         BinCodeReader
 	serials      SerialReader
 	batches      BatchReader
+	sfqrSkus     SfqrSkuReader
 	purchaseDocs DocFinder
 	salesDocs    DocFinder
 	stockopsDocs DocFinder
@@ -130,6 +141,10 @@ func WithSerials(r SerialReader) Option { return func(o *options) { o.serials = 
 
 // WithBatches 注入批次码读取实现（router 装配：inventory.NewBatchReader）。
 func WithBatches(r BatchReader) Option { return func(o *options) { o.batches = r } }
+
+// WithSfqrSkus 注入 SFQR 载荷 SKU 读取实现（router 装配：masterdata.NewSKUBarcodeReader——
+// 同一实现双接口，qr-code.md §6；必需——缺位启动期 panic，plan §3.1 规则①）。
+func WithSfqrSkus(r SfqrSkuReader) Option { return func(o *options) { o.sfqrSkus = r } }
 
 // WithPurchaseDocs 注入采购/入库域单据读取（IN/PO/QC/RC/PW）。
 func WithPurchaseDocs(r DocFinder) Option { return func(o *options) { o.purchaseDocs = r } }

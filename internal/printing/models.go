@@ -270,9 +270,10 @@ func (t *PrintTask) Snapshot() TemplateSnapshot {
 	return s
 }
 
-// PrintTaskRow 打印任务行（迁移 000012 print_task_rows；渲染数据包——
+// PrintTaskRow 打印任务行（迁移 000012 print_task_rows + 000019 data_id 列；渲染数据包——
 // code=主码内容（SKU 条码/库位编码/箱码/托盘码/单据号），values=字段绑定取值快照，
-// lines=单据明细行。重投递整体重写覆盖，装配为纯函数幂等（plan §7.2））。
+// lines=单据明细行，data_id=行业务身份快照。重投递整体重写覆盖，装配为纯函数幂等
+// （plan §7.2））。
 type PrintTaskRow struct {
 	ID        database.ID       `gorm:"primaryKey;autoIncrement" json:"id"`
 	TaskID    int64             `gorm:"column:task_id" json:"task_id"`
@@ -280,6 +281,7 @@ type PrintTaskRow struct {
 	Code      string            `gorm:"column:code;size:255" json:"code"`
 	Values    jsonb             `gorm:"column:values;type:jsonb" json:"values"`
 	Lines     jsonb             `gorm:"column:lines;type:jsonb" json:"lines"`
+	DataID    string            `gorm:"column:data_id;size:64" json:"data_id"`
 	CreatedAt database.JSONTime `gorm:"column:created_at" json:"created_at"`
 	UpdatedAt database.JSONTime `gorm:"column:updated_at" json:"updated_at"`
 	CreatedBy int64             `gorm:"column:created_by" json:"created_by"`

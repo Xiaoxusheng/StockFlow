@@ -258,6 +258,8 @@ func TestCreateSKUProductGuards(t *testing.T) {
 		{"列表内条码重复", SKUCreateInput{Code: "SKU-X", ProductID: pid,
 			Barcodes: []BarcodeInput{{Barcode: "B1"}, {Barcode: " B1 "}}}, "COMMON_INVALID_PARAM"},
 		{"条码为空", SKUCreateInput{Code: "SKU-X", ProductID: pid, Barcodes: []BarcodeInput{{Barcode: "  "}}}, "COMMON_INVALID_PARAM"},
+		{"条码保留SFQR协议前缀", SKUCreateInput{Code: "SKU-X", ProductID: pid,
+			Barcodes: []BarcodeInput{{Barcode: "SFQR|1|SKU|X"}}}, "COMMON_INVALID_PARAM"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -320,6 +322,12 @@ func TestUpdateSKUReplaceBarcodes(t *testing.T) {
 	self := []BarcodeInput{{Barcode: "NEW-1", IsPrimary: true}, {Barcode: "NEW-2"}}
 	_, err = svc.UpdateSKU(t.Context(), testActor(7), sid, SKUUpdateInput{Barcodes: &self})
 	require.NoError(t, err)
+
+	// 更新路径同样拒绝 SFQR 协议保留前缀（qr-code.md §3.2 命名空间保留——
+	// Create/Update 两调用点经 buildBarcodes 同一函数全覆盖）。
+	sfqr := []BarcodeInput{{Barcode: "SFQR|1|SKU|X"}}
+	_, err = svc.UpdateSKU(t.Context(), testActor(7), sid, SKUUpdateInput{Barcodes: &sfqr})
+	require.Equal(t, "COMMON_INVALID_PARAM", codeOf(t, err))
 }
 
 func TestUpdateSKUFlagsAndNotFound(t *testing.T) {

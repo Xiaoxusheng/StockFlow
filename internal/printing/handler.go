@@ -422,13 +422,24 @@ func (h *handler) listHistory(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	items, total, err := h.svc.ListHistory(c.Request.Context(), TaskFilter{
+	f := TaskFilter{
 		Keyword:    c.Query("keyword"),
 		ObjectType: c.Query("object_type"),
 		Status:     "", // 历史不看 render 态
 		Result:     resultFilter(c),
 		Page:       page, PageSize: pageSize,
-	})
+	}
+	if v := c.Query("template_id"); v != "" {
+		// 模板筛选（打印历史只加查询参数不加端点——qr-code.md 闭环；非正整数字符串
+		// 按参数错误，对齐 listTasks id 过滤先例）。
+		id, err := strconv.ParseInt(v, 10, 64)
+		if err != nil || id <= 0 {
+			response.Err(c, paramError("template_id", "必须为正整数字符串"))
+			return
+		}
+		f.TemplateID = id
+	}
+	items, total, err := h.svc.ListHistory(c.Request.Context(), f)
 	if err != nil {
 		response.Err(c, err)
 		return
