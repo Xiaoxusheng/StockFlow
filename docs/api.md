@@ -667,3 +667,31 @@ shelf_id 过滤为已修复项非缺口——零端点零改动，既有导出�
    菜单项（config/menu.tsx，码 purchase:view / sales:view）与 lazy import 三件未接线，
    页面不可达——后端 6 端点已交付且实测 200（routes.go:103-108）。属 web/ 范围，
    后端批次硬性禁改，移交收口位/前端批次完成"四件套"接线。
+
+### 2026-10-06 库存层级分布端点补齐（GET /api/inventory/{id}/distribution——前端先行契约 backend 交付）
+
+```text
+GET /api/inventory/{id}/distribution   库存层级分布树（frontend.md §10.4；库存详情页
+                             『库存分布』页签前端先行契约的后端补齐，前端
+                             StockDistributionNode 形状零变更）。path id=库存行 id
+                             （GET /api/inventory/{id} 的 :id）；语义=按该行 SKU 聚合
+                             其在数据权限范围内所有仓库的 仓库→库区→库位 三层分布
+                             （详情页头部为行维度五指标，本页签回答"该 SKU 的库存在
+                             哪里"）。响应 data=StockDistributionNode[]：warehouse 层
+                             {warehouse_code,warehouse_name,total_qty,available_qty,
+                             children}；zone 层 +zone_code；bin 层 +bin_code——编码
+                             有无即层级标记，中间层回填 warehouse_code（前端 nodeKey
+                             三段拼接依赖）；同库位多批次行在库位叶聚合（分布维度不含
+                             批次，批次口径由批次页签承载）；零量行（total_qty=0）不进
+                             树；排序按 仓库/库区/库位编码。权限
+                             inventory:inventory:list（§5.4.1 该资源冻结仅 list 动作，
+                             与详情同码）；数据权限 Scope 仓库集强制收敛（拒绝前端传入
+                             范围参数）；入口行不存在或行仓库越权 → 404
+                             COMMON_NOT_FOUND（fail-closed 与详情同口径），SKU 无正数
+                             库存行 → data=[]（前端空态"该 SKU 当前在所有仓库均无库存"）。
+                             实现：internal/inventory{handler.go getStockDistribution /
+                             query.go GetStockDistribution+buildStockDistributionTree(纯
+                             函数,单测 distribution_test.go) / repository.go
+                             stockDistribution(单查询 LEFT JOIN warehouses/zones/bins 只
+                             读取编码)}；routes_test 冻结端点集同步；swag 已重生成。
+```

@@ -249,6 +249,9 @@ Dashboard
 - 主题映射（App.tsx Table 组件 token，值源 tokens.css `--sf-table-*`）：表头文字 `--sf-table-header-text`（比正文弱一档）、hover 行 `--sf-surface-hover`、选中行=主题色低透明（alpha 0.04~0.08，禁止整行深蓝）。
 - 统一单元格（web/src/components/table/cells.tsx）：`NumberCell`（数字+tabular-nums，配合列 align:'right'）、`CodeCell`（编码 ellipsis+Tooltip+hover 显复制，Toast「已复制 xx」）、`ProductCell`（主名 500 字重+弱化编码双行）、`DateCell`（统一时间次要色）。
 - 操作列形态：高频动作 ≤2 个 link 按钮 + 「更多 ▾」Dropdown；删除永远在更多内且 danger；整列可见按钮（含更多）≤3 个；fixed:'right'（有横向滚动时）+ nowrap。参照 SkuListPage buildRowMenu 先例。
+- 操作列色彩层级（双色）：首个动作（编辑/详情等 link 按钮）保持链接主色（= 品牌主色，App.tsx `colorLink` 显式对齐，antd 缺省取 `colorInfo` 青蓝已废弃）；其后次级动作（停用/更多/记录等非 danger link）一律中性次要色（global.css 作用域规则，hover/按压加深为正文色）——「更多」下拉触发统一 `aria-label="更多操作"`（含 icon-only）无论位置恒为中性。主次分明，danger 红色语义不变。
+- 表格默认全边框：SfTable `bordered` 默认开启（外框+内格线，颜色走 antd `colorBorderSecondary`，App.tsx 已映射 `--sf-border` 同值，Dark 自适应）；页面传 `bordered={false}` 可回退无边框形态。
+- 横向滚动阈值自适应：全部可见列均显式声明 width 时，SfTable 自动按「列宽总和+10」推导 `scroll.x`——表格经 min-width:100% 撑满容器，仅内容真实放不下才出横向滚动条（能不出现就不出现）；页面声明的 `scrollX` 仅在存在未声明 width 的弹性列时作宽度预留，列设置隐藏列后阈值随可见列收缩。列宽声明应贴近内容自然宽度（反例：仓库列表曾虚高至 1480 致常规视口必出滚动条，已收紧至 1320）。
 - 筛选状态提示：SfSearchForm 提交后显示「已筛选 N 项 · 清除全部」（弱化行，重置归零）。
 
 ### 6.3 列表工具栏

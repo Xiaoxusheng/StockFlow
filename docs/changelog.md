@@ -14,6 +14,62 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：库存层级分布端点交付（GET /api/inventory/{id}/distribution——前端先行契约补齐，库存详情『库存分布』页签点亮）
+
+- **背景**：库存详情页『库存分布』页签为前端先行契约（frontend.md §10.4），此前呈统一错误态（页内文案「接口尚未交付」）。本批后端补齐，前端契约形状零变更（web/src/api/inventory.ts StockDistributionNode 逐字段回对）。
+- **端点语义**：path id=库存行 id；按该行 SKU 聚合其在数据权限范围内所有仓库的 仓库→库区→库位 三层分布树（详情页头部为行维度五指标，页签回答"该 SKU 的库存在哪里"）。同库位多批次行在库位叶聚合（分布维度不含批次）；零量行（total_qty=0）不进树；排序按 仓库/库区/库位编码。权限 inventory:inventory:list（§5.4.1 冻结该资源仅 list 动作，与详情同码）；Scope 仓库集强制收敛（拒绝前端范围参数）；入口行不存在/越权 → 404 fail-closed（与详情同口径）；SKU 无正数库存行 → data=[]（前端空态"该 SKU 当前在所有仓库均无库存"）。
+- **实现**：internal/inventory/{repository.go stockDistribution（单查询 LEFT JOIN warehouses/zones/bins 只读取编码；LEFT JOIN 保悬挂引用不丢行）+ query.go GetStockDistribution / buildStockDistributionTree（纯函数组树：同 bin 两批聚合，Warehouse→Zone→Bin 三层）+ handler.go getStockDistribution}；inventory.go 路由与冻结注释同步；handler_test.go 权限冻结路径表补 `/api/inventory/1/distribution`；新增 distribution_test.go（组树纯函数单测：多仓多区多库位聚合/同库位两批聚合/判层编码契约/空输入返回空切片非 null）。
+- **验证**：`go build/vet/test ./...` 24 包全绿（含新单测）；swag 重生成；后端重建重启（dev-environment.md ③ 文档化环境变量拉起）后 API 实测——单仓树形正确（WH-D01 12 → ZD01-STORE → S-01-11）、多库位聚合正确（SKU 9407：演示一号仓 220=S-01-22 100+S-02-11 120 + 演示二号仓 60）、404 路径 COMMON_NOT_FOUND；浏览器端到端——『库存分布』页签渲染真实两仓根节点（220/60），点击下钻库区层正常。前端门禁：StockDetailPage eslint 清洁、build 通过（顺带删除页内「接口尚未交付」过时文案与注释）。
+- **口径披露**：bin 层聚合跨批次数量；分布树总量=total_qty 求和且剔除零量行（与行维度详情五指标不冲突，后者是单行快照）；悬挂引用行为=空编码展示（不丢行不静默扣数）。
+- 影响范围：internal/inventory/{repository,query,handler,inventory}.go、internal/inventory/distribution_test.go(新)、internal/inventory/handler_test.go、apidocs/*（swag 重生成）、web/src/views/inventory/StockDetailPage.tsx、docs/{api.md §9 新节,changelog.md}。后端已重建重启（8080）；改动未提交（留提交阶段）。
+
+## [2026-10-06] 修复：「发起移库」按钮与筛选同行——SfSearchForm 新增 extraActions 尾部动作插槽
+
+- **现象**：库存转移页「发起移库」原挂在 SfTable 工具栏 actions，位于搜索表单下一行，单独占行显得割裂（用户反馈）。
+- **修复**：SfSearchForm 新增 `extraActions?: ReactNode` 尾部动作插槽（渲染在查询/重置按钮之后同一 Flex 行，通用能力——其他页面的同类业务主操作也可复用）；TransferPage「发起移库」（含 canMove 权限 fail-closed）从 SfTable actions 移入 extraActions。
+- 门禁：tsc/eslint 过；浏览器实测 /inventory/transfers 1680 宽——四个筛选字段 + 查询/重置/发起移库（主色）同一行。
+- 影响范围：web/src/components/table/SfSearchForm.tsx、web/src/views/inventory/TransferPage.tsx、docs/changelog.md。改动未提交（留提交阶段）。
+
+## [2026-10-06] 功能：全站图表内核换 ECharts + 库位地图修复（GORM 未导出嵌入）+ 库位/货架信息补列 + 搜索框收紧
+
+- **①图表内核换 ECharts（用户明确指示，docs/frontend.md §31 基线随本条更新）**：`npm i echarts@^6.1.0`、卸载 `@ant-design/plots`。`SfChart` 内核重写（echarts/core 按需注册 Line/Bar/Pie + Grid/Tooltip/Legend + CanvasRenderer；setOption notMerge 整体替换；ResizeObserver→resize；reduced-motion 动画关闭；dispose 清理）。关键架构：**双层容器**——外层 React 管理三态覆盖层（Skeleton/SfError/SfEmpty），内层专用 div 归 echarts（首版单容器曾被 echarts 直接改 DOM 致 React removeChild 崩溃）。六个业务组件 build 函数全部重写为 echarts option（组件 Props 契约不变，页面零改动）；横向排行用 echarts 天然「yAxis 类目反转 + xAxis 数值」——G2 transpose 轴义反转问题连根消除；**SfGaugeChart 删除**（无消费方）；库存趋势 X 轴日期横向稀疏排布（echarts interval auto），竖排时间问题随之消失。echarts chunk 559KB（gzip 191KB）独立分包。
+- **②库位地图空白修复（牵连多处的历史性 bug）**：GORM v1.31.2 对**未导出类型的匿名嵌入**不展开字段——warehouse 包 `baseCols`（zones/shelves 共用）的 ID/CreatedAt/UpdatedAt 等在 schema 解析中被整体吞掉，shelves 列表 id 恒为 "0"（货架编辑/停用按钮实际全部失效）、库位地图聚合按 shelf_id 关联失败恒空。修复：`baseCols` → `BaseCols` 导出（探针实验闭环：平铺字段 ✓ / 导出嵌入 ✓ / 未导出嵌入 ✗）；全仓扫描确认仅此一处未导出嵌入模型。
+- **③库位列表补"存放物料"列**：后端 ListBins 装配本页 ids 的存量聚合（binStockAggregates：inventory 表 COUNT(DISTINCT sku)/SUM(total_qty)；binStockFirstSkuNames：DISTINCT ON 取量最大 SKU 名，JOIN skus/products 过滤软删——reports 跨域 SQL 直连同口径；fakeRepo 补桩）。前端"存放物料"列：主 SKU 名（xN 种）+ 共总量，空位显示弱化 "-"。
+- **④货架列表补"所属仓库/所属库区"列**：全量 zones 查询 + warehouseOptions 建 id→名称映射，弱化次要色呈现。
+- **⑤搜索框收紧**：SfSearchForm 字段 flex 240→190px、maxWidth 360→260px、minWidth 200→160px——多字段筛选在常规屏宽下保持同行。
+- 门禁：go build/vet/test 全绿（warehouse 包含 fakeRepo 补桩）；tsc/eslint 过；npm run build ✓（SfChart 独立 chunk）。浏览器实测：Dashboard（KPI 迷你线/趋势/环形/柱状/排行）、销售分析三图、库位地图（WH-D02 2 区 4 货架）、库位存量聚合（REEL-01-11 → 贴片电阻 0402 共 30）。
+- 影响范围：web/package.json（+echarts -@ant-design/plots）、web/src/components/charts/*（内核+6 组件重写）、web/src/components/table/SfSearchForm.tsx、web/src/views/warehouse/{ShelfListPage,BinListPage}.tsx、web/src/api/warehouse.ts、internal/warehouse/{models.go,repository.go,service_location.go,dto.go,fakerepo_test.go}、docs/changelog.md。后端已重建重启；改动未提交（留提交阶段）。
+
+## [2026-10-06] 修复：表格横向滚动条「能不出现就不出现」——SfTable scroll.x 自适应 + 仓库列表列宽虚高收紧
+
+- **现象（用户反馈）**：仓库列表视口 ~1390 内容区下恒出横向滚动条（滚动量仅 ~90px，观感「没必要」）；货架列表同屏无滚动条。
+- **根因两层**：① 页面声明的 `scrollX` 普遍虚高于列宽总和（机动余量 80~200，全站扫描：Alerts +200/Ledger +180/Serial +160 等），而 antd 以 `scroll.x` 为溢出阈值——声明虚高 = 视口本可容纳时提前出滚动条；② 仓库列表列宽本身总和 1480（地址 200/名称 160/更新时间 160 等普遍宽松），超过常规 1390~1440 内容区。
+- **修复**：① SfTable 新增 scroll.x 自适应——全部可见列均显式声明 width 时按「列宽总和+10」自动推导（min-width:100% 保证宽屏撑满容器，仅真实放不下才出滚动条；列设置隐藏列后阈值随可见列实时收缩）；存在未声明 width 的弹性列时仍用声明值（预留语义不变）。② WarehouseListPage 十二列收紧 1480→1320（编码 120→110/名称 160→130/类型 90→80/面积·容量 100→90/地址 200→170/联系人 90→80/电话 130→120/仓管员 110→90/更新时间 160→150/操作 130→120；省略号列略窄零内容损失），scrollX 1490→1330 对齐约定。
+- **验证**：浏览器实测——仓库列表 1600×900 视口（内容区 ~1350）无横向滚动条、窄屏仍可横向滚动（固定列工作正常）；货架/库区列表回归无变化；lint 0 错误（1 既有 warning）、tsc + vite build 通过。
+- 影响范围：web/src/components/table/SfTable.tsx、web/src/views/warehouse/WarehouseListPage.tsx、docs/{frontend.md §6.2,changelog.md}。改动未提交（留提交阶段）。备注：声明虚高的其余页面（Alerts/Ledger/Serial 等）由①自动受益，无需逐页改。
+
+## [2026-10-06] 修复：货架页全量库区清单 pageSize=500 超后端上限恒 400「请求参数错误」+ 库区编辑链路复核
+
+- **根因（access log 实证）**：ShelfListPage 全量库区映射查询 `zoneApi.list({ page: 1, pageSize: 500 })`（唯一写死超限的调用方），超出后端 `ParsePage` 上限 `MaxPageSize=100`（response.go:47，M1 起即如此）——每次进入货架管理页该查询恒 400 COMMON_INVALID_PARAM「请求参数错误」（React Query 重试再 400 一次；2026-10-05 23:57:38/39 两条 warn 实录），「所属库区」列退化为裸 ID。全站其余取数均已走 `OPTIONS_PAGE_SIZE=100`/`MAX_PAGE_SIZE=100` 约定（rbac/masterdata/options/printing 五处常量实证），仅此一处违规。
+- **修复**：改为 `pageSize: OPTIONS_PAGE_SIZE`（100，对齐后端上限；超 100 条的库区名映射按既有约定降级为仅前 100 条，全站选项取数同口径），注释补双端上限依据。修复后实测：`GET /api/zones?page=1&pageSize=100 → 200`（access log 00:08/00:10 两条），货架页「所属库区」列恢复「存储区（ZD01-STORE）」渲染。
+- **库区编辑链路复核（用户报告编辑抽屉「请求参数错误」，如实）**：当前运行实例上端到端复测通过——打开抽屉 GET /api/zones/9112 200 → 保存 PUT（body `{code,name,zone_type,capacity}` 与 dto.go ZoneUpdateInput 逐字段一致）200 → 列表 refetch 200（access log 23:55/23:56 实录，含真实 UI 点击路径）。用户浏览器（Chrome/153 UA）在当前实例日志窗口（23:52:01 起）内无任何 zones 详情/PUT 请求、仅上述两条 pageSize=500 400——其截图所示抽屉报错发生于 23:52 重启前的旧实例（日志已滚动不可考）或即本条货架页 400 的同文案错位感知；旧实例 warehouse 契约与现行代码一致（dto.go/response.go 自 M1 0d8fe22 零变更），确切根因不可再现。结论：现行代码编辑链路无缺陷，请用户重试；若复现按时间点拉 access log 定位。
+- 门禁：lint 0 错误（1 条既有 warning）、tsc + vite build 通过（首次构建报 Text 类型瞬态错误，零改动重跑两次均绿——tsc -b 增量缓存与 dev server 并行竞态，未复现）。
+- 影响范围：web/src/views/warehouse/ShelfListPage.tsx、docs/changelog.md。改动未提交（留提交阶段）。
+
+## [2026-10-05] 修复：操作列双色层级未覆盖平铺按钮页 + 链接色青蓝改品牌主色（复核反馈轮）
+
+- **链接色「不高级」根因**：antd `colorLink` 缺省取 `colorInfo`，App.tsx 只映射了 `colorInfo: #0891b2`（--sf-info 青蓝）——全站文字链接/操作列 link 按钮因此呈青蓝色，与主按钮 #2563eb 异色割裂。修复：App.tsx token 显式新增 `colorLink: dark ? '#4c7ef0' : '#2563eb'`（复用主色双档，不新增色板；Dark 对 #171b21 底对比 ≈4.6:1 达 AA）。`colorInfo` 语义不变（信息色仍青蓝）。
+- **「有的没改」根因**：上一轮次级动作中性色规则仅按 `aria-label='更多操作'` 匹配——库区管理等「编辑+停用」平铺双按钮页（无「更多」下拉）未覆盖。修复：global.css 规则泛化为层级制——首个动作保持链接主色，其后非 danger link 一律中性次要色（`.ant-space-item:not(:first-child)` 定位 Space 包裹结构 + 平铺 fragment 直子结构两条选择器，antd 6 Space 渲染 `.ant-space-item` 包裹实测）；`aria-label='更多操作'` 规则保留（icon-only/任意位置恒中性）。danger 红、行 hover 渐显不受影响。
+- 验证：浏览器实测（dev 5173 实例）——库区管理页 编辑=#2563eb / 停用=#64748b，库位管理页 编辑=#2563eb / 更多=#64748b，Dark 两页链接=#4c7ef0 / 次级=rgba(255,255,255,0.6)；lint 0 错误、build 通过（详见会话门禁记录）。
+- 影响范围：web/src/App.tsx、web/src/styles/global.css、docs/{frontend.md §6.2,changelog.md}。改动未提交（留提交阶段）。
+
+## [2026-10-05] 优化：表格默认全边框 + 操作列「更多」中性色双色层级（SfTable 全站生效）
+
+- **表格默认边框**：SfTable 新增 `bordered` prop（默认 `true`）——外框+内格线全边框，颜色走 antd `colorBorderSecondary`（App.tsx 已映射 #e5e7eb / Dark rgba(255,255,255,0.08)，随主题自适应）；页面可传 `bordered={false}` 回退无边框形态。全站 66 个 SfTable 消费文件零改动自动生效（views 现存 `bordered` 用法均为 antd Descriptions，与本次无冲突）。
+- **操作列双色层级**：「更多」下拉触发（全站 10 页统一 `aria-label="更多操作"`，含 UserListPage icon-only 形态）在操作列内以中性次要色呈现（`--sf-text-secondary`，hover/按压加深为 `--sf-text`），主操作（编辑/详情等 link 按钮）保持主题色——主次分明；danger 红色语义、行 hover 渐显均不受影响；Dark 随 token 自适应。落点为 global.css 作用域规则（`.sf-table .sf-table-actions-cell` 内 `ant-btn-link[aria-label='更多操作']`），页面零改动；后续新增页面「更多」触发沿用同一 aria-label 即自动生效。
+- 文档：frontend.md §6.2 补「操作列色彩层级（双色）」「表格默认全边框」两条。
+- 影响范围：web/src/components/table/SfTable.tsx、web/src/styles/global.css、docs/{frontend.md,changelog.md}。改动未提交（留提交阶段）。
+
 ## [2026-10-05] 终局：缺失接口补齐轮收口——16 个新端点清单/口径要点/前端全量点亮/门禁全绿入册（交付提交位）
 
 - **新端点清单（16 个，均 internal/reports 实现并挂载、routes_test 冻结端点集同步、swag 重生成；请求/响应形状与口径全录 docs/api.md §1 + §9「分析卡片轮」「平台批」「收口披露」三节）**：聚合分析批 14——GET /api/inventory/sku-top、/api/inventory/turnover-trend、/api/reports/flow-trend（report-flowstats-trend-cap 销项）、/api/inbounds/status-composition、/api/inbounds/supplier-rank、/api/outbounds/completion-rate、/api/outbounds/product-rank、/api/warehouses/workload、/api/purchases/analytics/trend、/api/purchases/supplier-rank、/api/purchases/status-composition、/api/sales/analytics/trend、/api/sales/product-rank、/api/sales/status-composition；平台批 2——GET /api/workbench/summary、GET /api/tasks。
