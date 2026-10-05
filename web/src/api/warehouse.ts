@@ -181,6 +181,10 @@ export interface BinItem {
   status: string
   created_at?: string
   updated_at?: string
+	/** 存量展示聚合（ListBins 装配）：非零存量 SKU 数 / 总量 / 首个（量最大）SKU 名 */
+	stock_sku_count: number
+	stock_total_qty: number
+	stock_sku_name: string
 }
 
 /** 创建库位（dto.go:204-215：shelf_id 层级锚点 binding:required；zone_id/warehouse_id 可选交叉校验；

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Spin } from 'antd'
+import { useMemo, useState } from 'react'
+import { Alert, Button, Card, Drawer, Form, Input, InputNumber, Popconfirm, Select, Space, Spin, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -15,6 +15,9 @@ import {
   type ShelfUpdatePayload,
   type WarehouseSpaceId,
 } from '@/api/warehouse'
+// 全量取数走 OPTIONS_PAGE_SIZE=100——后端 ParsePage 上限 MaxPageSize=100（response.go:47），
+// 超 100 直接 400 COMMON_INVALID_PARAM（2026-10-05 货架页 pageSize=500 实测 400）
+import { OPTIONS_PAGE_SIZE } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
@@ -23,6 +26,8 @@ import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { formatDateTime, formatNumber } from '@/utils/format'
+
+const { Text } = Typography
 
 const SEARCH_FIELDS: SearchField[] = [
   { name: 'keyword', label: '关键词', control: 'input', placeholder: '货架编码' },
@@ -100,6 +105,28 @@ export default function ShelfListPage() {
       ? { ...field, options: warehouseOptions.map((o) => ({ label: o.label, value: String(o.value) })) }
       : field,
   )
+
+  // 全量库区清单（列表「所属库区」列映射 zone_id → 名称/编码；pageSize 对齐后端上限 100，
+  // 超出部分按既有约定降级为仅前 100 条映射——全站选项取数同口径）
+  const allZonesQuery = useQuery({
+    queryKey: ['warehouse', 'zones', 'all-for-map'],
+    queryFn: () => zoneApi.list({ page: 1, pageSize: OPTIONS_PAGE_SIZE }),
+    staleTime: 60_000,
+  })
+  const zoneNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const z of allZonesQuery.data?.items ?? []) {
+      map.set(String(z.id), `${z.name}（${z.code}）`)
+    }
+    return map
+  }, [allZonesQuery.data])
+  const warehouseNameById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const o of warehouseOptions) {
+      map.set(String(o.value), o.label)
+    }
+    return map
+  }, [warehouseOptions])
 
   const [form] = Form.useForm<ShelfFormValues>()
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -218,6 +245,28 @@ export default function ShelfListPage() {
 
   const columns: ColumnsType<ShelfItem> = [
     ...COLUMNS,
+    {
+      title: '所属仓库',
+      key: 'warehouse_name',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => (
+        <Text type="secondary" ellipsis style={{ maxWidth: 160 }}>
+          {warehouseNameById.get(String(record.warehouse_id)) ?? record.warehouse_id}
+        </Text>
+      ),
+    },
+    {
+      title: '所属库区',
+      key: 'zone_name',
+      width: 180,
+      ellipsis: true,
+      render: (_, record) => (
+        <Text type="secondary" ellipsis style={{ maxWidth: 160 }}>
+          {zoneNameById.get(String(record.zone_id)) ?? record.zone_id}
+        </Text>
+      ),
+    },
     {
       title: '操作',
       key: 'actions',

@@ -22,13 +22,15 @@ export interface SfSearchFormProps {
   loading?: boolean
   /** ≥4 个字段时默认折叠，展开按钮控制 */
   collapsible?: boolean
+  /** 尾部动作区（如「发起移库」等业务主操作）：与查询/重置同行渲染，避免按钮单独换行 */
+  extraActions?: ReactNode
 }
 
 /**
  * 统一查询表单（frontend.md §6.3）。
  * 非受控实现：提交时把值交给页面状态，页面据此触发 usePagedList 请求。
  */
-export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible = fields.length >= 5 }: SfSearchFormProps) {
+export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible = fields.length >= 5, extraActions }: SfSearchFormProps) {
   const [form] = Form.useForm()
   const collapsed = useWatch('collapsed', form) ?? collapsible
   // 任务书 §50：已生效筛选条件数——只在用户提交后增长，如实反映当前过滤状态
@@ -63,7 +65,7 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
             key={field.name}
             name={field.name}
             label={field.label}
-            style={{ marginBottom: 0, flex: '1 1 240px', maxWidth: 360, minWidth: 200 }}
+            style={{ marginBottom: 0, flex: '1 1 190px', maxWidth: 260, minWidth: 160 }}
           >
             {field.control === 'select' ? (
               <Select
@@ -87,6 +89,7 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
           <Button icon={<ReloadOutlined />} onClick={handleReset}>
             重置
           </Button>
+          {extraActions}
           {collapsible && (
             <Button type="link" onClick={() => form.setFieldValue('collapsed', !collapsed)}>
               {collapsed ? '展开' : '收起'}

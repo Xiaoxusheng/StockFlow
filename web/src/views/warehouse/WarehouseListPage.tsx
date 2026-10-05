@@ -51,31 +51,31 @@ const SEARCH_FIELDS: SearchField[] = [
 ]
 
 const COLUMNS: ColumnsType<WarehouseItem> = [
-  { title: '编码', dataIndex: 'code', width: 120, fixed: 'left' },
-  { title: '名称', dataIndex: 'name', width: 160, ellipsis: true },
+  { title: '编码', dataIndex: 'code', width: 100, fixed: 'left' },
+  { title: '名称', dataIndex: 'name', width: 120, ellipsis: true },
   {
     title: '类型',
     dataIndex: 'type',
-    width: 90,
+    width: 80,
     render: (v?: string) => (v ? (WAREHOUSE_TYPE_LABEL[v] ?? v) : '-'),
   },
   {
     title: '面积(㎡)',
     dataIndex: 'area',
-    width: 100,
+    width: 90,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '容量',
     dataIndex: 'capacity',
-    width: 100,
+    width: 90,
     align: 'right',
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
-  { title: '地址', dataIndex: 'address', width: 200, ellipsis: true, render: (v?: string) => v ?? '-' },
-  { title: '联系人', dataIndex: 'contact', width: 90, render: (v?: string) => v ?? '-' },
-  { title: '电话', dataIndex: 'phone', width: 130, render: (v?: string) => v ?? '-' },
+  { title: '地址', dataIndex: 'address', width: 150, ellipsis: true, render: (v?: string) => v ?? '-' },
+  { title: '联系人', dataIndex: 'contact', width: 80, render: (v?: string) => v ?? '-' },
+  { title: '电话', dataIndex: 'phone', width: 120, render: (v?: string) => v ?? '-' },
 ]
 
 /** 尾列：仓管员列之后拼接（仓管员列依赖用户 options 映射，见组件内） */
@@ -89,7 +89,7 @@ const TAIL_COLUMNS: ColumnsType<WarehouseItem> = [
   {
     title: '更新时间',
     dataIndex: 'updated_at',
-    width: 160,
+    width: 140,
     render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
   },
 ]
@@ -281,7 +281,7 @@ export default function WarehouseListPage() {
     {
       title: '仓管员',
       dataIndex: 'manager_user_id',
-      width: 110,
+      width: 90,
       ellipsis: true,
       render: (value?: WarehouseSpaceId) => renderManagerRef(value, userNames),
     },
@@ -289,7 +289,7 @@ export default function WarehouseListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 130,
+      width: 120,
       fixed: 'right',
       render: (_, record) => {
         const enabled = record.status?.toUpperCase() === 'ENABLED'
@@ -358,7 +358,7 @@ export default function WarehouseListPage() {
           feedbackTone={fb.tone}
           removingRowKeys={fb.removingRowKeys}
           emptyText="当前筛选条件下没有仓库"
-          scrollX={1490}
+          scrollX={1280}
         />
       </Card>
 

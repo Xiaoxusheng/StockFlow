@@ -145,7 +145,7 @@ function nodeKey(node: StockDistributionNode): string {
 /**
  * 层级下钻：整棵分布树来自 GET /api/inventory/{id}/distribution 一次返回，
  * 点击带 children 的节点进入下一层（仓库 → 库区 → 库位），面包屑回退。
- * 分布接口为前端先行契约（后端 M1 库存查询面未含），就绪前呈统一错误态。
+ * 后端按该库存行的 SKU 聚合权限范围内全网分布（数据权限 fail-closed 同详情口径）。
  */
 function DistributionTab({ stockId }: { stockId: string }) {
   const distribution = useQuery({
@@ -159,13 +159,7 @@ function DistributionTab({ stockId }: { stockId: string }) {
     return <Skeleton active paragraph={{ rows: 5 }} />
   }
   if (distribution.error) {
-    return (
-      <SfError
-        error={distribution.error}
-        onRetry={distribution.refetch}
-        description="库存分布接口 GET /api/inventory/{id}/distribution 尚未交付（后端 M1 库存查询面未含层级分布），接口就绪后自动展示真实数据"
-      />
-    )
+    return <SfError error={distribution.error} onRetry={distribution.refetch} />
   }
 
   const roots = distribution.data ?? []

@@ -29,6 +29,10 @@ export function App() {
         // 状态色 ↔ --sf-primary/-info/-success/-warning/-danger
         colorPrimary: dark ? '#4c7ef0' : '#2563eb',
         colorInfo: dark ? '#22b8cf' : '#0891b2',
+        // 链接色显式对齐品牌主色：antd colorLink 缺省取 colorInfo（青蓝 #0891b2），
+        // 与主按钮 #2563eb 异色显割裂——表格操作列/文字链接全站与主色同源；
+        // Dark 直接复用暗色主色档（对 #171b21 底对比 ≈4.6:1 达 AA）
+        colorLink: dark ? '#4c7ef0' : '#2563eb',
         colorSuccess: dark ? '#3fb950' : '#16a34a',
         colorWarning: dark ? '#e8a33d' : '#d97706',
         colorError: dark ? '#e8564f' : '#dc2626',

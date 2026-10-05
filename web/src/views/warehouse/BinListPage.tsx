@@ -87,6 +87,28 @@ const COLUMNS: ColumnsType<BinItem> = [
     render: (v?: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
+    title: '存放物料',
+    key: 'stock',
+    width: 180,
+    ellipsis: true,
+    render: (_, record) => {
+      if (!record.stock_total_qty) {
+        return <Typography.Text type="secondary">-</Typography.Text>
+      }
+      return (
+        <div style={{ minWidth: 0 }}>
+          <Typography.Text ellipsis style={{ maxWidth: 160 }}>
+            {record.stock_sku_name}
+            {record.stock_sku_count > 1 ? ` 等 ${record.stock_sku_count} 种` : ''}
+          </Typography.Text>
+          <div className="sf-num" style={{ fontSize: 12, color: 'var(--sf-text-muted)' }}>
+            共 {formatNumber(record.stock_total_qty)}
+          </div>
+        </div>
+      )
+    },
+  },
+  {
     title: '状态',
     dataIndex: 'status',
     width: 90,

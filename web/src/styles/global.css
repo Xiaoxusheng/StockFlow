@@ -200,6 +200,27 @@ body {
   }
 }
 
+/* 操作列主次色层级（frontend.md §6.2）：首个动作（编辑/详情等）保持链接主色，
+   其后次级动作（停用/更多/记录等非 danger link）一律中性次要色，hover/按压加深为
+   正文色保持反馈。覆盖两种页面结构——Space 包裹（全站主流，经 .ant-space-item 定位，
+   含「编辑+停用」平铺双按钮形态）与平铺 fragment；「更多」下拉触发（全站统一
+   aria-label="更多操作"，含 icon-only 形态）无论位置恒为中性。danger 红色语义、
+   行 hover 渐显（上方规则）均不受影响；颜色走 --sf-text-*，Dark 自适应。 */
+.sf-table .sf-table-actions-cell .ant-space-item:not(:first-child) .ant-btn-link:not(.ant-btn-dangerous),
+.sf-table .sf-table-actions-cell > .ant-btn-link:not(:first-child):not(.ant-btn-dangerous),
+.sf-table .sf-table-actions-cell .ant-btn-link[aria-label='更多操作'] {
+  color: var(--sf-text-secondary);
+}
+
+.sf-table .sf-table-actions-cell .ant-space-item:not(:first-child) .ant-btn-link:not(.ant-btn-dangerous):hover,
+.sf-table .sf-table-actions-cell > .ant-btn-link:not(:first-child):not(.ant-btn-dangerous):hover,
+.sf-table .sf-table-actions-cell .ant-btn-link[aria-label='更多操作']:hover,
+.sf-table .sf-table-actions-cell .ant-space-item:not(:first-child) .ant-btn-link:not(.ant-btn-dangerous):active,
+.sf-table .sf-table-actions-cell > .ant-btn-link:not(:first-child):not(.ant-btn-dangerous):active,
+.sf-table .sf-table-actions-cell .ant-btn-link[aria-label='更多操作']:active {
+  color: var(--sf-text);
+}
+
 /* #3：勾选缩放 0.96→1（180ms 一次性，无 1→1.2 弹跳）。antd 6.6.5 checkbox 无 -inner
    （antd/es/checkbox/style/index.js:56 "Styles moved from inner"），-checked 由 rc 挂在根 span
    （@rc-component/checkbox/es/index.js:33）——选择器必须挂根元素。根元素自带 antd 内部

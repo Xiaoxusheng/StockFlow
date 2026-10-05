@@ -282,6 +282,13 @@ export default function TransferPage() {
             { name: 'batch_id', label: '批次 ID', control: 'input', placeholder: '批次 ID（0=非批次）' },
           ]}
           onSearch={handleSearch}
+          extraActions={
+            canMove ? (
+              <Button type="primary" icon={<SwapOutlined />} onClick={openCreate}>
+                发起移库
+              </Button>
+            ) : undefined
+          }
         />
         <SfTable<LedgerItem>
           storageKey="inventory-move-ledger"
@@ -295,13 +302,6 @@ export default function TransferPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          actions={
-            canMove ? (
-              <Button type="primary" icon={<SwapOutlined />} onClick={openCreate}>
-                发起移库
-              </Button>
-            ) : undefined
-          }
           emptyText="当前筛选条件下没有移库流水"
           scrollX={1320}
         />

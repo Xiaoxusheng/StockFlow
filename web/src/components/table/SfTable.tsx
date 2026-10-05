@@ -92,8 +92,13 @@ export interface SfTableProps<T extends object> extends TableProps<T> {
   emptyText?: string
   /** 列显示与密度持久化 key（frontend.md §26.3） */
   storageKey?: string
-  /** 横向滚动宽度：列多时必填，保证固定列与横向滚动可用 */
+  /** 横向滚动基准宽度：全部可见列均显式声明 width 时自动按「列宽总和+10」推导（2026-10-06），
+   * 本值仅在存在未声明 width 的弹性列时作为其宽度预留使用；有固定列的表仍建议声明，
+   * 保证窄屏横向滚动可用 */
   scrollX?: number
+  /** 表格边框（frontend.md §6.2）：默认开启全边框（外框+内格线，颜色走 antd colorBorderSecondary，
+   * App.tsx 已映射 --sf-border 同值，Dark 自适应）；传 false 回退无边框形态 */
+  bordered?: boolean
   showToolbar?: boolean
   showDensity?: boolean
   showColumnSetting?: boolean
@@ -160,6 +165,7 @@ export function SfTable<T extends object>({
   feedbackRowKey,
   feedbackTone = 'success',
   removingRowKeys,
+  bordered = true,
   onClearSelection: onClearSelectionProp,
   ...rest
 }: SfTableProps<T>) {
@@ -252,6 +258,18 @@ export function SfTable<T extends object>({
       }),
     [columns, hiddenKeys],
   )
+
+  // scroll.x 自适应（2026-10-06）：全部可见列均显式声明 width 时按「列宽总和+10」推导——
+  // 页面声明的 scrollX 普遍虚高（机动余量 80~200），视口本可容纳时提前出横向滚动条
+  // （用户反馈：仓库列表内容区 ~1390 vs 声明 1490）；min-width:100% 保证宽屏仍撑满容器，
+  // 仅「真正放不下」才出滚动条。存在未声明 width 的弹性列时仍用声明值（预留语义）；
+  // 列设置隐藏列后随可见列实时收缩。
+  const resolvedScrollX = useMemo(() => {
+    if (scrollX === undefined) return undefined
+    const cols = visibleColumns as Array<{ width?: unknown }>
+    if (cols.length === 0 || !cols.every((c) => typeof c.width === 'number')) return scrollX
+    return cols.reduce<number>((acc, c) => acc + (c.width as number), 0) + 10
+  }, [scrollX, visibleColumns])
 
   // 动效 #4：批量工具栏——读受控 rowSelection，selectedRowKeys>0 由 SfToolbar 自动切换批量面板
   const selectedRowKeys =
@@ -521,6 +539,7 @@ export function SfTable<T extends object>({
         <ConfigProvider theme={tableTheme}>
           <Table<T>
             size={density}
+            bordered={bordered}
             columns={visibleColumns}
             rowKey={rowKey}
             rowSelection={rowSelection}
@@ -557,7 +576,7 @@ export function SfTable<T extends object>({
                   }
                 : false
             }
-            scroll={scrollX !== undefined ? { x: scrollX } : undefined}
+            scroll={resolvedScrollX !== undefined ? { x: resolvedScrollX } : undefined}
             {...rest}
           />
         </ConfigProvider>
