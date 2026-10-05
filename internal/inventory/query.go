@@ -59,6 +59,110 @@ func (s *Service) GetInventoryDetail(ctx context.Context, id int64, scope Scope)
 	return row, nil
 }
 
+// StockDistributionNode 库存层级分布节点（frontend.md §10.4 / 前端 StockDistributionNode 契约对齐）。
+// 判层规则（前端 nodeLevel）：warehouse 层仅 warehouse_code/name；zone 层 + zone_code；
+// bin 层再 + bin_code——编码有无即层级标记，故中间层必须回填 warehouse_code。
+// total_qty/available_qty 恒输出（Qty 裸数字线格式）；children 仅非末层持有。
+type StockDistributionNode struct {
+	WarehouseCode string                  `json:"warehouse_code"`
+	WarehouseName string                  `json:"warehouse_name,omitempty"`
+	ZoneCode      string                  `json:"zone_code,omitempty"`
+	BinCode       string                  `json:"bin_code,omitempty"`
+	TotalQty      Qty                     `json:"total_qty"`
+	AvailableQty  Qty                     `json:"available_qty"`
+	Children      []StockDistributionNode `json:"children,omitempty"`
+}
+
+// GetStockDistribution 库存层级分布（GET /api/inventory/{id}/distribution，frontend.md §10.4）。
+// 语义：入口为库存行 id——按该行 SKU 聚合其在数据权限范围内所有仓库的 仓库→库区→库位 分布
+// （详情页头部是行维度五指标，本页签回答"该 SKU 的库存在哪里"，前端空态文案同语境）。
+// fail-closed 与 GetInventoryDetail 同口径：入口行不存在或行仓库越权 → (nil, nil) → handler 404；
+// 入口行在库但 SKU 无正数库存行 → 空数组（前端呈空态）。
+func (s *Service) GetStockDistribution(ctx context.Context, id int64, scope Scope) ([]StockDistributionNode, error) {
+	if s.db == nil {
+		return nil, gorm.ErrInvalidDB
+	}
+	row, err := s.repo.getInventory(ctx, id)
+	if err != nil || row == nil {
+		return nil, err
+	}
+	if !scope.AllWarehouses && !containsID(scope.WarehouseIDs, row.WarehouseID) {
+		return nil, nil
+	}
+	rows, err := s.repo.stockDistribution(ctx, row.SKUID, scope)
+	if err != nil {
+		return nil, err
+	}
+	return buildStockDistributionTree(rows), nil
+}
+
+// buildStockDistributionTree 扁平行 → 仓库→库区→库位 两层树（聚合与排序，纯函数可单测）。
+// 同库位多批次行（uk_inventory_location 含 batch 维度）在库位叶聚合——分布维度不含批次
+// （批次口径由批次页签承载）；仓库/库区总量=子树求和。输入顺序经 SQL ORDER BY 编码保证稳定。
+func buildStockDistributionTree(rows []stockDistRow) []StockDistributionNode {
+	whOrder := make([]int64, 0, 8)
+	whNodes := make(map[int64]*StockDistributionNode, 8)
+	zoneOrderInWh := make(map[int64][]int64, 16)
+	zoneNodes := make(map[int64]*StockDistributionNode, 16)
+	binOrderInZone := make(map[int64][]int64, 32)
+	binNodes := make(map[int64]*StockDistributionNode, 32)
+
+	for _, row := range rows {
+		wn, ok := whNodes[row.WarehouseID]
+		if !ok {
+			wn = &StockDistributionNode{
+				WarehouseCode: row.WarehouseCode,
+				WarehouseName: row.WarehouseName,
+				Children:      []StockDistributionNode{},
+			}
+			whNodes[row.WarehouseID] = wn
+			whOrder = append(whOrder, row.WarehouseID)
+		}
+		wn.TotalQty = wn.TotalQty.Add(row.TotalQty)
+		wn.AvailableQty = wn.AvailableQty.Add(row.AvailableQty)
+
+		zn, ok := zoneNodes[row.ZoneID]
+		if !ok {
+			zn = &StockDistributionNode{
+				WarehouseCode: row.WarehouseCode,
+				ZoneCode:      row.ZoneCode,
+				Children:      []StockDistributionNode{},
+			}
+			zoneNodes[row.ZoneID] = zn
+			zoneOrderInWh[row.WarehouseID] = append(zoneOrderInWh[row.WarehouseID], row.ZoneID)
+		}
+		zn.TotalQty = zn.TotalQty.Add(row.TotalQty)
+		zn.AvailableQty = zn.AvailableQty.Add(row.AvailableQty)
+
+		bn, ok := binNodes[row.BinID]
+		if !ok {
+			bn = &StockDistributionNode{
+				WarehouseCode: row.WarehouseCode,
+				ZoneCode:      row.ZoneCode,
+				BinCode:       row.BinCode,
+			}
+			binNodes[row.BinID] = bn
+			binOrderInZone[row.ZoneID] = append(binOrderInZone[row.ZoneID], row.BinID)
+		}
+		bn.TotalQty = bn.TotalQty.Add(row.TotalQty)
+		bn.AvailableQty = bn.AvailableQty.Add(row.AvailableQty)
+	}
+
+	tree := make([]StockDistributionNode, 0, len(whOrder))
+	for _, whID := range whOrder {
+		wn := whNodes[whID]
+		for _, zoneID := range zoneOrderInWh[whID] {
+			zn := zoneNodes[zoneID]
+			for _, binID := range binOrderInZone[zoneID] {
+				zn.Children = append(zn.Children, *binNodes[binID])
+			}
+			wn.Children = append(wn.Children, *zn)
+		}
+		tree = append(tree, *wn)
+	}
+	return tree
+}
+
 func containsID(ids []int64, id int64) bool {
 	for _, v := range ids {
 		if v == id {

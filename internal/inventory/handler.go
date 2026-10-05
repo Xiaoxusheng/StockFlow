@@ -294,6 +294,33 @@ func (h *handler) getInventory(c *gin.Context) {
 	response.OK(c, newInventoryView(row))
 }
 
+// getStockDistribution GET /api/inventory/{id}/distribution。
+// @Summary GET /api/inventory/{id}/distribution
+// @Tags 库存
+// @Produce json
+// @Param id path int true "库存行 id（按该行 SKU 聚合全网分布）"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Failure 404 {object} response.Envelope "资源不存在"
+// @Router /api/inventory/{id}/distribution [get]
+func (h *handler) getStockDistribution(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	nodes, err := h.svc.GetStockDistribution(c.Request.Context(), id, scopeOf(c))
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	if nodes == nil {
+		// 入口行不存在或行仓库越权（fail-closed 按不存在，GetInventoryDetail 同口径）
+		response.Err(c, response.NewError(response.CodeNotFound, map[string]any{"id": id}))
+		return
+	}
+	response.OK(c, nodes)
+}
+
 // ---- GET /api/inventory-ledgers（流水，只读）----
 
 // @Summary GET /api/inventory-ledgers

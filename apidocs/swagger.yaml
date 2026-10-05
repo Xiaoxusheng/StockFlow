@@ -2872,6 +2872,32 @@ paths:
       summary: GET /api/inventory/:id
       tags:
       - 库存
+  /api/inventory/{id}/distribution:
+    get:
+      parameters:
+      - description: 库存行 id（按该行 SKU 聚合全网分布）
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 统一响应信封
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "400":
+          description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+        "404":
+          description: 资源不存在
+          schema:
+            $ref: '#/definitions/github_com_stockflow_server_internal_response.Envelope'
+      summary: GET /api/inventory/{id}/distribution
+      tags:
+      - 库存
   /api/inventory/adjustments:
     get:
       produces:

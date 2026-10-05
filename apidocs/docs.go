@@ -3441,6 +3441,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/inventory/{id}/distribution": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "库存"
+                ],
+                "summary": "GET /api/inventory/{id}/distribution",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "库存行 id（按该行 SKU 聚合全网分布）",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "404": {
+                        "description": "资源不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/logs/logins": {
             "get": {
                 "produces": [

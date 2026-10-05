@@ -733,6 +733,54 @@ func (r *repository) getInventory(ctx context.Context, id int64) (*Inventory, er
 	return &row, nil
 }
 
+// ---- 库存层级分布（GET /api/inventory/{id}/distribution，frontend.md §10.4 前端先行契约补齐）----
+
+// stockDistRow 分布扁平行（单查询联 warehouses/zones/bins 取编码/名称，树组装在应用层
+// buildStockDistributionTree——纯函数可单测；只读联表仅 SELECT 编码/名称，reports 域读
+// inventory 表同口径先例）。LEFT JOIN 保证悬挂引用不丢行（展示降级为空编码）。
+type stockDistRow struct {
+	WarehouseID   int64  `gorm:"column:warehouse_id"`
+	WarehouseCode string `gorm:"column:warehouse_code"`
+	WarehouseName string `gorm:"column:warehouse_name"`
+	ZoneID        int64  `gorm:"column:zone_id"`
+	ZoneCode      string `gorm:"column:zone_code"`
+	BinID         int64  `gorm:"column:bin_id"`
+	BinCode       string `gorm:"column:bin_code"`
+	TotalQty      Qty    `gorm:"column:total_qty"`
+	AvailableQty  Qty    `gorm:"column:available_qty"`
+}
+
+// stockDistribution 查询该 SKU 在数据权限范围内所有仓库的库存分布扁平行。
+// 零量行不进分布树（total_qty > 0：分布回答"库存在哪里"，空仓零位是噪音）；
+// Scope 仓库集强制收敛（permission.md §4，禁止接受前端传入仓库范围参数）；
+// 排序按 仓库/库区/库位编码 + bin_id 保证同键多批行聚合后输出稳定。
+func (r *repository) stockDistribution(ctx context.Context, skuID int64, scope Scope) ([]stockDistRow, error) {
+	rows := []stockDistRow{}
+	q := `
+		SELECT i.warehouse_id, w.code AS warehouse_code, w.name AS warehouse_name,
+		       i.zone_id, z.code AS zone_code,
+		       i.bin_id, b.code AS bin_code,
+		       i.total_qty, i.available_qty
+		FROM inventory i
+		LEFT JOIN warehouses w ON w.id = i.warehouse_id
+		LEFT JOIN zones z ON z.id = i.zone_id
+		LEFT JOIN bins b ON b.id = i.bin_id
+		WHERE i.sku_id = ? AND i.total_qty > 0`
+	args := []any{skuID}
+	if !scope.AllWarehouses {
+		if len(scope.WarehouseIDs) == 0 {
+			return rows, nil
+		}
+		q += " AND i.warehouse_id IN ?"
+		args = append(args, scope.WarehouseIDs)
+	}
+	q += " ORDER BY w.code, z.code, b.code, i.bin_id"
+	if err := r.db.WithContext(ctx).Raw(q, args...).Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
 // ledgerFilter 流水查询过滤（只读审计查询；追加条件与迁移索引对齐）。
 type ledgerFilter struct {
 	AllWarehouses bool

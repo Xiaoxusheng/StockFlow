@@ -77,6 +77,7 @@ func TestRegisterRoutesAllEndpointsRequirePermission(t *testing.T) {
 	paths := []string{
 		"/api/inventory",
 		"/api/inventory/1",
+		"/api/inventory/1/distribution",
 		"/api/inventory-ledgers",
 		"/api/batches",
 		"/api/serials",
