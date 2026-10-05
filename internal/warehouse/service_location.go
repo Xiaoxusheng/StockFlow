@@ -636,9 +636,27 @@ func (s *Service) ListBins(ctx context.Context, f BinListFilter) ([]*BinView, in
 	if err != nil {
 		return nil, 0, err
 	}
+	// 存量展示聚合（2026-10-05 用户反馈：库位列表应显示存放物料；本页 ids 聚合零额外分页成本）
+	binIDs := make([]int64, 0, len(rows))
+	for _, b := range rows {
+		binIDs = append(binIDs, b.ID.Int64())
+	}
+	stockAgg, aggErr := s.repo.binStockAggregates(ctx, binIDs)
+	if aggErr != nil {
+		return nil, 0, aggErr
+	}
+	firstSku, nameErr := s.repo.binStockFirstSkuNames(ctx, binIDs)
+	if nameErr != nil {
+		return nil, 0, nameErr
+	}
 	views := make([]*BinView, 0, len(rows))
 	for _, b := range rows {
 		v := viewBin(b)
+		if agg, ok := stockAgg[b.ID.Int64()]; ok {
+			v.StockSkuCount = int(agg.SkuCount)
+			v.StockTotalQty = agg.TotalQty
+			v.StockSkuName = firstSku[b.ID.Int64()]
+		}
 		views = append(views, &v)
 	}
 	return views, total, nil

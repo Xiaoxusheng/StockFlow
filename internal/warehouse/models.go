@@ -40,10 +40,10 @@ type Warehouse struct {
 // TableName 显式表名。
 func (Warehouse) TableName() string { return "warehouses" }
 
-// baseCols 无软删除实体（zones/shelves）的通用字段（database.md §3 但书：按业务实际
+// BaseCols 无软删除实体（zones/shelves）的通用字段（database.md §3 但书：按业务实际
 // 取字段——zones/shelves 无 deleted_at 列，不能嵌入 database.BaseModel，否则 GORM 会在
 // SELECT 拼出不存在的 deleted_at 条件）。钩子语义与 database.BaseModel 一致。
-type baseCols struct {
+type BaseCols struct {
 	ID        database.ID       `gorm:"primaryKey;autoIncrement" json:"id"`
 	CreatedAt database.JSONTime `json:"created_at"`
 	UpdatedAt database.JSONTime `json:"updated_at"`
@@ -52,7 +52,7 @@ type baseCols struct {
 }
 
 // BeforeCreate 兜底填充创建/更新时间（GORM autoCreateTime 之外的双保险）。
-func (b *baseCols) BeforeCreate(tx *gorm.DB) error {
+func (b *BaseCols) BeforeCreate(tx *gorm.DB) error {
 	if b.CreatedAt.IsZero() {
 		b.CreatedAt = database.Now()
 	}
@@ -63,14 +63,14 @@ func (b *baseCols) BeforeCreate(tx *gorm.DB) error {
 }
 
 // BeforeUpdate 兜底刷新更新时间。
-func (b *baseCols) BeforeUpdate(tx *gorm.DB) error {
+func (b *BaseCols) BeforeUpdate(tx *gorm.DB) error {
 	b.UpdatedAt = database.Now()
 	return nil
 }
 
 // Zone 库区（business-flow §1.6 第二级；000004 zones）。无删除通路，仅启停。
 type Zone struct {
-	baseCols
+	BaseCols
 	WarehouseID database.ID `gorm:"column:warehouse_id" json:"warehouse_id"`
 	Code        string      `gorm:"column:code;size:64" json:"code"`
 	Name        string      `gorm:"column:name;size:255" json:"name"`
@@ -84,7 +84,7 @@ func (Zone) TableName() string { return "zones" }
 
 // Shelf 货架（business-flow §1.6 第三级；000004 shelves）。无删除通路，仅启停。
 type Shelf struct {
-	baseCols
+	BaseCols
 	WarehouseID database.ID `gorm:"column:warehouse_id" json:"warehouse_id"`
 	ZoneID      database.ID `gorm:"column:zone_id" json:"zone_id"`
 	Code        string      `gorm:"column:code;size:64" json:"code"`

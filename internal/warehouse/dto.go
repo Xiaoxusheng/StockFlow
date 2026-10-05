@@ -116,6 +116,10 @@ type BinView struct {
 	Status          string            `json:"status"`
 	CreatedAt       database.JSONTime `json:"created_at"`
 	UpdatedAt       database.JSONTime `json:"updated_at"`
+	// 存量展示聚合（ListBins 装配；口径=inventory 表 total_qty>0 行，2026-10-05 用户反馈补列）
+	StockSkuCount int     `json:"stock_sku_count"`
+	StockTotalQty float64 `json:"stock_total_qty"`
+	StockSkuName  string  `json:"stock_sku_name"`
 }
 
 func viewBin(b *Bin) BinView {

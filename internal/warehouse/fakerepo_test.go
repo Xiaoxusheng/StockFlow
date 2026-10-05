@@ -569,3 +569,13 @@ func setTyped(dst reflect.Value, val any) {
 		dst.Set(rv.Convert(dst.Type()))
 	}
 }
+
+// binStockAggregates / binStockFirstSkuNames 测试桩：默认空聚合（存量展示列为零值，
+// 不影响既有断言；需要断言存量展示时请在用例内替换实现）。
+func (r *fakeRepo) binStockAggregates(ctx context.Context, binIDs []int64) (map[int64]binStockAggregateRow, error) {
+	return map[int64]binStockAggregateRow{}, nil
+}
+
+func (r *fakeRepo) binStockFirstSkuNames(ctx context.Context, binIDs []int64) (map[int64]string, error) {
+	return map[int64]string{}, nil
+}

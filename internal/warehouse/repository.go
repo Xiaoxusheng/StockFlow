@@ -50,6 +50,9 @@ type Repository interface {
 	// 软删行仍占用编码——库位编码永久保留，避免历史库存/流水追溯混淆，000004 注释）。
 	FindBinByCode(ctx context.Context, warehouseID int64, code string) (*Bin, error)
 	ListBins(ctx context.Context, f BinListFilter) ([]*Bin, int64, error)
+	// binStockAggregates / binStockFirstSkuNames 库位存量展示聚合（ListBins 装配；跨域 SQL 直连见实现注）
+	binStockAggregates(ctx context.Context, binIDs []int64) (map[int64]binStockAggregateRow, error)
+	binStockFirstSkuNames(ctx context.Context, binIDs []int64) (map[int64]string, error)
 	ListBinsByWarehouse(ctx context.Context, warehouseID int64) ([]*Bin, error)
 	InsertBin(ctx context.Context, tx *gorm.DB, b *Bin) error
 	UpdateBinCols(ctx context.Context, tx *gorm.DB, id int64, cols map[string]any) error
@@ -392,6 +395,62 @@ func (r *gormRepo) ListBins(ctx context.Context, f BinListFilter) ([]*Bin, int64
 		return nil, 0, err
 	}
 	return rows, total, nil
+}
+
+// binStockAggregateRow 库位存量聚合行（ListBins 列表装配用）。
+type binStockAggregateRow struct {
+	BinID    int64   `gorm:"column:bin_id"`
+	SkuCount int64   `gorm:"column:sku_count"`
+	TotalQty float64 `gorm:"column:total_qty"`
+}
+
+// binStockAggregates 库位存量聚合（跨域零 import：SQL 直连 inventory/skus 表——
+// reports/workbench.go 同口径；软删一致性：skus 内嵌 DeletedAt（迁移 000016）显式过滤，
+// inventory 为 M1 表无软删。仅供列表页展示，不做业务判定）。
+func (r *gormRepo) binStockAggregates(ctx context.Context, binIDs []int64) (map[int64]binStockAggregateRow, error) {
+	if len(binIDs) == 0 {
+		return map[int64]binStockAggregateRow{}, nil
+	}
+	var rows []binStockAggregateRow
+	if err := r.db.WithContext(ctx).Raw(`
+SELECT i.bin_id,
+       COUNT(DISTINCT i.sku_id)::bigint AS sku_count,
+       COALESCE(SUM(i.total_qty), 0)::float8 AS total_qty
+FROM inventory i
+WHERE i.bin_id IN ? AND i.total_qty > 0
+GROUP BY i.bin_id`, binIDs).Scan(&rows).Error; err != nil {
+		return nil, translateUnique(err)
+	}
+	result := make(map[int64]binStockAggregateRow, len(rows))
+	for _, row := range rows {
+		result[row.BinID] = row
+	}
+	return result, nil
+}
+
+// binStockFirstSkuNames 每库位存量最大的一个 SKU 名（display 用，DISTINCT ON 取行）。
+func (r *gormRepo) binStockFirstSkuNames(ctx context.Context, binIDs []int64) (map[int64]string, error) {
+	if len(binIDs) == 0 {
+		return map[int64]string{}, nil
+	}
+	var rows []struct {
+		BinID   int64  `gorm:"column:bin_id"`
+		SkuName string `gorm:"column:sku_name"`
+	}
+	if err := r.db.WithContext(ctx).Raw(`
+SELECT DISTINCT ON (i.bin_id) i.bin_id, COALESCE(p.name, s.code) AS sku_name
+FROM inventory i
+JOIN skus s ON s.id = i.sku_id AND s.deleted_at IS NULL
+LEFT JOIN products p ON p.id = s.product_id AND p.deleted_at IS NULL
+WHERE i.bin_id IN ? AND i.total_qty > 0
+ORDER BY i.bin_id, i.total_qty DESC`, binIDs).Scan(&rows).Error; err != nil {
+		return nil, translateUnique(err)
+	}
+	result := make(map[int64]string, len(rows))
+	for _, row := range rows {
+		result[row.BinID] = row.SkuName
+	}
+	return result, nil
 }
 
 func (r *gormRepo) ListBinsByWarehouse(ctx context.Context, warehouseID int64) ([]*Bin, error) {
