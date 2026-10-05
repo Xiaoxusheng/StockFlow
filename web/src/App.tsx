@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { ConfigProvider, theme as antdTheme } from 'antd'
+import { useMemo, useState } from 'react'
+import { App as AntdApp, ConfigProvider, theme as antdTheme } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { RouterProvider } from 'react-router'
 import { useThemeStore } from '@/stores/theme'
@@ -7,23 +7,54 @@ import { router } from '@/router'
 
 /**
  * antd Theme ↔ --sf-* Design Token 映射（frontend.md §2）。
- * 数值与 src/styles/tokens.css 保持一致：修改时两处同步。
+ * 数值与 src/styles/tokens.css 保持一致：修改时两处必须同 commit 同步。
  */
 export function App() {
   const mode = useThemeStore((s) => s.mode)
   const dark = mode === 'dark'
+  // 系统减少动效偏好（任务书 §59）：挂载时读一次——OS 偏好极少会话中途切换，不做监听，
+  // 中途变更刷新页面生效（图表侧 useSfChartTheme 独立实时读取，不依赖本值）。
+  const [reducedMotion] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
 
   const themeConfig = useMemo(
     () => ({
       algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
+      // 系统减少动效：antd 官方开关（seed.motion；alias.js motion:false → Fast/Mid/Slow
+      // 三档时长覆写 0s，且优先于下方显式时长）——Modal/Drawer/Menu 等组件内部动效全站归零，
+      // 与 global.css 文尾 token 驱动的 reduced-motion 归零同口径。
+      motion: !reducedMotion,
       token: {
-        colorPrimary: dark ? '#3c8dff' : '#1674ff',
-        colorInfo: dark ? '#3c8dff' : '#1674ff',
-        colorSuccess: dark ? '#6abf3f' : '#389e0d',
-        colorWarning: dark ? '#e8b339' : '#d48806',
-        colorError: dark ? '#e8564f' : '#cf1322',
+        // 状态色 ↔ --sf-primary/-info/-success/-warning/-danger
+        colorPrimary: dark ? '#4c7ef0' : '#2563eb',
+        colorInfo: dark ? '#22b8cf' : '#0891b2',
+        colorSuccess: dark ? '#3fb950' : '#16a34a',
+        colorWarning: dark ? '#e8a33d' : '#d97706',
+        colorError: dark ? '#e8564f' : '#dc2626',
+        // 表面 ↔ --sf-bg / --sf-surface（页面背景 #F6F7F9 与卡片白两级分层，任务书 §6）
+        colorBgLayout: dark ? '#101418' : '#f6f7f9',
+        colorBgContainer: dark ? '#171b21' : '#ffffff',
+        // 边框 ↔ --sf-border / --sf-border-subtle
+        colorBorder: dark ? 'rgba(255, 255, 255, 0.08)' : '#e5e7eb',
+        colorBorderSecondary: dark ? 'rgba(255, 255, 255, 0.05)' : '#f1f3f5',
+        // 文字三档 ↔ --sf-text / -secondary / -muted
+        colorText: dark ? 'rgba(255, 255, 255, 0.9)' : '#111827',
+        colorTextSecondary: dark ? 'rgba(255, 255, 255, 0.6)' : '#64748b',
+        colorTextTertiary: dark ? 'rgba(255, 255, 255, 0.38)' : '#94a3b8',
+        // 控件级圆角 = --sf-radius-sm；字号/字体 ↔ --sf-font-*（保证浮层字体一致）
         borderRadius: 6,
-        colorBgLayout: dark ? '#11151a' : '#f5f6f8',
+        // 控件统一高度下限（任务书 §24：Form 控件 32~36px）
+        controlHeight: 32,
+        // 动效三档时长 ↔ --sf-motion-fast/-normal/-slow（120/180/240ms；antd 默认由
+        // motionUnit 0.1s 派生 0.1/0.2/0.3s 与 Design Token 不一致，显式对齐——
+        // Button/Modal 等组件内部动效经 motionDurationMid 等消费）
+        motionDurationFast: '0.12s',
+        motionDurationMid: '0.18s',
+        motionDurationSlow: '0.24s',
+        fontSize: 14,
+        fontFamily:
+          "Inter, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif",
       },
       components: {
         Layout: {
@@ -31,21 +62,41 @@ export function App() {
           headerPadding: '0 16px',
         },
         Table: {
-          headerBg: dark ? '#1f252e' : '#f7f8fa',
+          headerBg: dark ? '#1d232b' : '#f8fafc',
           headerSplitColor: 'transparent',
+          // 表头文字比正文弱一档（--sf-table-header-text）
+          headerColor: dark ? 'rgba(255, 255, 255, 0.72)' : '#334155',
+          rowHoverBg: dark ? '#232a33' : '#f8fafc',
+          // 选中行=主题色低透明（任务书 §17 alpha 0.04~0.08，禁止整行深蓝）
+          rowSelectedBg: dark ? 'rgba(76, 126, 240, 0.16)' : 'rgba(37, 99, 235, 0.06)',
+          rowSelectedHoverBg: dark ? 'rgba(76, 126, 240, 0.22)' : 'rgba(37, 99, 235, 0.1)',
           cellPaddingBlock: 12,
+          // 全站表格统一 13px 密度字号（antd 同步派生 cellFontSize，表头/单元格/汇总行一致）
+          fontSize: 13,
         },
         Card: {
           paddingLG: 20,
+          // antd 6.6.5：Card 消费全局 borderRadiusLG（es/card/style/index.js:27,217），
+          // 组件级覆盖 = --sf-radius-md 8px（任务书 §10）
+          borderRadiusLG: 8,
+        },
+        Modal: {
+          // antd 6.6.5：Modal 消费全局 borderRadiusLG（es/modal/style/index.js:111,127,175），
+          // 组件级覆盖 = --sf-radius-lg 10px（任务书 §25）
+          borderRadiusLG: 10,
         },
       },
     }),
-    [dark],
+    [dark, reducedMotion],
   )
 
   return (
     <ConfigProvider locale={zhCN} theme={themeConfig}>
-      <RouterProvider router={router} />
+      {/* component={false}：仅提供 App.useApp() 上下文（message/modal 静态替代），
+          不渲染包裹 DOM，避免破坏既有布局结构 */}
+      <AntdApp component={false}>
+        <RouterProvider router={router} />
+      </AntdApp>
     </ConfigProvider>
   )
 }

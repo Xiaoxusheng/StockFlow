@@ -10,6 +10,8 @@ body {
   margin: 0;
   background: var(--sf-bg);
   color: var(--sf-text);
+  /* 字体栈统一走 Token（frontend.md §2.1 / 任务书 §8），antd 浮层在 App.tsx 同步映射 */
+  font-family: var(--sf-font-family);
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
 }
@@ -22,6 +24,22 @@ body {
 /* 页面容器：紧凑企业级密度（frontend.md §3） */
 .sf-page {
   padding: var(--sf-space-5) var(--sf-space-6);
+  /* 页面进入动画（frontend.md §25 允许「页面进入」；任务书 §56/§59）：
+     轻微上移淡入，时长/缓动走动效 Token（--sf-motion-normal 180ms）。
+     fill-mode 用 backwards：结束后回退计算值（opacity:1 / 无 transform），
+     不在元素上常驻 transform，避免劫持 fixed/sticky 子孙的包含块。 */
+  animation: sf-page-enter var(--sf-motion-normal) var(--sf-motion-ease) backwards;
+}
+
+@keyframes sf-page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* 滚动条（含 Dark 模式适配） */
@@ -44,13 +62,79 @@ body {
 }
 
 /* 栅格卡片等高：Col 本身随行等高（flex stretch），但内部 Card 只有内容高，
-   导致同一行卡片参差不齐。凡直接置于 Col 的 Card 一律撑满（frontend.md §6 统一卡片网格）。 */
-.ant-col > .ant-card {
+   导致同一行卡片参差不齐。凡直接置于 Col 的卡片——antd Card 与 SfChartCard 的
+   section.sf-chart-card 壳——一律撑满（frontend.md §6 统一卡片网格）。 */
+.ant-col > .ant-card,
+.ant-col > .sf-chart-card {
   height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.ant-col > .ant-card > .ant-card-body {
+.ant-col > .ant-card > .ant-card-body,
+.ant-col > .sf-chart-card > .sf-chart-card__body {
   flex: 1;
+}
+
+/* Card Hover（任务书 §57）：悬停只允许 border-color / box-shadow 过渡，
+   全站禁止 translateY / scale 位移缩放式 hover。时长/缓动走动效 Token，
+   reduced-motion 时随 --sf-motion-* 归零即时完成（见文末媒体查询）。 */
+.ant-card {
+  transition:
+    border-color var(--sf-motion-normal) var(--sf-motion-ease),
+    box-shadow var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+/* ===== 统一表格 Cell（components/table/cells.tsx） ===== */
+/* CodeCell：长编码省略 + hover 显复制（任务书 §12/§48：hover 出现，不放大按钮） */
+.sf-code-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.sf-code-cell__text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-code-cell__copy {
+  flex-shrink: 0;
+  color: var(--sf-text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--sf-motion-fast) var(--sf-motion-ease), color var(--sf-motion-fast) var(--sf-motion-ease);
+}
+
+.sf-code-cell:hover .sf-code-cell__copy {
+  opacity: 1;
+}
+
+.sf-code-cell__copy:hover {
+  color: var(--sf-primary);
+}
+
+.sf-code-cell__copy--done {
+  color: var(--sf-success);
+  opacity: 1;
+  cursor: default;
+}
+
+/* Reduced Motion（任务书 §59，token 驱动）：系统偏好减少动效时三档动效时长归零，
+   所有引用 --sf-motion-* 的 transition/animation 即时完成，业务 css 无需各自处理。
+   选择器 :root 与 tokens.css 同特异性、声明靠后（@import 先于本文件规则），dark 主题下同样生效。 */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sf-motion-fast: 0ms;
+    --sf-motion-normal: 0ms;
+    --sf-motion-slow: 0ms;
+  }
+
+  .sf-page {
+    animation: none;
+  }
 }

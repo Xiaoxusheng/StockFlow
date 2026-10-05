@@ -2,6 +2,7 @@ import { Button, Card, Flex, Result } from 'antd'
 import { useNavigate } from 'react-router'
 import { findMenuItem } from '@/config/menu'
 import { useLocation } from 'react-router'
+import { SfLogo } from '@/components/common/SfLogo'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 
 /**
@@ -45,16 +46,7 @@ function ModuleIcon() {
         margin: '0 auto',
       }}
     >
-      <svg width="40" height="40" viewBox="0 0 32 32" aria-hidden>
-        <rect width="32" height="32" rx="7" fill="var(--sf-border)" />
-        <path
-          d="M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12"
-          stroke="var(--sf-text-muted)"
-          strokeWidth="2.6"
-          fill="none"
-          strokeLinecap="round"
-        />
-      </svg>
+      <SfLogo size={40} variant="muted" />
     </Flex>
   )
 }

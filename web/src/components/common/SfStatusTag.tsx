@@ -1,15 +1,20 @@
 import { Tag } from 'antd'
 import { resolveStatus, type StatusSemantic } from '@/types/status'
 
-/** 语义色 → antd Tag 预设色（frontend.md §24 全局唯一映射） */
+/**
+ * 语义色 → --sf-* Token（frontend.md §24 / 任务书 §19 全局唯一映射）。
+ * 不再使用 antd 预设色（gold/orange 等与 --sf-warning #d97706 不一致，且绕过 Token）；
+ * 处理中按语义归 info，待处理/警告归 warning。
+ * 底色/描边由 color-mix 从同一 Token 派生（12% / 24%），Light/Dark 随 Token 自动切换。
+ */
 const SEMANTIC_COLOR: Record<StatusSemantic, string> = {
-  success: 'success',
-  processing: 'processing',
-  pending: 'gold',
-  warning: 'orange',
-  danger: 'error',
-  neutral: 'default',
-  disabled: 'default',
+  success: 'var(--sf-success)',
+  processing: 'var(--sf-info)',
+  pending: 'var(--sf-warning)',
+  warning: 'var(--sf-warning)',
+  danger: 'var(--sf-danger)',
+  neutral: 'var(--sf-text-secondary)',
+  disabled: 'var(--sf-text-muted)',
 }
 
 export interface SfStatusTagProps {
@@ -31,7 +36,15 @@ export function SfStatusTag({ status, label, semantic, bordered }: SfStatusTagPr
   const text = meta?.label ?? label ?? status ?? '-'
   const color = SEMANTIC_COLOR[meta?.semantic ?? semantic ?? 'neutral']
   return (
-    <Tag color={color} bordered={bordered} style={{ marginInlineEnd: 0 }}>
+    <Tag
+      bordered={bordered}
+      style={{
+        marginInlineEnd: 0,
+        color,
+        backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
+        borderColor: `color-mix(in srgb, ${color} 24%, transparent)`,
+      }}
+    >
       {text}
     </Tag>
   )

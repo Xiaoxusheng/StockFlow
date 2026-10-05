@@ -1,4 +1,4 @@
-import { Alert, AutoComplete, Avatar, Badge, Breadcrumb, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
+import { Alert, AutoComplete, Avatar, Badge, Breadcrumb, ConfigProvider, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
 import {
   BellOutlined,
   DownOutlined,
@@ -13,7 +13,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router'
-import type { AutoCompleteProps, MenuProps } from 'antd'
+import type { AutoCompleteProps, MenuProps, ThemeConfig } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { MENU_TREE, resolveMenuTrail, type MenuItem } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -22,10 +22,48 @@ import { useUiStore } from '@/stores/ui'
 import { canAccess } from '@/types/permission'
 import { authApi, PASSWORD_RULE, type ChangePasswordPayload } from '@/api/auth'
 import { notificationApi } from '@/api/notifications'
+import { SfLogo } from '@/components/common/SfLogo'
 import { matchFieldErrors, resolveErrorMessage } from '@/api/client'
 import { NotificationDrawer } from './NotificationDrawer'
 
 const { Header, Sider, Content } = Layout
+
+/** Sidebar 菜单规格（任务书 §13）：
+ * - 菜单高 38px（36~40）、条目间距 2px（2~4）、圆角 6 = --sf-radius-sm；
+ * - Active = 淡蓝背景 + 主色文字（color-mix 从 --sf-primary 派生，Light/Dark 随 Token 自动切换），
+ *   左侧 3px 指示条由下方 .sf-pc-sider 样式块补充——antd Menu 无 inline 模式指示条 token；
+ * - 图标统一 16px（展开/收起同尺寸，颜色继承条目色，不逐项配色）。
+ * 色值一律引用 --sf-* Token；嵌套 ConfigProvider 与 App.tsx 主题按组件合并（算法/暗色继承）。 */
+const SIDER_MENU_THEME: ThemeConfig = {
+  components: {
+    Menu: {
+      itemHeight: 38,
+      itemMarginBlock: 2,
+      itemMarginInline: 8,
+      itemBorderRadius: 6,
+      itemColor: 'var(--sf-text-secondary)',
+      itemHoverColor: 'var(--sf-text)',
+      itemHoverBg: 'var(--sf-surface-hover)',
+      itemActiveBg: 'var(--sf-surface-hover)',
+      itemSelectedColor: 'var(--sf-primary)',
+      itemSelectedBg: 'color-mix(in srgb, var(--sf-primary) 12%, transparent)',
+      iconSize: 16,
+      collapsedIconSize: 16,
+    },
+  },
+}
+
+/** PcLayout 局部样式（仅骨架自身需要、antd token 覆盖不到的部分）：
+ * 菜单选中左侧 3px 指示条 + Header 图标按钮的 hover/focus/active（任务书 §13/§58）。
+ * Reduced Motion（任务书 §59）：关闭按钮过渡与按压缩放。 */
+const PC_LAYOUT_CSS = `
+.sf-pc-sider .ant-menu-item-selected::before{content:'';position:absolute;inset-block:6px;inset-inline-start:0;width:3px;border-radius:2px;background:var(--sf-primary);}
+.sf-header-icon-btn{transition:background var(--sf-motion-fast) var(--sf-motion-ease),color var(--sf-motion-fast) var(--sf-motion-ease);}
+.sf-header-icon-btn:hover{background:var(--sf-border-subtle);}
+.sf-header-icon-btn:focus-visible{outline:2px solid var(--sf-primary);outline-offset:1px;}
+.sf-header-icon-btn:active{transform:scale(.97);}
+@media (prefers-reduced-motion:reduce){.sf-header-icon-btn{transition:none;}.sf-header-icon-btn:active{transform:none;}}
+`
 
 function buildMenuItems(items: MenuItem[]): NonNullable<MenuProps['items']> {
   return items.map((item) => ({
@@ -194,9 +232,11 @@ export function PcLayout() {
   return (
     <Layout style={{ minHeight: '100vh' }}>
       {contextHolder}
+      <style>{PC_LAYOUT_CSS}</style>
       <Sider
-        width={216}
-        collapsedWidth={48}
+        className="sf-pc-sider"
+        width="var(--sf-sider-width)"
+        collapsedWidth="var(--sf-sider-collapsed-width)"
         breakpoint="lg"
         onBreakpoint={setBroken}
         collapsed={collapsed}
@@ -213,32 +253,25 @@ export function PcLayout() {
         <Flex
           align="center"
           justify="center"
-          gap={8}
+          gap="var(--sf-space-2)"
           style={{ height: 'var(--sf-header-height)', overflow: 'hidden' }}
         >
-          <svg width="24" height="24" viewBox="0 0 32 32" aria-hidden>
-            <rect width="32" height="32" rx="7" fill="var(--sf-primary)" />
-            <path
-              d="M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12"
-              stroke="#fff"
-              strokeWidth="2.6"
-              fill="none"
-              strokeLinecap="round"
-            />
-          </svg>
+          <SfLogo size={24} />
           {!collapsed && (
             <span style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'nowrap' }}>StockFlow</span>
           )}
         </Flex>
-        <Menu
-          mode="inline"
-          items={menuItems}
-          selectedKeys={[location.pathname]}
-          openKeys={collapsed ? [] : openKeys}
-          onOpenChange={(keys) => setOpenKeys(keys)}
-          style={{ borderInlineEnd: 'none', background: 'transparent' }}
-          onClick={({ key }) => navigate(key)}
-        />
+        <ConfigProvider theme={SIDER_MENU_THEME}>
+          <Menu
+            mode="inline"
+            items={menuItems}
+            selectedKeys={[location.pathname]}
+            openKeys={collapsed ? [] : openKeys}
+            onOpenChange={(keys) => setOpenKeys(keys)}
+            style={{ borderInlineEnd: 'none', background: 'transparent' }}
+            onClick={({ key }) => navigate(key)}
+          />
+        </ConfigProvider>
       </Sider>
 
       <Layout>
@@ -250,14 +283,14 @@ export function PcLayout() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            padding: '0 16px',
+            padding: '0 var(--sf-space-4)',
             height: 'var(--sf-header-height)',
             lineHeight: 'normal',
             background: 'var(--sf-surface)',
             borderBottom: '1px solid var(--sf-border)',
           }}
         >
-          <Flex align="center" gap={12} style={{ minWidth: 0 }}>
+          <Flex align="center" gap="var(--sf-space-3)" style={{ minWidth: 0 }}>
             <ButtonGhost
               title={collapsed ? '展开菜单' : '收起菜单'}
               icon={<UnorderedListOutlined />}
@@ -266,7 +299,7 @@ export function PcLayout() {
             <Breadcrumb items={breadcrumbItems} style={{ whiteSpace: 'nowrap' }} />
           </Flex>
 
-          <Flex align="center" gap={8}>
+          <Flex align="center" gap="var(--sf-space-2)">
             <AutoComplete
               value={keyword}
               options={searchOptions}
@@ -275,8 +308,8 @@ export function PcLayout() {
               popupMatchSelectWidth={280}
               style={{ width: 220 }}
             >
+              {/* 高度取全局 controlHeight 32（任务书 §24 控件 32~36），与页面表单控件一致 */}
               <Input
-                size="small"
                 allowClear
                 onPressEnter={handleSearchEnter}
                 prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
@@ -303,8 +336,8 @@ export function PcLayout() {
             <Dropdown menu={{ items: userMenu, onClick: handleUserMenu }} trigger={['click']}>
               <Flex
                 align="center"
-                gap={6}
-                style={{ cursor: 'pointer', padding: '4px 8px', borderRadius: 'var(--sf-radius-md)' }}
+                gap="var(--sf-space-2)"
+                style={{ cursor: 'pointer', padding: 'var(--sf-space-1) var(--sf-space-2)', borderRadius: 'var(--sf-radius-md)' }}
               >
                 <Avatar size={26} icon={<UserOutlined />} />
                 <span
@@ -507,6 +540,7 @@ function ButtonGhost({
   return (
     <button
       type="button"
+      className="sf-header-icon-btn"
       aria-label={title}
       onClick={onClick}
       style={{
@@ -521,8 +555,6 @@ function ButtonGhost({
         color: 'var(--sf-text-secondary)',
         cursor: 'pointer',
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--sf-border-subtle)')}
-      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       {icon}
     </button>

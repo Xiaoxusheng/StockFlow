@@ -19,16 +19,16 @@ export function SfToolbar({ title, extra, children }: SfToolbarProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        gap: 12,
+        gap: 'var(--sf-space-3)',
         flexWrap: 'wrap',
-        marginBottom: 12,
+        marginBottom: 'var(--sf-space-3)',
       }}
     >
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 'var(--sf-space-2)',
           flexWrap: 'wrap',
           flex: 1,
           minWidth: 0,
@@ -38,7 +38,7 @@ export function SfToolbar({ title, extra, children }: SfToolbarProps) {
         {children}
       </div>
       {extra && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>{extra}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>{extra}</div>
       )}
     </div>
   )

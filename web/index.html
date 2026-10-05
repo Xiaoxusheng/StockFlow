@@ -2,9 +2,30 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // 首帧主题预置（防 FOUC）：在任何 CSS/JS 加载前写 <html data-theme>，暗色用户首帧不闪白。
+      // 逻辑镜像 src/stores/theme.ts 的 resolveInitialMode / applyToDocument（STORAGE_KEY 'sf.theme'），
+      // 两处必须同 commit 同步修改（纪律同 tokens.css ↔ App.tsx 的双源同步，见 AGENTS.md）。
+      // theme.ts 仍是运行时唯一属主：本脚本只负责首帧预置，不监听变化、不写 localStorage、不响应切换。
+      ;(function () {
+        var saved = null
+        try {
+          saved = localStorage.getItem('sf.theme')
+        } catch (e) {
+          // localStorage 不可用（隐私模式等）：退回系统偏好；theme.ts 运行时行为一致
+        }
+        var mode =
+          saved === 'light' || saved === 'dark'
+            ? saved
+            : window.matchMedia('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+        document.documentElement.dataset.theme = mode
+      })()
+    </script>
     <link
       rel="icon"
-      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%231674ff'/%3E%3Cpath d='M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12' stroke='%23fff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12' stroke='%23fff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="StockFlow 库流智能仓储管理系统" />

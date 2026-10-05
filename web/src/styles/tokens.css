@@ -1,70 +1,155 @@
 /**
  * StockFlow Design Token（frontend.md §2.1）
- * 业务层唯一样式变量来源；antd Token 通过 ConfigProvider 映射（App.tsx）。
+ * 业务层唯一样式变量来源；antd Token 通过 ConfigProvider 映射（App.tsx），两处同 commit 同步修改。
  * 禁止页面绕过 Token 直接写死样式值。
+ *
+ * 结构：:root 承载 Light 值 + 主题无关 token（字体/字号/间距/动效/布局）；
+ * [data-theme='dark'] 仅覆盖随主题变化的值（表面/边框/文字/状态色/阴影/图表）。
+ * 两个选择器特异性相同、后者靠后生效，dark 覆盖依赖声明顺序（stores/theme.ts 写 html[data-theme]）。
  */
 
 :root {
-  /* 表面与背景 */
-  --sf-bg: #f5f6f8;
+  /* ===== 表面与背景（任务书 §6：页面背景 #F6F7F9 与 Surface #FFFFFF 两级分层） ===== */
+  --sf-bg: #f6f7f9;
   --sf-surface: #ffffff;
   --sf-surface-elevated: #ffffff;
+  /* hover 表面档（表格行 / 侧边栏菜单 hover） */
+  --sf-surface-hover: #f8fafc;
 
-  /* 边框 */
-  --sf-border: #e1e4e8;
-  --sf-border-subtle: #eef0f2;
+  /* ===== 边框 ===== */
+  --sf-border-width: 1px;
+  --sf-border: #e5e7eb;
+  --sf-border-subtle: #f1f3f5;
 
-  /* 文字 */
-  --sf-text: rgba(31, 35, 41, 0.92);
-  --sf-text-secondary: rgba(31, 35, 41, 0.65);
-  --sf-text-muted: rgba(31, 35, 41, 0.45);
+  /* ===== 文字 ===== */
+  --sf-text: #111827;
+  --sf-text-secondary: #64748b;
+  --sf-text-muted: #94a3b8;
+  --sf-text-disabled: #cbd5e1;
 
-  /* 主色与状态色 */
-  --sf-primary: #1674ff;
-  --sf-success: #389e0d;
-  --sf-warning: #d48806;
-  --sf-danger: #cf1322;
+  /* ===== 主色与状态色 ===== */
+  --sf-primary: #2563eb;
+  --sf-primary-hover: #3f76ed;
+  --sf-primary-active: #1e53d5;
+  /* 主色底上的前景对比色（logo 描边等 on-primary 语义，两主题恒定白） */
+  --sf-on-primary: #ffffff;
+  --sf-success: #16a34a;
+  --sf-warning: #d97706;
+  --sf-danger: #dc2626;
+  --sf-info: #0891b2;
 
-  /* 圆角 */
-  --sf-radius-sm: 4px;
-  --sf-radius-md: 6px;
-  --sf-radius-lg: 8px;
+  /* ===== 字体（任务书 §8；无外部字体文件，Inter 缺省回退系统中文字体） ===== */
+  --sf-font-family: Inter, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
 
-  /* 阴影 */
-  --sf-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
-  --sf-shadow-md: 0 2px 8px rgba(15, 23, 42, 0.08);
+  /* ===== 字号层级（任务书 §8） ===== */
+  --sf-font-size-caption: 12px;
+  --sf-font-size-secondary: 13px;
+  --sf-font-size-body: 14px;
+  --sf-font-size-section-title: 16px;
+  --sf-font-size-page-title: 20px;
+  --sf-font-size-kpi: 26px;
 
-  /* 间距 */
+  /* ===== 表格（frontend.md §6.2；App.tsx Table 组件 token 同值映射） ===== */
+  --sf-table-header-text: #334155;
+  --sf-table-selected-bg: rgba(37, 99, 235, 0.06);
+  --sf-table-selected-hover-bg: rgba(37, 99, 235, 0.1);
+
+  /* ===== 圆角（任务书 §10） ===== */
+  --sf-radius-sm: 6px;
+  --sf-radius-md: 8px;
+  --sf-radius-lg: 10px;
+
+  /* ===== 阴影（任务书 §11，克制轻阴影） ===== */
+  --sf-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --sf-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.05);
+
+  /* ===== 间距（任务书 §9；1..6 既有不动，补 7） ===== */
   --sf-space-1: 4px;
   --sf-space-2: 8px;
   --sf-space-3: 12px;
   --sf-space-4: 16px;
   --sf-space-5: 20px;
   --sf-space-6: 24px;
+  --sf-space-7: 32px;
 
-  /* 布局 */
+  /* ===== 动效（任务书 §55） ===== */
+  --sf-motion-fast: 120ms;
+  --sf-motion-normal: 180ms;
+  --sf-motion-slow: 240ms;
+  --sf-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ===== 布局 ===== */
   --sf-header-height: 48px;
   --sf-sider-width: 216px;
   --sf-sider-collapsed-width: 48px;
+
+  /* ===== 图表（任务书 §31/§46/§50；SfChart 主题唯一取值来源，改此处即改图表） ===== */
+  --sf-chart-primary: #2563eb;
+  --sf-chart-secondary: #0891b2;
+  --sf-chart-success: #16a34a;
+  --sf-chart-warning: #d97706;
+  --sf-chart-danger: #dc2626;
+  --sf-chart-info: #0891b2;
+  --sf-chart-muted: #94a3b8;
+  --sf-chart-axis: #64748b;
+  --sf-chart-grid: rgba(15, 23, 42, 0.06);
+  --sf-chart-tooltip-bg: #ffffff;
+  --sf-chart-tooltip-border: #e5e7eb;
+  --sf-chart-tooltip-text: #111827;
+  --sf-chart-legend-text: #64748b;
 }
 
 [data-theme='dark'] {
-  --sf-bg: #11151a;
-  --sf-surface: #181d24;
-  --sf-surface-elevated: #1f252e;
+  /* ===== 表面与背景（任务书 §7：重建层级，禁止纯黑） ===== */
+  --sf-bg: #101418;
+  --sf-surface: #171b21;
+  --sf-surface-elevated: #1d232b;
+  --sf-surface-hover: #232a33;
 
-  --sf-border: #2b323c;
-  --sf-border-subtle: #222832;
+  /* ===== 边框（任务书 §7：透明度边框） ===== */
+  /* --sf-border-width 与主题无关，两块同声明（阶段契约：token 在 Light/Dark 均可取到） */
+  --sf-border-width: 1px;
+  --sf-border: rgba(255, 255, 255, 0.08);
+  --sf-border-subtle: rgba(255, 255, 255, 0.05);
 
-  --sf-text: rgba(230, 236, 244, 0.92);
-  --sf-text-secondary: rgba(230, 236, 244, 0.65);
-  --sf-text-muted: rgba(230, 236, 244, 0.45);
+  /* ===== 文字（任务书 §7 精确值） ===== */
+  --sf-text: rgba(255, 255, 255, 0.9);
+  --sf-text-secondary: rgba(255, 255, 255, 0.6);
+  --sf-text-muted: rgba(255, 255, 255, 0.38);
+  --sf-text-disabled: rgba(255, 255, 255, 0.25);
 
-  --sf-primary: #3c8dff;
-  --sf-success: #6abf3f;
-  --sf-warning: #e8b339;
+  /* ===== 主色与状态色（与 Light 同相提亮） ===== */
+  --sf-primary: #4c7ef0;
+  --sf-primary-hover: #6b93f3;
+  --sf-primary-active: #3a6be0;
+  /* --sf-on-primary 与主题无关，两块同声明（阶段契约：token 在 Light/Dark 均可取到） */
+  --sf-on-primary: #ffffff;
+  --sf-success: #3fb950;
+  --sf-warning: #e8a33d;
   --sf-danger: #e8564f;
+  --sf-info: #22b8cf;
 
-  --sf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.32);
-  --sf-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.4);
+  /* ===== 阴影（任务书 §11：dark 以边框 + 分层替代重阴影） ===== */
+  --sf-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.24);
+  --sf-shadow-md: 0 2px 8px rgba(0, 0, 0, 0.32);
+
+  /* ===== 表格（与 Light 同相提亮） ===== */
+  --sf-table-header-text: rgba(255, 255, 255, 0.72);
+  --sf-table-selected-bg: rgba(76, 126, 240, 0.16);
+  --sf-table-selected-hover-bg: rgba(76, 126, 240, 0.22);
+
+  /* ===== 图表 ===== */
+  --sf-chart-primary: #4c7ef0;
+  --sf-chart-secondary: #22b8cf;
+  --sf-chart-success: #3fb950;
+  --sf-chart-warning: #e8a33d;
+  --sf-chart-danger: #e8564f;
+  --sf-chart-info: #22b8cf;
+  --sf-chart-muted: rgba(255, 255, 255, 0.45);
+  --sf-chart-axis: rgba(255, 255, 255, 0.6);
+  --sf-chart-grid: rgba(255, 255, 255, 0.07);
+  --sf-chart-tooltip-bg: #1d232b;
+  --sf-chart-tooltip-border: rgba(255, 255, 255, 0.08);
+  --sf-chart-tooltip-text: rgba(255, 255, 255, 0.9);
+  --sf-chart-legend-text: rgba(255, 255, 255, 0.6);
 }

@@ -3,6 +3,7 @@ import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
 import { authApi, PASSWORD_RULE, type LoginPayload } from '@/api/auth'
+import { SfLogo } from '@/components/common/SfLogo'
 import { useAuthStore, type SessionInput } from '@/stores/auth'
 import { matchFieldErrors, resolveErrorMessage } from '@/api/client'
 import type { UserInfo } from '@/types/permission'
@@ -142,16 +143,7 @@ export function LoginPage() {
       >
         <Flex vertical gap={4} style={{ marginBottom: 24 }}>
           <Flex align="center" gap={10}>
-            <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden>
-              <rect width="32" height="32" rx="7" fill="var(--sf-primary)" />
-              <path
-                d="M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12"
-                stroke="#fff"
-                strokeWidth="2.6"
-                fill="none"
-                strokeLinecap="round"
-              />
-            </svg>
+            <SfLogo size={30} />
             <Title level={4} style={{ margin: 0 }}>StockFlow</Title>
           </Flex>
           <Text type="secondary">库流智能仓储管理系统</Text>

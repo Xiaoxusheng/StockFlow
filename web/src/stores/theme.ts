@@ -2,6 +2,8 @@ import { create } from 'zustand'
 
 export type ThemeMode = 'light' | 'dark'
 
+// web/index.html <head> 内联脚本镜像了本文件的首帧解析逻辑（防 FOUC 首帧闪白）：
+// 修改 STORAGE_KEY / resolveInitialMode / applyToDocument 时必须同 commit 同步该脚本（注释互指）。
 const STORAGE_KEY = 'sf.theme'
 
 function resolveInitialMode(): ThemeMode {

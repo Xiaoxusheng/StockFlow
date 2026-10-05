@@ -1,0 +1,74 @@
+/**
+ * StockFlow 图表基座专属样式（web/src/components/charts/index.ts 唯一入口 import）
+ *
+ * 颜色一律引用 tokens.css 的 --sf-* Design Token，本文件不定义任何色值
+ * （--sf-chart-* 变量本体在 tokens.css，是图表色值唯一真相，见 themeContract）。
+ */
+
+/* ===== SfChart 渲染容器 ===== */
+.sf-chart {
+  position: relative;
+  width: 100%;
+  /* 高度由内联样式（height prop，默认 260px）控制，保证三态切换不抖动 */
+}
+
+/* 三态（loading / error / empty）占位：居中 + 保高，防布局抖动（任务书 §51） */
+.sf-chart__state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+.sf-chart__state--skeleton {
+  padding: var(--sf-space-4);
+}
+
+/* ===== SfChartCard 图表卡片（任务书 §45，紧凑 padding 走 --sf-space-4/5） ===== */
+.sf-chart-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--sf-surface);
+  border: var(--sf-border-width) solid var(--sf-border);
+  border-radius: var(--sf-radius-md);
+  box-shadow: var(--sf-shadow-sm);
+}
+
+.sf-chart-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sf-space-3);
+  padding: var(--sf-space-4) var(--sf-space-5) 0;
+}
+
+.sf-chart-card__titles {
+  min-width: 0;
+}
+
+.sf-chart-card__title {
+  margin: 0;
+  font-size: var(--sf-font-size-section-title);
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--sf-text);
+}
+
+.sf-chart-card__subtitle {
+  margin-top: 2px;
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text-secondary);
+}
+
+.sf-chart-card__extra {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--sf-space-2);
+}
+
+.sf-chart-card__body {
+  min-width: 0;
+  padding: var(--sf-space-4) var(--sf-space-5) var(--sf-space-5);
+}

@@ -1,4 +1,4 @@
-import { Button, Drawer, Flex, List, Tag, Typography } from 'antd'
+import { Button, Drawer, Flex, List, Typography } from 'antd'
 import { CheckOutlined } from '@ant-design/icons'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
@@ -8,22 +8,26 @@ import { formatDateTime } from '@/utils/format'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import type { StatusSemantic } from '@/types/status'
 
 const { Text } = Typography
 
 /** 单页条数（后端 ParsePage 单页上限 100，internal/response/response.go MaxPageSize） */
 const PAGE_SIZE = 50
 
-// 通知类型 → Tag 色：键为后端值域大写枚举（db/migrations/000014 chk_notifications_type：
+// 通知类型 → 语义色：键为后端值域大写枚举（db/migrations/000014 chk_notifications_type：
 // SYSTEM/APPROVAL/STOCK_ALERT/EXPIRY_ALERT/EXCEPTION/TASK，api/notifications.ts
-// NotificationType）；未知类型兜底 default 色。
-const NOTIFICATION_TYPE_COLOR: Record<string, string> = {
-  APPROVAL: 'blue',
-  STOCK_ALERT: 'orange',
-  EXPIRY_ALERT: 'gold',
-  EXCEPTION: 'red',
-  TASK: 'cyan',
-  SYSTEM: 'default',
+// NotificationType）。§24 状态色统一：语义 → SfStatusTag 经 --sf-* Token 派生，
+// 禁 antd 预设色（orange/gold 与 --sf-warning、red 与 --sf-danger 不同相）；
+// 未知类型中性兜底。
+const NOTIFICATION_TYPE_SEMANTIC: Record<string, StatusSemantic> = {
+  APPROVAL: 'processing',
+  STOCK_ALERT: 'warning',
+  EXPIRY_ALERT: 'warning',
+  EXCEPTION: 'danger',
+  TASK: 'processing',
+  SYSTEM: 'neutral',
 }
 
 export interface NotificationDrawerProps {
@@ -112,9 +116,10 @@ export function NotificationDrawer({ open, onClose }: NotificationDrawerProps) {
               >
                 <Flex vertical gap={4} style={{ width: '100%' }}>
                   <Flex align="center" gap={8}>
-                    <Tag color={NOTIFICATION_TYPE_COLOR[item.type] ?? 'default'} style={{ marginInlineEnd: 0 }}>
-                      {item.title}
-                    </Tag>
+                    <SfStatusTag
+                      label={item.title}
+                      semantic={NOTIFICATION_TYPE_SEMANTIC[item.type] ?? 'neutral'}
+                    />
                     {!item.read && <Text type="danger" style={{ fontSize: 12 }}>未读</Text>}
                   </Flex>
                   {/* 未读内容加粗、已读弱化，视觉一眼可分 */}

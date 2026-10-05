@@ -5,9 +5,9 @@ export const EMPTY_TEXT = '-'
 
 type DateLike = string | number | Date | null | undefined
 
-/** 时间：YYYY-MM-DD HH:mm:ss */
+/** 时间：YYYY-MM-DD HH:mm（任务书 §36：全站统一分钟精度，禁止各页面自选格式） */
 export function formatDateTime(value: DateLike): string {
-  return formatByPattern(value, 'YYYY-MM-DD HH:mm:ss')
+  return formatByPattern(value, 'YYYY-MM-DD HH:mm')
 }
 
 /** 日期：YYYY-MM-DD */

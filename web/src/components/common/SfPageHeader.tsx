@@ -12,19 +12,19 @@ export interface SfPageHeaderProps {
 }
 
 /**
- * 统一页面头（frontend.md §4.1 Page Header）
- * 紧凑单行结构：标题 + 副标题 + 右侧操作，不做大 Banner。
+ * 统一页面头（frontend.md §4.1 Page Header / 任务书 §15）
+ * 紧凑单行结构：标题(20px，antd level 4 = --sf-font-size-page-title) + 副标题 + 右侧操作，不做大 Banner。
  */
 export function SfPageHeader({ title, subtitle, extra, onBack }: SfPageHeaderProps) {
   return (
     <Flex
       align="center"
       justify="space-between"
-      gap={16}
-      style={{ marginBottom: 16 }}
+      gap="var(--sf-space-4)"
+      style={{ marginBottom: 'var(--sf-space-4)' }}
       wrap="wrap"
     >
-      <Flex align="center" gap={12} style={{ minWidth: 0 }}>
+      <Flex align="center" gap="var(--sf-space-3)" style={{ minWidth: 0 }}>
         {onBack && (
           <Typography.Link onClick={onBack} style={{ whiteSpace: 'nowrap' }}>
             返回
@@ -34,12 +34,15 @@ export function SfPageHeader({ title, subtitle, extra, onBack }: SfPageHeaderPro
           {title}
         </Title>
         {subtitle && (
-          <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
+          <Text
+            type="secondary"
+            style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+          >
             {subtitle}
           </Text>
         )}
       </Flex>
-      {extra && <Flex align="center" gap={8}>{extra}</Flex>}
+      {extra && <Flex align="center" gap="var(--sf-space-2)">{extra}</Flex>}
     </Flex>
   )
 }

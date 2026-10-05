@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Button, Flex, Form, Select, Input } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ReactNode } from 'react'
@@ -30,15 +31,20 @@ export interface SfSearchFormProps {
 export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible = fields.length >= 5 }: SfSearchFormProps) {
   const [form] = Form.useForm()
   const collapsed = useWatch('collapsed', form) ?? collapsible
+  // 任务书 §50：已生效筛选条件数——只在用户提交后增长，如实反映当前过滤状态
+  const [appliedCount, setAppliedCount] = useState(0)
 
   const visibleFields = collapsed ? fields.slice(0, 3) : fields
 
   const handleFinish = (values: Record<string, unknown>) => {
-    onSearch(cleanValues(values))
+    const cleaned = cleanValues(values)
+    setAppliedCount(Object.keys(cleaned).length)
+    onSearch(cleaned)
   }
 
   const handleReset = () => {
     form.resetFields()
+    setAppliedCount(0)
     onReset?.()
     onSearch({})
   }
@@ -48,9 +54,10 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
       form={form}
       onFinish={handleFinish}
       initialValues={{ collapsed }}
-      style={{ marginBottom: 12 }}
+      style={{ marginBottom: 'var(--sf-space-3)' }}
     >
-      <Flex gap={12} wrap="wrap" align="middle" style={{ marginBottom: 12 }}>
+      {/* 弹性行：字段 flex 挤占 + 操作按钮同排尾部（f854d23 行为），仅去除外层重复下边距 */}
+      <Flex gap="var(--sf-space-3)" wrap="wrap" align="middle">
         {visibleFields.map((field) => (
           <Form.Item
             key={field.name}
@@ -73,7 +80,7 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
             )}
           </Form.Item>
         ))}
-        <Flex gap={8} wrap="wrap" style={{ flex: '0 0 auto' }}>
+        <Flex gap="var(--sf-space-2)" wrap="wrap" style={{ flex: '0 0 auto' }}>
           <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
             查询
           </Button>
@@ -87,6 +94,27 @@ export function SfSearchForm({ fields, onSearch, onReset, loading, collapsible =
           )}
         </Flex>
       </Flex>
+      {appliedCount > 0 && (
+        <Flex
+          align="center"
+          gap={4}
+          style={{
+            marginTop: 'var(--sf-space-2)',
+            fontSize: 'var(--sf-font-size-caption)',
+            color: 'var(--sf-text-muted)',
+          }}
+        >
+          已筛选 {appliedCount} 项
+          <Button
+            type="link"
+            size="small"
+            style={{ paddingInline: 4, height: 22 }}
+            onClick={handleReset}
+          >
+            清除全部
+          </Button>
+        </Flex>
+      )}
     </Form>
   )
 }
