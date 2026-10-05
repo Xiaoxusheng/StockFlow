@@ -62,6 +62,15 @@ export const STATUS_META: Record<string, StatusMeta> = {
   signed: { label: '已签收', semantic: 'success' },
   shipment_exception: { label: '发货异常', semantic: 'danger' },
 
+  // 销售出库/退货单据态（internal/sales/models.go:265-276 出库单十态、internal/returns/
+  // models.go:27-36 退货单八态的专有键；通用八态复用上方通用键）。2026-10-05 收口补键
+  // 统一多数派口径：销售域 salesStatusMeta 与采购退货 RETURN_STATUS_TAG 既有兜底与本表
+  // 逐键同值（行为零变化）；出库域 OutboundPage 随注册表切换——PARTIAL_SHIPPED
+  // warning→processing、SHIPPED_ALL '已发货'→'全部发货'。
+  partial_shipped: { label: '部分发货', semantic: 'processing' },
+  shipped_all: { label: '全部发货', semantic: 'success' },
+  in_qc: { label: '质检中', semantic: 'processing' },
+
   // 调拨单（business-flow.md §10.1 七态经 toStatusKey 归一：draft/pending_approval/approved/
   // transferring/awaiting_receipt/completed/cancelled——internal/stockops/models.go:134-142；
   // approved 复用上方通用键「已审核」，调拨语境「待出库」文案由 api/transfer.ts

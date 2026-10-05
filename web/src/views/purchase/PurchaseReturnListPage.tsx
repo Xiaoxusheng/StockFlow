@@ -27,8 +27,8 @@ import { formatDateTime } from '@/utils/format'
  * 采购退货单状态 → SfStatusTag（internal/returns/models.go:27-36 八态，经
  * api/purchase.ts PurchaseReturnStatus 回对）。types/status.ts 注册表已收录
  * draft/pending_approval/approved/receiving/shipped/completed/cancelled（文案/语义
- * 一致，SfStatusTag 以注册表优先）；IN_QC 为退货语境专有键未注册，经 SfStatusTag
- * 的 label/semantic 兜底；后端返回未知值时中性灰 + 原始文案，不崩溃。
+ * 一致，SfStatusTag 以注册表优先）；IN_QC 退货语境专有键已于 2026-10-05 收口补注册
+ * （in_qc{质检中,processing}，与本表同值，行为零变化）；后端返回未知值时中性灰 + 原始文案，不崩溃。
  */
 const RETURN_STATUS_TAG: Record<PurchaseReturnStatus, { label: string; semantic: StatusSemantic }> = {
   DRAFT: { label: '草稿', semantic: 'neutral' },

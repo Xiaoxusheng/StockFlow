@@ -11,7 +11,8 @@ export type DashboardView = 'management' | 'operator'
 /**
  * Dashboard 端点时间参数（对齐后端报表域冻结口径：requireRange，handler.go:26-53——
  * time_from/time_to，YYYY-MM-DD，缺省近 30 天，上限 366 天）。禁止 from/to 拼写。
- * 五个 /api/reports/dashboard/* 端点后端尚未注册（遗留清单挂账项），接线时按本契约回对。
+ * 五个 /api/reports/dashboard/* 端点已于 2026-10-05 联调轮注册
+ * （internal/reports/routes.go:56-60，权限 inventory:inventory:list）。
  */
 export interface DashboardTimeParams {
   /** 自定义时间窗起（YYYY-MM-DD）；仅 trend 图表时间段切换时下发 */
@@ -70,7 +71,9 @@ export interface DashboardTaskItem {
   link: string
 }
 
-/** 库存预警条目（字段按后端 snake_case 口径对齐，repository.go AlertItem 同源语义） */
+/** 库存预警条目（字段按后端 snake_case 口径对齐，dashboard.go:94-102 dashboardAlertRowDTO 同源：
+ * created_at 为 *database.JSONTime，种子流水无发生时间时实测为 null——formatDateTime 空
+ * 值统一占位「-」） */
 export interface DashboardAlertItem {
   id: number | string
   type: string
@@ -78,7 +81,7 @@ export interface DashboardAlertItem {
   sku_code: string
   product_name: string
   message: string
-  created_at: string
+  created_at: string | null
 }
 
 /** 仓库库存分析（frontend.md §5 第四层；字段按后端 snake_case 口径对齐） */
@@ -90,8 +93,11 @@ export interface DashboardWarehouseStock {
   bin_utilization: number
 }
 
-/** 五个 /api/reports/dashboard/* 端点后端尚未注册（遗留清单挂账项）：
- * 页面呈统一错误态合规；端点立项接线时按本封装与后端 JSON tag 回对。 */
+/** Dashboard 五端点（routes.go:56-60 已注册，DTO 见 internal/reports/dashboard.go:37-102——
+ * JSON tag 已逐字段核实与本文件类型一致）。本文件只承载 /api/reports/dashboard/* 五端点；
+ * Dashboard 页其余块消费既有封装：inventoryApi.stockSummary/analytics（GET /api/inventory/summary|
+ * analytics，routes.go:64,67）、reportsApi.inboundStats/outboundStats（KPI 迷你趋势）、
+ * inventoryApi.ledger（最近库存异动表）——不改其他 api 文件。 */
 export const dashboardApi = {
   todayMetrics: (params?: DashboardTimeParams) =>
     http.get<DashboardTodayMetrics>('/api/reports/dashboard/today', { params }),

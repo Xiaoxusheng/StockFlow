@@ -1,0 +1,82 @@
+/**
+ * Dashboard 页面专属样式（任务书 §17 KPI 卡 / §27 高密度工作台）
+ *
+ * 颜色 / 间距 / 圆角 / 阴影一律引用 tokens.css 的 --sf-* Design Token，
+ * 本文件不定义任何色值字面量（AGENTS.md 硬性规则 3 / 任务书 §64）。
+ */
+
+/* ===== KPI 卡（§17：标签 13px / 数字 24~28px tabular-nums / 颜色只用于趋势和状态） ===== */
+.sf-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  height: 100%;
+  padding: var(--sf-space-4) var(--sf-space-5);
+  background: var(--sf-surface);
+  border: var(--sf-border-width) solid var(--sf-border);
+  border-radius: var(--sf-radius-md);
+  box-shadow: var(--sf-shadow-sm);
+  /* §57 Card Hover 只动 border-color / box-shadow */
+  transition:
+    border-color var(--sf-motion-normal) var(--sf-motion-ease),
+    box-shadow var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+.sf-kpi-card--link {
+  cursor: pointer;
+}
+
+.sf-kpi-card--link:hover {
+  border-color: var(--sf-primary);
+  box-shadow: var(--sf-shadow-md);
+}
+
+.sf-kpi-card__label {
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text-secondary);
+  line-height: 1.4;
+}
+
+.sf-kpi-card__value {
+  font-size: var(--sf-font-size-kpi);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--sf-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-kpi-card__value--danger {
+  color: var(--sf-danger);
+}
+
+/* 底部信息区固定高度：迷你趋势（32px）或次要说明，保证同排卡片等高 */
+.sf-kpi-card__footer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sf-space-2);
+  min-height: 32px;
+}
+
+.sf-kpi-card__footer--spark {
+  align-items: center;
+}
+
+.sf-kpi-card__footer .sf-kpi-card__spark {
+  flex: 1;
+  min-width: 0;
+}
+
+.sf-kpi-card__sub {
+  font-size: var(--sf-font-size-caption);
+  color: var(--sf-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* KPI 卡错误态（§53：单块失败不拖垮整排，块内可重试） */
+.sf-kpi-card__error {
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+  font-size: var(--sf-font-size-caption);
+  color: var(--sf-danger);
+}

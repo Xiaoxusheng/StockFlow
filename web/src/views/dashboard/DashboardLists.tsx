@@ -1,6 +1,7 @@
 import { Flex, Typography } from 'antd'
 import { useNavigate } from 'react-router'
 import type { DashboardAlertItem, DashboardTaskItem } from '@/api/dashboard'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { formatDateTime, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
@@ -31,7 +32,8 @@ export function TaskList({ items }: { items: DashboardTaskItem[] }) {
   )
 }
 
-/** 第三层库存预警（数据来自 GET /api/reports/dashboard/alerts） */
+/** 第三层库存预警（数据来自 GET /api/reports/dashboard/alerts，前 8 条 feed）；
+ * 级别标签统一走 SfStatusTag（types/status.ts 已注册五级预警语义，frontend.md §24） */
 export function AlertList({ items }: { items: DashboardAlertItem[] }) {
   const navigate = useNavigate()
   return (
@@ -44,10 +46,13 @@ export function AlertList({ items }: { items: DashboardAlertItem[] }) {
           style={{ padding: '8px 4px', borderBottom: '1px solid var(--sf-border-subtle)', cursor: 'pointer' }}
           onClick={() => navigate('/inventory/alerts')}
         >
-          <Flex justify="space-between" gap={12}>
-            <Text strong style={{ fontSize: 13 }}>
-              {item.sku_code} · {item.product_name}
-            </Text>
+          <Flex justify="space-between" gap={12} align="center">
+            <Flex gap={8} align="center" style={{ minWidth: 0 }}>
+              <SfStatusTag status={item.level} />
+              <Text strong style={{ fontSize: 13 }} ellipsis>
+                {item.sku_code} · {item.product_name}
+              </Text>
+            </Flex>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {formatDateTime(item.created_at)}
             </Text>

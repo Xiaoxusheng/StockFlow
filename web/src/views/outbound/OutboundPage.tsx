@@ -23,8 +23,9 @@ const { Link, Text } = Typography
 
 /** 出库单状态 → SfStatusTag（frontend.md §24：颜色统一走注册表语义）。
  * 后端大写枚举（internal/sales/models.go:265-276）经 toStatusKey 归一后命中
- * types/status.ts 注册表（pending_allocate/…/cancelled/closed）；
- * PARTIAL_SHIPPED/SHIPPED_ALL 注册表暂无键，以 label/semantic 兜底，注册表补键后自动切换。 */
+ * types/status.ts 注册表（pending_allocate/…/cancelled/closed，2026-10-05 收口补键
+ * partial_shipped/shipped_all 统一多数派口径）；本表保留为注册表缺失时的兜底，
+ * 两专有键值已对齐注册表（部分发货=processing、全部发货=success）防漂移。 */
 const OB_STATUS_TAG: Record<OutboundOrderStatus, { label: string; semantic: StatusSemantic }> = {
   PENDING_ALLOCATE: { label: '待分配', semantic: 'pending' },
   ALLOCATED: { label: '已分配', semantic: 'processing' },
@@ -32,8 +33,8 @@ const OB_STATUS_TAG: Record<OutboundOrderStatus, { label: string; semantic: Stat
   PICKED: { label: '已拣货', semantic: 'success' },
   CHECKED: { label: '已复核', semantic: 'success' },
   PACKED: { label: '已打包', semantic: 'success' },
-  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'warning' },
-  SHIPPED_ALL: { label: '已发货', semantic: 'success' },
+  PARTIAL_SHIPPED: { label: '部分发货', semantic: 'processing' },
+  SHIPPED_ALL: { label: '全部发货', semantic: 'success' },
   CANCELLED: { label: '已取消', semantic: 'neutral' },
   CLOSED: { label: '已关闭', semantic: 'neutral' },
 }
@@ -52,7 +53,7 @@ const STATUS_OPTIONS: Array<{ label: string; value: OutboundOrderStatus }> = [
   { label: '已复核', value: 'CHECKED' },
   { label: '已打包', value: 'PACKED' },
   { label: '部分发货', value: 'PARTIAL_SHIPPED' },
-  { label: '已发货', value: 'SHIPPED_ALL' },
+  { label: '全部发货', value: 'SHIPPED_ALL' },
   { label: '已取消', value: 'CANCELLED' },
   { label: '已关闭', value: 'CLOSED' },
 ]

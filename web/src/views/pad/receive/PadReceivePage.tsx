@@ -120,11 +120,20 @@ function parseSerials(text: string): string[] {
     .filter((s) => s.length > 0)
 }
 
-/** 新幂等键（service_inbound.go:69-74：同一次收货意图重试复用同键，成功后作废） */
+/** 新幂等键（service_inbound.go:69-74：同一次收货意图重试复用同键，成功后作废）。
+ * crypto.randomUUID 优先；非安全上下文（局域网 http 直连）回退 crypto.getRandomValues
+ * （window.crypto 全量可用，无需 https）；两者皆缺再回退时间戳+会话内计数器。 */
+let idemKeySeq = 0
 function newIdempotencyKey(): string {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `pad-receive-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    const buf = new Uint32Array(2)
+    crypto.getRandomValues(buf)
+    return `pad-receive-${Date.now()}-${buf[0].toString(36)}${buf[1].toString(36)}`
+  }
+  return `pad-receive-${Date.now()}-${(idemKeySeq += 1).toString(36)}`
 }
 
 /** 数量步进器（≥ 触摸最小尺寸大按钮，frontend.md §20.9） */

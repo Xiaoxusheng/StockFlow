@@ -1,9 +1,9 @@
-import { lazy, Suspense } from 'react'
 import type { ReactNode } from 'react'
 import { Button, Card, Col, Flex, Progress, Row, Skeleton, Statistic, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { systemApi, type SystemMonitorMetrics } from '@/api/system'
+import { SfLineChart } from '@/components/charts'
 import { SfDetailSection } from '@/components/common/SfDetailSection'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
@@ -12,9 +12,6 @@ import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { EMPTY_TEXT, formatNumber, formatPercent } from '@/utils/format'
 
 const { Text } = Typography
-
-/** 图表按需加载（同 AnalyticsPage 模式，避免 plots 进入首包） */
-const Line = lazy(() => import('@ant-design/plots').then((m) => ({ default: m.Line })))
 
 /** Progress percent 值域保护（0~100；接口异常值不阻塞渲染） */
 function clampPercent(value: number | undefined): number | undefined {
@@ -107,10 +104,13 @@ export default function MonitorPage() {
   const queues = data?.queued_tasks ?? []
   const remarks = data?.remarks ?? []
 
-  const trendData = (data?.api_trend ?? []).flatMap((point) => [
-    { time: point.time, 类型: '请求量', 数量: point.requests },
-    { time: point.time, 类型: '错误数', 数量: point.errors },
-  ])
+  // 趋势宽表（SfLineChart 多序列入参）：请求量/错误数按 5 分钟桶对齐，
+  // 图表主题/色板/三态由 SfChart 内核统一注入（业务页零图表色值字面量）
+  const trendData = (data?.api_trend ?? []).map((point) => ({
+    time: point.time,
+    请求量: point.requests,
+    错误数: point.errors,
+  }))
 
   return (
     <div className="sf-page">
@@ -206,23 +206,22 @@ export default function MonitorPage() {
             </Col>
           </Row>
 
-          {/* API 请求/错误趋势：图表数据全部来自契约端点 api_trend（近 24 小时，5 分钟聚桶） */}
+          {/* API 请求/错误趋势（§32 折线）：图表数据全部来自契约端点 api_trend（近 24 小时，
+              5 分钟聚桶）；SfLineChart 内聚三态（Loading/Empty/Error），空桶如实空态不画 0 */}
           <Card size="small" title="API 请求 / 错误趋势（近 24 小时 · 5 分钟聚桶）">
-            {trendData.length === 0 ? (
-              <SfEmpty description="暂无趋势采样数据（进程内采样随请求积累，服务重启后清零）" />
-            ) : (
-              <Suspense fallback={<Skeleton active paragraph={{ rows: 5 }} />}>
-                <Line
-                  data={trendData}
-                  xField="time"
-                  yField="数量"
-                  colorField="类型"
-                  shapeField="smooth"
-                  height={280}
-                  style={{ maxWidth: '100%' }}
-                />
-              </Suspense>
-            )}
+            <SfLineChart
+              data={trendData}
+              xField="time"
+              series={[
+                { key: '请求量', name: '请求量', color: 'primary' },
+                { key: '错误数', name: '错误数', color: 'danger' },
+              ]}
+              height={280}
+              loading={metrics.isPending}
+              error={metrics.error}
+              onRetry={() => void metrics.refetch()}
+              emptyText="暂无趋势采样数据（进程内采样随请求积累，服务重启后清零）"
+            />
           </Card>
 
           {/* 运行信息：进程运行时长 + 版本三元组（构建提交缺省不展示，不造假版本号） */}

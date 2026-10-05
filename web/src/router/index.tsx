@@ -20,6 +20,8 @@ const LoginPageLazy = lazy(() => import('@/views/login/LoginPage').then((m) => (
 // 基础资料（F6 基础资料 M1 契约域）
 const ProductListPage = lazy(() => import('@/views/masterdata/ProductListPage'))
 const SkuListPage = lazy(() => import('@/views/masterdata/SkuListPage'))
+// 商品二维码中心（F12 扩展：SFQR 闭环，frontend.md §13.1；基础资料组菜单，权限复用 sku:view）
+const QrCodeCenterPage = lazy(() => import('@/views/masterdata/QrCodeCenterPage'))
 const CategoryListPage = lazy(() => import('@/views/masterdata/CategoryListPage'))
 const UnitListPage = lazy(() => import('@/views/masterdata/UnitListPage'))
 const SupplierListPage = lazy(() => import('@/views/masterdata/SupplierListPage'))
@@ -31,6 +33,8 @@ const ZoneListPage = lazy(() => import('@/views/warehouse/ZoneListPage'))
 const ShelfListPage = lazy(() => import('@/views/warehouse/ShelfListPage'))
 const BinListPage = lazy(() => import('@/views/warehouse/BinListPage'))
 const WarehouseMapPage = lazy(() => import('@/views/warehouse/WarehouseMapPage'))
+// 仓库分析（六域图表轮：库房维度聚合，/api/reports/warehouse-stock 挂 inventory:inventory:list）
+const WarehouseAnalyticsPage = lazy(() => import('@/views/warehouse/WarehouseAnalyticsPage'))
 
 // 系统管理（F13 系统管理 M1 契约域）
 const UserListPage = lazy(() => import('@/views/system/UserListPage'))
@@ -42,6 +46,8 @@ const DepartmentPage = lazy(() => import('@/views/system/DepartmentPage'))
 const InboundPage = lazy(() => import('@/views/inbound/InboundPage'))
 const OutboundPage = lazy(() => import('@/views/outbound/OutboundPage'))
 const PurchaseListPage = lazy(() => import('@/views/purchase/PurchaseListPage'))
+// 出库分析（六域图表轮：/api/reports/outbound-stats 挂 reports:report:read）
+const OutboundAnalyticsPage = lazy(() => import('@/views/outbound/OutboundAnalyticsPage'))
 
 // 任务中心（F8：工作台四计数 + 我的任务；后端任务域未交付，呈统一错误态）
 const WorkbenchPage = lazy(() => import('@/views/workbench/WorkbenchPage'))
@@ -77,6 +83,8 @@ const PurchaseOrderDetailPage = lazy(() => import('@/views/purchase/PurchaseOrde
 // 单据创建/草稿编辑共用表单页（采购订单/入库单；列表「新建」与详情「编辑」跳转目标，无菜单路径）
 const PurchaseOrderFormPage = lazy(() => import('@/views/purchase/PurchaseOrderFormPage'))
 const InboundFormPage = lazy(() => import('@/views/inbound/InboundFormPage'))
+// 入库分析（六域图表轮：/api/reports/inbound-stats 挂 reports:report:read）
+const InboundAnalyticsPage = lazy(() => import('@/views/inbound/InboundAnalyticsPage'))
 
 // 质量中心（前端先行契约：后端质量域未交付，呈统一错误态）
 const QualityInspectionListPage = lazy(() => import('@/views/quality/QualityInspectionListPage'))
@@ -159,12 +167,15 @@ const IMPLEMENTED_PATHS = new Set([
   // 基础资料
   '/products',
   '/skus',
+  '/qr-codes',
   '/categories',
   '/units',
   '/suppliers',
   '/customers',
   // 仓库中心
   '/warehouses',
+  // 仓库分析（六域图表轮；不加则 placeholderRoutes 按菜单路径生成同路径占位路由抢占真页）
+  '/warehouses/analytics',
   '/zones',
   '/shelves',
   '/bins',
@@ -178,7 +189,11 @@ const IMPLEMENTED_PATHS = new Set([
   '/system/departments',
   // 仓储作业 / 采购
   '/inbound',
+  // 入库分析（六域图表轮；不加则菜单路径被占位路由抢占）
+  '/inbound/analytics',
   '/outbound',
+  // 出库分析（六域图表轮；同上）
+  '/outbound/analytics',
   '/purchases',
   // 异常中心
   '/exceptions',
@@ -341,6 +356,11 @@ export const router = createBrowserRouter([
         path: 'inbound/new',
         element: <LazyPage><InboundFormPage /></LazyPage>,
       },
+      // 入库分析（六域图表轮；静态段先于 inbound/:id 动态段）
+      {
+        path: 'inbound/analytics',
+        element: <LazyPage><InboundAnalyticsPage /></LazyPage>,
+      },
       // 入库单详情（列表「详情」列进入；动态段无菜单）
       {
         path: 'inbound/:id',
@@ -354,6 +374,11 @@ export const router = createBrowserRouter([
       {
         path: 'outbound',
         element: <LazyPage><OutboundPage /></LazyPage>,
+      },
+      // 出库分析（六域图表轮；静态段必须先于 outbound/:id 动态段）
+      {
+        path: 'outbound/analytics',
+        element: <LazyPage><OutboundAnalyticsPage /></LazyPage>,
       },
       // 出库单详情（动态段无菜单）
       {
@@ -386,6 +411,11 @@ export const router = createBrowserRouter([
       {
         path: 'warehouses',
         element: <LazyPage><WarehouseListPage /></LazyPage>,
+      },
+      // 仓库分析（六域图表轮；无 warehouses/:id 动态段，静态嵌套无冲突）
+      {
+        path: 'warehouses/analytics',
+        element: <LazyPage><WarehouseAnalyticsPage /></LazyPage>,
       },
       {
         path: 'zones',
@@ -468,6 +498,11 @@ export const router = createBrowserRouter([
       {
         path: 'skus',
         element: <LazyPage><SkuListPage /></LazyPage>,
+      },
+      // 商品二维码中心（F12 扩展：SFQR 闭环工作台；?code= 直达承接扫码识别跳转）
+      {
+        path: 'qr-codes',
+        element: <LazyPage><QrCodeCenterPage /></LazyPage>,
       },
       {
         path: 'categories',

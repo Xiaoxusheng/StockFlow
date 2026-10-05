@@ -43,7 +43,14 @@ export const MENU_TREE: MenuItem[] = [
     children: [
       { path: '/tasks', label: '我的任务', permission: 'task:view' },
       { path: '/inbound', label: '入库管理', permission: 'inbound:view' },
+      // 入/出库分析菜单码 reports:report:view：数据端点挂 reports:report:read
+      // （internal/reports/routes.go inbound-stats/outbound-stats），matchBackendPermission
+      // 取末两段 report:view 命中后端冻结码 reports:report:list/read（permissions.go:343-344，
+      // :report: 资源段全局唯一）任一动作即放行——菜单可见 ⟺ 数据可达；
+      // 域码（inbound:view 等）无报表读权限角色进页 403、造 analytics 假码则恒隐身。
+      { path: '/inbound/analytics', label: '入库分析', permission: 'reports:report:view' },
       { path: '/outbound', label: '出库管理', permission: 'outbound:view' },
+      { path: '/outbound/analytics', label: '出库分析', permission: 'reports:report:view' },
       { path: '/picking', label: '拣货管理', permission: 'picking:view' },
       { path: '/checking', label: '复核管理', permission: 'checking:view' },
       { path: '/packing', label: '打包管理', permission: 'packing:view' },
@@ -71,7 +78,13 @@ export const MENU_TREE: MenuItem[] = [
       // （grep -rn ':alert:' internal/ db/ 零输出），非超管用户看不到菜单入口。
       { path: '/inventory/alerts', label: '库存预警', permission: 'inventory:stock:view' },
       { path: '/inventory/trace', label: '库存追溯', permission: 'inventory:trace:view' },
-      { path: '/inventory/analytics', label: '库存分析', permission: 'inventory:analytics:view' },
+      // 库存分析菜单码归一为 inventory:stock:view（同上方库存预警修法）：原
+      // inventory:analytics:view 资源段 analytics 在后端冻结权限码零命中
+      // （grep -rn "analytics:view|inventory:analytics" internal/ db/ 零输出），
+      // matchBackendPermission 按末两段匹配永不命中 → 非超管恒隐身（fail-closed）；
+      // /inventory/analytics 页三数据端点挂 inventory:inventory:list（internal/reports/
+      // routes.go:63-67），stock 经 RESOURCE_ALIASES 命中，与实时库存同码同源。
+      { path: '/inventory/analytics', label: '库存分析', permission: 'inventory:stock:view' },
     ],
   },
   {
@@ -80,6 +93,9 @@ export const MENU_TREE: MenuItem[] = [
     icon: <HomeOutlined />,
     children: [
       { path: '/warehouses', label: '仓库', permission: 'warehouse:view' },
+      // 仓库分析菜单码 inventory:stock:view：数据端点 /api/reports/warehouse-stock 挂
+      // inventory:inventory:list（internal/reports/routes.go:60），与实时库存/库存预警同码同源。
+      { path: '/warehouses/analytics', label: '仓库分析', permission: 'inventory:stock:view' },
       { path: '/zones', label: '库区', permission: 'warehouse:zone:view' },
       { path: '/shelves', label: '货架', permission: 'warehouse:shelf:view' },
       { path: '/bins', label: '库位', permission: 'warehouse:bin:view' },
@@ -129,6 +145,8 @@ export const MENU_TREE: MenuItem[] = [
     children: [
       { path: '/products', label: '商品', permission: 'product:view' },
       { path: '/skus', label: 'SKU', permission: 'sku:view' },
+      // 商品二维码中心（SFQR 闭环，qr-code.md §10：权限复用 SKU 码，不新增 qr:*）
+      { path: '/qr-codes', label: '商品二维码', permission: 'sku:view' },
       { path: '/categories', label: '分类', permission: 'category:view' },
       { path: '/units', label: '单位', permission: 'unit:view' },
       { path: '/suppliers', label: '供应商', permission: 'supplier:view' },
