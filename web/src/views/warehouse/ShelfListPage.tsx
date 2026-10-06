@@ -68,7 +68,8 @@ const COLUMNS: ColumnsType<ShelfItem> = [
   {
     title: '更新时间',
     dataIndex: 'updated_at',
-    width: 160,
+    // 内容为 YYYY-MM-DD HH:mm（约 109px），150 足够；富余宽度让给仓库/库区列
+    width: 150,
     render: (v?: string) => <DateCell value={v} />,
   },
 ]
@@ -249,24 +250,32 @@ export default function ShelfListPage() {
     {
       title: '所属仓库',
       key: 'warehouse_name',
-      width: 180,
-      ellipsis: true,
-      render: (_, record) => (
-        <Text type="secondary" ellipsis style={{ maxWidth: 160 }}>
-          {warehouseNameById.get(String(record.warehouse_id)) ?? record.warehouse_id}
-        </Text>
-      ),
+      width: 200,
+      /* 名称常超列宽（如「演示一号仓（WH-D01）」）——截断处必须能回看完整值。
+         用原生 title 而非列级 ellipsis.showTitle：单元格内容是 React 节点
+         （Typography.Text），rc-table 的 showTitle 只能转字符串、不会生成 title。 */
+      render: (_, record) => {
+        const name = warehouseNameById.get(String(record.warehouse_id)) ?? String(record.warehouse_id)
+        return (
+          <Text type="secondary" title={name} ellipsis style={{ maxWidth: 180 }}>
+            {name}
+          </Text>
+        )
+      },
     },
     {
       title: '所属库区',
       key: 'zone_name',
-      width: 180,
-      ellipsis: true,
-      render: (_, record) => (
-        <Text type="secondary" ellipsis style={{ maxWidth: 160 }}>
-          {zoneNameById.get(String(record.zone_id)) ?? record.zone_id}
-        </Text>
-      ),
+      width: 200,
+      /* 同所属仓库：库区名含编码后缀，截断处同样提供完整值回看 */
+      render: (_, record) => {
+        const name = zoneNameById.get(String(record.zone_id)) ?? String(record.zone_id)
+        return (
+          <Text type="secondary" title={name} ellipsis style={{ maxWidth: 180 }}>
+            {name}
+          </Text>
+        )
+      },
     },
     {
       title: '操作',
