@@ -95,7 +95,7 @@ idempotency_keys（端点级幂等键：key/user_id/endpoint/request_hash/respon
 > - **幂等键不建新表**（2026-10-06 集成收口起部分废止，见下条）：沿用 `inventory_ledgers.idempotency_key` 唯一索引兜底 + receipts/packing/shipments 既有幂等键列；新增「行级幂等键 × Idempotency-Key 头合成规则」（api.md §7）。
 > - **idempotency_keys（000024，集成收口追加——实现批 ask 升级覆盖原「通用幂等结果缓存表不做」裁决）**：端点级「执行权仲裁 + 响应快照回放」，与上述行级唯一索引两层正交（api.md §7）。唯一索引 `uk_idempotency_keys (key, user_id, endpoint)` 即并发仲裁真相源（INSERT ... ON CONFLICT 恰一方占用）+ `idx_idempotency_keys_created_at`（孤儿 PROCESSING 行清理作业支撑，sysops 定时清理挂账）；`key` CHECK `^[A-Za-z0-9._:-]{1,64}$`、`status` CHECK IN ('PROCESSING','COMPLETED')；无 deleted_at（幂等行无软删语义，清理为物理删除）；中间件挂载端点清单与灰度口径见 api.md §7/§9 同日集成收口披露。
 > - **最近活动零新表**：最近操作读 `operation_logs` 尾 N 条（写入仍仅 middleware.Audit 既有链路）；最近访问属导航态，存 `user_preferences.pref_value`（key=recent_visits，服务端裁剪至 20 条），不建新审计表。
-> - **复用既有表扩展**：000023 为 `putaway_tasks`/`pick_tasks`/`check_tasks` 各加 `priority smallint NOT NULL DEFAULT 0`（CHECK 0–9）+ 部分索引 `idx_*_tasks_next (status, priority DESC, created_at) WHERE 活动态`（inbound_orders/exceptions 不扩列——/api/tasks/next 两分支无 priority 排序层，api.md §9 同日节披露）；000022 为全局搜索建 pg_trgm GIN 索引批（见 §6 补录）。000020/000021 已落盘，000022/000023 为 B2/B3 波次预留编号（以 db/migrations 实际为准）。
+> - **复用既有表扩展**：000023 为 `putaway_tasks`/`pick_tasks`/`check_tasks` 各加 `priority smallint NOT NULL DEFAULT 0`（CHECK 0–9）+ 部分索引 `idx_*_tasks_next (status, priority DESC, created_at) WHERE 活动态`（inbound_orders/exceptions 不扩列——/api/tasks/next 两分支无 priority 排序层，api.md §9 同日节披露）；000022 为全局搜索建 pg_trgm GIN 索引批（见 §6 补录）。000020–000023 均已落盘（000022/000023 随 B2/B3 波次交付），000024 随集成收口追加（以 db/migrations 实际为准）。
 
 ---
 
@@ -170,7 +170,7 @@ deleted_at
    - 000022：全局搜索中缀匹配 pg_trgm GIN 索引批（`idx_*_trgm`，覆盖商品/SKU 名称与编码、条码、批次号、序列号、库位编码、仓库名称、往来单位名称、七类单据号与物流单号共 17 列，清单以迁移文件为准；skus 表无 name 列——名称在 products.name，sku 搜索匹配 skus.code + products.name，不建 idx_skus_name_trgm，见 api.md §9 同日交付披露）；pg_trgm 扩展需安装权限，生产由超级用户执行迁移（deployment.md grants 流程），目标库拒绝扩展时回退=去索引保 ILIKE（功能等价、性能降级）。
    - 000023：三任务表部分索引 `idx_putaway_tasks_next` / `idx_pick_tasks_next` / `idx_check_tasks_next`（`(status, priority DESC, created_at)` WHERE 活动态）支撑 `/api/tasks/next` 真实 SQL 排序。
    - 000020/000021：user_saved_views 两条唯一索引（含 is_default 部分唯一）与 user_preferences 复合主键即全量索引，见 §2 效率层注记。
-   - 000024（集成收口追加）：idempotency_keys 唯一索引 `uk_idempotency_keys (key, user_id, endpoint)`（并发占用仲裁真相源）+ `idx_idempotency_keys_created_at`（孤儿行清理支撑），见 §2 效率层注记；真库 up/down 往返验证待具备 PG 的环境补做（000020–000023 已随实现波次一次性库验证通过）。
+   - 000024（集成收口追加）：idempotency_keys 唯一索引 `uk_idempotency_keys (key, user_id, endpoint)`（并发占用仲裁真相源）+ `idx_idempotency_keys_created_at`（孤儿行清理支撑），见 §2 效率层注记；真库 up/down 往返验证已随集成收口完成（本地一次性库 up→24→down 全级→0 表→再 up 通过，验证后即删库；000020–000023 同法随实现波次验证）。
 
 ---
 

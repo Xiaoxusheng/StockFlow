@@ -6,20 +6,20 @@
 
 **后端主线（M1–M3）全量交付完毕，后端收尾轮已完成（2026-10-04：遗留债务清偿 + 000015/000016 迁移修复 + 阶段 20 CI 关卡 + swag 汇总 + 服务器部署升级与真库回归）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余量均为**待环境项**：阶段 16 真机验收（PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收场景 9）与阶段 21 性能优化（索引/缓存/慢查询治理）待环境后启动；阶段 22 生产部署的环境配置/发布流程已随本轮推进（里程碑 M4 的 7 验收场景走通待现场）；CI 的 go test -race 关卡待 push 后首次 Actions 运行验证（main 领先 origin/main 9 提交未推送）。汇总见 docs/changelog.md 同日「后端收尾轮」条目与下文同日节。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
 
-## 2026-10-06 作业效率提升层一期（进行中，计划见 docs/plans/2026-10-06-efficiency-layer-phase1.md）
+## 2026-10-06 作业效率提升层一期（已完成，计划见 docs/plans/2026-10-06-efficiency-layer-phase1.md）
 
 | 波次 | 内容 | 状态 |
 |---|---|---|
 | 前端波次 | `usePagedList` 新增 `urlSync`（筛选/分页同步到 URL，刷新/分享/前进后退可还原）并全站列表页接入；路由级权限守卫（menu `resolveRoutePermission` 最长前缀匹配 + PcLayout 接入 + `useCrudPermissions.ts`）；Vite 生产拆包（vendor-react / vendor-charts，antd 不拆保 tree-shaking，见 vite.config.ts 注释） | ✅ 已提交 |
 | 后端契约测试 | internal/{auth,datax,devices,health,inventory,masterdata,printing,purchase,reports,returns,sales,stockops,sysops,warehouse} 各模块 handler/路由 HTTP 契约测试补全 | ✅ 已提交 |
-| 后端能力波次 | 计划 §2 各能力（任务 priority、/api/tasks 扩值域、迁移 000020 等） | 🔄 进行中（B1 已落盘：迁移 000020/000021 + internal/userpref 包；B2 搜索/B3 任务流/B4 批量与导入 待开工） |
+| 后端能力波次 | 计划 §2 各能力（任务 priority、/api/tasks 扩值域、迁移 000020 等） | ✅ 已完成（B1 userpref+000020/000021；B2 search+000022+HasPermission；B3 000023+tasks/next+recent-operations+batch-claim×3+priority×3；B4 printing 批量结果+datax retry-failed+stockops 头键合成；集成收口 000024 幂等挂载 16 端点+batchresult 收敛） |
 | 文档先行（本轮） | docs/api.md §1 域行（search/userpref/tasks-next/recent-operations/retry-failed）+ §9「2026-10-06 作业效率提升层一期」契约节（搜索/保存视图/用户偏好/tasks-next 排序口径披露/最近操作/批量结果契约与打印语义演进/priority×3+三新权限码/retry-failed/summary 增量）+ §7 幂等头键合成规则；docs/database.md §2 用户态实体组与效率层注记（000020–000023）+ §6 索引补录；docs/requirements.md §2.10 新节 + §2.2/§2.7/§2.8 交付批注 | ✅ 本轮完成（changelog 已随后端收口轮补写） |
 
 **门禁记录**：go build/vet/test 全绿；web typecheck 0 错、lint 0 错误 2 警告（usePagedList.ts:156、PadReceivePage.tsx:349 exhaustive-deps，既有）。
 **本地垃圾处置**：`web/.tmp-*`、`web/public/__urlsync-check.html`、`.workbuddy-ai/` 已入 .gitignore（含注入 token 的检查页，严禁入库），勿 `git add -f`。
 
 **当前进度（2026-10-06 后端波次收口）**：B1–B4 后端波次与集成收口完成（权限三码 cb51539 先行；router.go 装配 search/userpref；make swag 252 路径 8 新端点就位；api.md §9 增「后端交付披露」节记录实现差异——skus 无 name 列搜索修正/打印 DUPLICATE_DATA_ID 等 reason/retry-failed 事务核验通过/头键 32 上限核验/moves 存量无行级键披露；migrations_test 增个人态表类别）。门禁：全量 go build/vet/test 绿；迁移 000020–000023 一次性库往返验证通过；dev 库 stockflow 已升至 23。
-**下一步（按计划 §6 波次）**：F1/F2 前端组件并行（GlobalSearch/ShortcutProvider 族/SfViewBar/SfTable 受控列/BatchResultDrawer 等，见 §5）→ F3 页面接入 → 打印消费点 PrintingCenterPage/SfQrPrintModal 适配批量结果形态（后端 409 语义已废止，前端不适配即行为错）→ frontend.md/scanner.md/testing.md 增量随 F 波次交付 → push 后验证 CI go test -race 关卡。
+**收尾状态（2026-10-06 一期终局，已完成）**：一期后续波次已全部交付——F1/F2 组件、F3 页面接入、打印消费点适配（见下方 F 波次节）；其后页面接入三域（库存缺口收口 + 采购入库质检四页 + 销售出库退货七页：SfViewBar/导出当前视图/关联业务/空态 CTA/确认弹窗接 SfCompleteNextButton）、工作台改版收口（priorities 挂路由+超时阈值运行时可调）与扫码优化（三模式偏好+智能下一步+Pad 扫→判→继续）、测试加固（后端 HasPermission/偏好往返用例+守卫 7/7；前端 node:test 零依赖设施 40 用例）均落库；独立验收 8 场景全过（场景 2 口径缺口如实披露：库存页无临期筛选维度、/inventory/alerts 未接 SfViewBar）。文档收尾轮抽查修齐 database.md（000022/000023 交付状态、000024 真库验证状态）与 frontend.md（SfCompleteNextButton 接线状态、SfRelationListDrawer 登记、Alt+→/← 注册点状态）三处过时表述，changelog 新增一期收尾条目（含十项能力端点/表/组件/测试概览与遗留汇总）。仅余 CI go test -race 关卡待 push 后首次 Actions 运行验证。
 
 **当前进度（2026-10-06 后端集成收口·幂等与批量结果波次，已完成）**：① 幂等中间件挂载——internal/idempotency（C 交付）增 RouteGuard 组级路由感知形态，挂 protected 组 AuthRequired 后、各域 RegisterRoutes 前；端点注册表 internal/router/idempotency_mount.go（16 条，覆盖 ask 12 项可落端点；「入库确认 POST /api/inbounds/:id/confirm」「库存调整写端点」域内不存在如实不挂）+ verifyIdempotentEndpoints 启动核验 fail-fast；一期全表灰度 Required=false（前端 retryFailed 未附键，Required 即刻 400 打断重导入口，升级随前端接 useIdempotentMutation 批次）。② 批量结果统一结构——printing CreateTask 收敛至 internal/batchresult（JSON 契约零变化）；batch-claim ×3 挂账（results[].id 数字→字符串为跨栈契约变化，先 api.md 后前端）；reports routes_test 冻结清单补录 recent-operations/tasks-next。③ 迁移 000024 真库验证——一次性库 up→24→down 全级→再 up 往返通过（表+双索引就位）；dev 库 stockflow 23→24。④ 文档——api.md §7 端点级幂等仲裁条目 + §9 集成收口披露节（含搜索 navigation 八字段补录）、database.md §2/§6 补 000024、changelog 同日条目。门禁：gofmt -l 空、build/vet（±integration tags）/test -count=1 28 包全绿。遗留：孤儿 PROCESSING 行 sysops 清理作业、Required 逐端点升级、batch-claim 收敛（见 changelog 同日条目）。
 

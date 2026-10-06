@@ -805,11 +805,15 @@ RecentVisitsDropdown  最近访问下拉（读 user_preferences.recent_visits，
 SfPreferenceDrawer 偏好设置抽屉（默认仓库/清除最近数据；PC 用户菜单『偏好设置』入口；
                    读写走 usePreferences——读+防抖写，localStorage 先行渲染防闪变）
 BatchResultDrawer  批量结果统一抽屉（计数条+逐条三态+仅重试失败；打印/批量领取共用，§16.1）
-SfCompleteNextButton  「完成并处理下一条」（配合 useNextTask 调 /api/tasks/next，claim 已被领取冲突视为可进入；
-                   收货/上架作业页先行，PC 出库四作业页随其接线轮）
+SfCompleteNextButton  任务完成按钮组【完成并处理下一条】primary/【完成】/【返回列表】（导出别名 TaskNextButton；
+                   提供 nextQuery 时完成后调 GET /api/tasks/next 重查→claim→切换，绝不前端推算，
+                   claim 已被领取冲突视为可进入）；已接 Pad 收货/上架与 PC 拣货/复核，
+                   打包/发货因 /api/tasks/next 白名单五值不含挂账
 SfRelationNav      详情页关联业务导航（SfDetailSection 内 chip 组，config/relations.tsx 注册表驱动，
                    canAccess fail-closed 过滤，点击优先开 Drawer/带 query 预填跳转；
                    接入 SKU/流水/入库/采购单/出库/销售单/盘点 七详情页）
+SfRelationListDrawer  关联业务内嵌列表抽屉（SfRelationNav 关联项「优先 Drawer 内嵌」的承载面，
+                   复用 SfTable nested 渲染，不离开当前详情页）
 SfAutoRefreshSelect  自动刷新选择器（关/10/30/60 秒，document.hidden 暂停，连续失败退避停轮；
                    配合 useAutoRefresh，任务型列表页工具栏）
 ScanInput / useScanBuffer  扫码输入三模式 normal/fast/continuous（可切换偏好 useScanStore）
@@ -1083,7 +1087,8 @@ Ctrl+F           当前列表搜索聚焦（列表页作用域）
 Ctrl+R           刷新（preventDefault → invalidate active queries）
 Esc              关闭自有浮层（全局搜索/帮助面板）；antd Modal/Drawer 的 Esc 归组件自身，不双抢
 Enter            确认
-Alt+→ / Alt+←    下一条 / 上一条（经 useNextTask 注册，仅任务作业页 enabled）
+Alt+→ / Alt+←    下一条 / 上一条（注册点 useShortcut.ts useTaskNavShortcuts 已交付，仅任务作业页
+                 注册生效；一期页面接线待后续批次，未注册不生效、帮助面板不展示）
 G+I / G+P / G+S / G+T   跳转 实时库存 / 采购 / 销售 / 我的任务（G 系 chord，800ms 序列窗口）
 ?                快捷键帮助面板（ShortcutHelpDrawer）
 ```
