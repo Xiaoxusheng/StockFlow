@@ -150,7 +150,15 @@ export function SfSearchForm({
           字段宽度上限走 --sf-search-field-width（240px，原硬编码 260px 过宽，会把右侧
           操作按钮挤到第二行）；label 定宽右对齐（样式见 global.css .sf-search-form），
           两者共同保证「同一行内所有控件严格等宽」。 */}
-      <Flex gap="var(--sf-space-3)" wrap="wrap" align="middle">
+      {/* 搜索行**不换行**（用户口径：「所有页面的这种都要不换行」）：筛选字段用
+          flex-basis 0 等分剩余空间、可随宽度压缩；「查询/重置/展开」与 extraActions
+          两组固定不压缩。极端挤压时由外层 overflow-x 横向滚动兜底，
+          **不把任何控件折到第二行**。 */}
+      <Flex
+        gap="var(--sf-space-3)"
+        align="middle"
+        style={{ width: '100%', overflowX: 'auto' }}
+      >
         {visibleFields.map((field) => (
           <Form.Item
             key={field.name}
@@ -163,12 +171,15 @@ export function SfSearchForm({
                  「查询/重置 + extraActions（视图、自动刷新）」整组不折行；
                  宽屏时仍自由增长到 --sf-search-field-width 上限。
                  时间范围控件更宽（两个日期 + 分隔），单独放宽上限与下限。 */
-              flex: field.control === 'dateRange' ? '1 1 300px' : '1 1 170px',
+              /* basis 0：字段等分剩余空间并随空间压缩（宽度让位给按钮组）；
+                 上限仍是 --sf-search-field-width（宽屏观感不变）；
+                 下限只保证 label + 控件可用——不做「保宽度所以换行」。 */
+              flex: field.control === 'dateRange' ? '1 1 300px' : '1 1 0',
               maxWidth:
                 field.control === 'dateRange'
                   ? 'calc(var(--sf-search-field-width) + 120px)'
                   : 'var(--sf-search-field-width)',
-              minWidth: field.control === 'dateRange' ? 240 : 150,
+              minWidth: field.control === 'dateRange' ? 200 : 128,
             }}
           >
             {field.control === 'select' ? (
@@ -193,7 +204,7 @@ export function SfSearchForm({
             )}
           </Form.Item>
         ))}
-        <Flex gap="var(--sf-space-2)" wrap="wrap" style={{ flex: '0 0 auto' }}>
+        <Flex gap="var(--sf-space-2)" style={{ flex: '0 0 auto' }}>
           <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={loading}>
             查询
           </Button>
@@ -206,11 +217,10 @@ export function SfSearchForm({
             </Button>
           )}
         </Flex>
-        {/* extraActions 独立成 flex item（不再与「查询/重置」同组）：空间不足时只让这一组
-            折到下一行，而不是把查询/重置一起拖下去。修前整组折行——复核页 536px 的
-            视图+自动刷新组把查询/重置带到第二行，首行只剩筛选字段（2026-10-06 实测）。 */}
+        {/* extraActions 独立成 flex item：与字段/按钮组同排**不换行**（用户口径：
+            所有页面搜索行都不折行）。空间不足时优先压缩筛选字段，extraActions 保持完整。 */}
         {extraActions && (
-          <Flex gap="var(--sf-space-2)" wrap="wrap" style={{ flex: '0 0 auto' }}>
+          <Flex gap="var(--sf-space-2)" style={{ flex: '0 0 auto' }}>
             {extraActions}
           </Flex>
         )}
