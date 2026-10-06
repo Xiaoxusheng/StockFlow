@@ -115,6 +115,21 @@ export default function TransferFormModal({ open, mode, transferId, onClose }: T
           .filter((bin) => String(bin.warehouse_id) === warehouseId)
           .map((bin) => ({ value: String(bin.id), label: bin.code }))
 
+  // 仓库切换时清空明细行已选的库位：库位 options 按新仓库过滤，切换后旧值不在
+  // 选项集合内，残留显示会让用户误以为还能提交一个「新仓库下不存在的库位」
+  useEffect(() => {
+    if (!open) return
+    const lines = (form.getFieldValue('lines') ?? []) as Array<{
+      from_bin_id?: string
+      to_bin_id?: string
+    }>
+    if (lines.some((l) => l.from_bin_id || l.to_bin_id)) {
+      form.setFieldsValue({
+        lines: lines.map((l) => ({ ...l, from_bin_id: undefined, to_bin_id: undefined })),
+      })
+    }
+  }, [fromWarehouseId, toWarehouseId, open, form])
+
   /** 库位 ID → TransferLocInput（仓库/库区/货架由 BinItem 层级锚点反查，满足目标行五维要求） */
   const locOf = (binId: string | undefined): TransferLocInput | undefined => {
     if (binId == null) return undefined
@@ -307,6 +322,9 @@ export default function TransferFormModal({ open, mode, transferId, onClose }: T
                         optionFilterProp="label"
                         loading={binOptions.isLoading}
                         placeholder={fromWarehouseId ? '源库位' : '先选源仓库'}
+                        notFoundContent={
+                          fromWarehouseId && !binOptions.isLoading ? '该仓库下暂无库位' : undefined
+                        }
                         options={binOptionsOf(fromWarehouseId)}
                       />
                     </Form.Item>
@@ -331,6 +349,9 @@ export default function TransferFormModal({ open, mode, transferId, onClose }: T
                         optionFilterProp="label"
                         loading={binOptions.isLoading}
                         placeholder={toWarehouseId ? '目标库位' : '先选目标仓库'}
+                        notFoundContent={
+                          toWarehouseId && !binOptions.isLoading ? '该仓库下暂无库位' : undefined
+                        }
                         options={binOptionsOf(toWarehouseId)}
                       />
                     </Form.Item>

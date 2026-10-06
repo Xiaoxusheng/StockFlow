@@ -65,6 +65,20 @@ export default function PackingPage() {
   const [printTargets, setPrintTargets] = useState<SfQrPrintSku[]>([])
   const [printOpen, setPrintOpen] = useState(false)
   const [selectedPackKeys, setSelectedPackKeys] = useState<Array<string | number>>([])
+  /** 批量打印箱码：选中包裹的编号原文作为 data_ids（builtinReader 直吃码值） */
+  const openBulkCartonPrint = () => {
+    setPrintTargets(
+      list.items
+        .filter((item) => selectedPackKeys.some((key) => String(key) === String(item.id)))
+        .map((item) => ({
+          id: item.package_no,
+          code: item.package_no,
+          productName: item.carrier || item.outbound_no,
+          enabled: true,
+        })),
+    )
+    setPrintOpen(true)
+  }
   const canPrintLabel = canAccess(user, 'printing:task:create')
   /** 打包弹窗：选中的出库单号（undefined=未选） */
   const [packNo, setPackNo] = useState<string>()
@@ -269,6 +283,14 @@ export default function PackingPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
+          /* 批量打印箱码按钮与「查询/重置」同行（用户口径：批量按钮上移到搜索行） */
+          extraActions={
+            canPrintLabel && selectedPackKeys.length > 0 ? (
+              <Button type="primary" icon={<PrinterOutlined />} onClick={openBulkCartonPrint}>
+                批量打印箱码（{selectedPackKeys.length}）
+              </Button>
+            ) : undefined
+          }
         />
         <SfTable<PackingRecord>
           storageKey="outbound-packing"
@@ -291,35 +313,12 @@ export default function PackingPage() {
               </Button>
             ) : undefined
           }
-          /* 批量打印箱码：勾选多行 → 包裹编号原文作为 data_ids（builtinReader 直吃码值） */
+          /* 批量打印箱码：勾选多行 → 包裹编号原文作为 data_ids（builtinReader 直吃码值）；
+             批量按钮已上移至搜索行 extraActions */
           rowSelection={{
             selectedRowKeys: selectedPackKeys,
             onChange: (keys) => setSelectedPackKeys(keys as Array<string | number>),
           }}
-          bulkActions={
-            canPrintLabel ? (
-              <Button
-                type="primary"
-                size="small"
-                icon={<PrinterOutlined />}
-                onClick={() => {
-                  setPrintTargets(
-                    list.items
-                      .filter((item) => selectedPackKeys.some((key) => String(key) === String(item.id)))
-                      .map((item) => ({
-                        id: item.package_no,
-                        code: item.package_no,
-                        productName: item.carrier || item.outbound_no,
-                        enabled: true,
-                      })),
-                  )
-                  setPrintOpen(true)
-                }}
-              >
-                批量打印箱码（{selectedPackKeys.length}）
-              </Button>
-            ) : undefined
-          }
           scrollX={1470}
         />
       </Card>

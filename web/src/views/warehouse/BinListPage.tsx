@@ -181,6 +181,22 @@ export default function BinListPage() {
   const user = useAuthStore((s) => s.user)
   /** 打印入口门禁（后端 printing:task:create 同码校验，前端仅隐藏入口） */
   const canPrintLabel = canAccess(user, 'printing:task:create')
+  /** 批量打印：把选中行组装为打印对象并打开弹窗（按钮位于搜索行 extraActions） */
+  const openBulkPrint = () => {
+    setPrintTargets(
+      list.items
+        .filter((item) => selectedBinKeys.some((key) => String(key) === String(item.id)))
+        .map((item) => ({
+          id: item.id,
+          code: item.code,
+          productName: warehouseOptions.find(
+            (o) => String(o.value) === String(item.warehouse_id),
+          )?.label,
+          enabled: item.status?.toUpperCase() === 'ENABLED',
+        })),
+    )
+    setPrintOpen(true)
+  }
 
   // 表单内级联：仓库 → 库区 → 货架
   const formWarehouseId = Form.useWatch('warehouse_id', form)
@@ -391,7 +407,23 @@ export default function BinListPage() {
         }
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfSearchForm
+          fields={searchFields}
+          onSearch={handleSearch}
+          /* 批量打印按钮与「查询/重置」同行（用户口径：批量按钮上移到搜索行，
+             不再占用表格工具栏的独立批量面板） */
+          extraActions={
+            canPrintLabel && selectedBinKeys.length > 0 ? (
+              <Button
+                type="primary"
+                icon={<PrinterOutlined />}
+                onClick={openBulkPrint}
+              >
+                批量打印标签（{selectedBinKeys.length}）
+              </Button>
+            ) : undefined
+          }
+        />
         {actionError !== null && (
           <Alert
             type="error"
@@ -423,32 +455,6 @@ export default function BinListPage() {
             selectedRowKeys: selectedBinKeys,
             onChange: (keys) => setSelectedBinKeys(keys as Array<string | number>),
           }}
-          bulkActions={
-            canPrintLabel ? (
-              <Button
-                type="primary"
-                size="small"
-                icon={<PrinterOutlined />}
-                onClick={() => {
-                  setPrintTargets(
-                    list.items
-                      .filter((item) => selectedBinKeys.some((key) => String(key) === String(item.id)))
-                      .map((item) => ({
-                        id: item.id,
-                        code: item.code,
-                        productName: warehouseOptions.find(
-                          (o) => String(o.value) === String(item.warehouse_id),
-                        )?.label,
-                        enabled: item.status?.toUpperCase() === 'ENABLED',
-                      })),
-                  )
-                  setPrintOpen(true)
-                }}
-              >
-                批量打印标签（{selectedBinKeys.length}）
-              </Button>
-            ) : undefined
-          }
           emptyText="当前筛选条件下没有库位"
           scrollX={920}
         />
