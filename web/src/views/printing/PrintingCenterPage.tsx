@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -9,6 +9,7 @@ import {
   Modal,
   Radio,
   Select,
+  Space,
   Switch,
   Tabs,
   Tooltip,
@@ -136,7 +137,7 @@ function toTemplatePayload(values: TemplateFormValues): PrintTemplateSavePayload
   }
 }
 
-function TemplateTab() {
+function TemplateTab({ createSignal }: { createSignal: number }) {
   const [params, setParams] = useState<PrintTemplateQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<PrintTemplateItem | null>(null)
@@ -200,6 +201,14 @@ function TemplateTab() {
     setModalOpen(true)
     form.resetFields()
   }
+
+  // 页头「新建模板」入口（右上角，全站统一位置）：信号自增时打开创建弹窗
+  // （ref 转发规避 effect 对不稳定函数引用的依赖）
+  const openCreateRef = useRef(openCreate)
+  openCreateRef.current = openCreate
+  useEffect(() => {
+    if (createSignal > 0) openCreateRef.current()
+  }, [createSignal])
 
   const openEdit = (record: PrintTemplateItem) => {
     saveMutation.reset()
@@ -324,12 +333,7 @@ function TemplateTab() {
           onPageChange={list.onPageChange}
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}
-          actions={
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-              新建模板
-            </Button>
-          }
-          emptyText="暂无打印模板，点击「新建模板」创建（printing.md §2：禁止把打印 HTML 写死）"
+          emptyText="暂无打印模板，点击右上角「新建模板」创建（printing.md §2：禁止把打印 HTML 写死）"
           emptyAction={
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
               新建模板
@@ -447,9 +451,15 @@ interface TaskConfirmFormValues {
 /** 任务在途轮询间隔（与数据中心任务一致，excel.md §3） */
 const POLL_INTERVAL_MS = 5000
 
-function TaskTab() {
+function TaskTab({ createSignal }: { createSignal: number }) {
   const [params, setParams] = useState<PrintTaskQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
+
+  // 页头「新建打印任务」入口（右上角）：信号自增时打开创建弹窗
+  useEffect(() => {
+    if (createSignal > 0) setModalOpen(true)
+  }, [createSignal])
+
   const [form] = Form.useForm<TaskFormValues>()
   const [confirmTask, setConfirmTask] = useState<PrintTaskItem | null>(null)
   const [confirmForm] = Form.useForm<TaskConfirmFormValues>()
@@ -671,12 +681,7 @@ function TaskTab() {
           onPageChange={list.onPageChange}
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}
-          actions={
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-              新建打印任务
-            </Button>
-          }
-          emptyText="暂无打印任务，点击「新建打印任务」创建（printing.md §1.2 打印统一走任务模型）"
+          emptyText="暂无打印任务，点击右上角「新建打印任务」创建（printing.md §1.2 打印统一走任务模型）"
           emptyAction={
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
               新建打印任务
@@ -1000,19 +1005,46 @@ function HistoryTab({ onOpenTasks }: { onOpenTasks: () => void }) {
  */
 export default function PrintingCenterPage() {
   const [activeKey, setActiveKey] = useState('templates')
+  /** 页头主操作入口信号：自增触发对应 tab 的创建弹窗（右上角全站统一位置） */
+  const [templateSignal, setTemplateSignal] = useState(0)
+  const [taskSignal, setTaskSignal] = useState(0)
 
   return (
     <div className="sf-page">
       <SfPageHeader
         title="打印中心"
         subtitle="打印模板 / 打印任务 / 打印历史（printing.md §1–§2，frontend.md §13）"
+        extra={
+          <Space size={8}>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setActiveKey('tasks')
+                setTaskSignal((s) => s + 1)
+              }}
+            >
+              新建打印任务
+            </Button>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                setActiveKey('templates')
+                setTemplateSignal((s) => s + 1)
+              }}
+            >
+              新建模板
+            </Button>
+          </Space>
+        }
       />
       <Tabs
         activeKey={activeKey}
         onChange={setActiveKey}
         items={[
-          { key: 'templates', label: '打印模板', children: <TemplateTab /> },
-          { key: 'tasks', label: '打印任务', children: <TaskTab /> },
+          { key: 'templates', label: '打印模板', children: <TemplateTab createSignal={templateSignal} /> },
+          { key: 'tasks', label: '打印任务', children: <TaskTab createSignal={taskSignal} /> },
           { key: 'history', label: '打印历史', children: <HistoryTab onOpenTasks={() => setActiveKey('tasks')} /> },
         ]}
       />
