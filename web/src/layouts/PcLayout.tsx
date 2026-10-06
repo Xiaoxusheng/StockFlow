@@ -196,12 +196,20 @@ function PcLayoutShell() {
     [location.pathname],
   )
   const [openKeys, setOpenKeys] = useState<string[]>(openKey ? [openKey] : [])
-  // 跨分组跳转时自动展开目标分组。必须挂在路由变化上而非渲染期：渲染期每帧断言
-  // 会把用户刚点收起的当前分组立刻弹回（onOpenChange 置空后下一帧又被塞回），菜单表现为"收不回去"。
+  /**
+   * 侧栏展开态**收敛到当前分组**（用户口径：「只是想减少菜单项」——不改信息架构，
+   * 只让侧栏变短）。全站 12 个分组、50+ 叶子项；原实现展开态「只增不减」，逛过几个
+   * 页面后多个分组同时展开，侧栏要滚动数屏才找得到目标（实测同时展开 3 组）。
+   *
+   * 收敛规则：路由变化时把展开项重置为「当前路由所属分组」这唯一一项；
+   * 用户手动点开其他分组依然生效（onOpenChange 直连 state，本 effect 只在
+   * openKey 变化时介入），所以是「跟着页面自动收敛」而非「禁止手动展开」。
+   *
+   * 必须挂在路由变化上而非渲染期：渲染期每帧断言会把用户刚点收起的当前分组立刻弹回
+   * （onOpenChange 置空后下一帧又被塞回），菜单表现为「收不回去」。
+   */
   useEffect(() => {
-    if (openKey) {
-      setOpenKeys((prev) => (prev.includes(openKey) ? prev : [...prev, openKey]))
-    }
+    setOpenKeys(openKey ? [openKey] : [])
   }, [openKey])
 
   const breadcrumbItems = useMemo(() => {
