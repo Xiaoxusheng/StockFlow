@@ -216,6 +216,12 @@ var naturalPkTables = map[string]bool{
 	"system_configs": true,
 }
 
+// 个人态表（效率层一期 000021 user_preferences）：复合自然主键 (user_id, pref_key)，
+// 无 bigserial 代理键；个人高频读写态不挂审计（计划 §2.3），无 created_by/updated_by/deleted_at。
+var personalStateTables = map[string]bool{
+	"user_preferences": true,
+}
+
 // 计数表（docnum 引擎，backend-m2-plan §4.1）：复合主键 prefix+period，无 bigserial 代理键；
 // 通用字段仅 created_at/updated_at（updated_at 记录最近发放时间），无 deleted_at。
 var counterTables = map[string]bool{
@@ -749,6 +755,22 @@ func TestCommonColumnsAndSoftDeleteScope(t *testing.T) {
 				for _, forbidden := range []string{"bigserial", "deleted_at"} {
 					if strings.Contains(body, forbidden) {
 						t.Fatalf("自然主键表 %s 不应包含 %s", d.Name, forbidden)
+					}
+				}
+			case personalStateTables[d.Name]:
+				// 个人态表（user_preferences，效率层一期 000021）：复合自然主键，
+				// 个人高频读写态不挂审计——仅 created_at/updated_at，无审计/软删字段。
+				if !strings.Contains(body, "primary key") {
+					t.Fatalf("个人态表 %s 缺少 primary key 声明", d.Name)
+				}
+				for _, need := range []string{"created_at", "updated_at"} {
+					if !strings.Contains(body, need) {
+						t.Fatalf("个人态表 %s 缺少通用字段 %s", d.Name, need)
+					}
+				}
+				for _, forbidden := range []string{"bigserial", "created_by", "updated_by", "deleted_at"} {
+					if strings.Contains(body, forbidden) {
+						t.Fatalf("个人态表 %s 不应包含 %s", d.Name, forbidden)
 					}
 				}
 			default:

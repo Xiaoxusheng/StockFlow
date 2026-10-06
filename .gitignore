@@ -56,3 +56,6 @@ config.*.yaml
 .workbuddy-ai/
 .tmp-*
 web/public/__urlsync-check.html
+
+# Agent 本地任务状态（TASK_STATE 等，工作状态以 docs/tasks/current.md 为准）
+.agent/
