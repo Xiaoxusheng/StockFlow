@@ -215,7 +215,7 @@ export default function TransferFormModal({ open, mode, transferId, onClose }: T
           layout="vertical"
           initialValues={{ type: 'WAREHOUSE', lines: [{}] }}
         >
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr 2fr', gap: '0 16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr 1fr', gap: '0 16px' }}>
             <Form.Item name="type" label="调拨维度" rules={[{ required: true, message: '请选择调拨维度' }]}>
               <Radio.Group options={TYPE_OPTIONS} optionType="button" buttonStyle="solid" />
             </Form.Item>
