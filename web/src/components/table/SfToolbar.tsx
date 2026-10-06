@@ -1,5 +1,5 @@
+import { Button, Flex, Space } from 'antd'
 import type { ReactNode } from 'react'
-import { SfBatchBar } from './SfBatchBar'
 
 export interface SfToolbarProps {
   /** 左侧：标题或操作按钮组 */
@@ -7,26 +7,32 @@ export interface SfToolbarProps {
   /** 右侧：视图工具（刷新/密度/列设置/全屏等） */
   extra?: ReactNode
   children?: ReactNode
-  /** 批量态（frontend.md §31 #4）：选中行数 >0 时根节点加 sf-table-toolbar--selected */
+  /** 选中行数>0 时，bulkActions 按钮**追加**在左区既有按钮之后（同一行） */
   selectedCount?: number
-  /** 批量操作面板内容：传入后左区升级为「常规 ⇄ 已选择 N 项」grid 双面板（切换动效由 CSS 承担） */
+  /** 批量操作按钮组（选中时显示） */
   bulkActions?: ReactNode
-  /** 批量面板「清空」回调（SfTable 默认调 rowSelection.onChange([], [], { type: 'none' })） */
+  /** 清空选中（右区「已选择 N 条 · 清空」处） */
   onClearSelection?: () => void
 }
 
-/** SfBatchBar onClear 为必填；仅当外部直用 SfToolbar 传 bulkActions 却漏传 onClearSelection 时兜底（SfTable 场景恒传真实现） */
-const noopClear = () => undefined
-
 /**
- * 统一列表工具栏容器：左侧动作、右侧工具（frontend.md §6.3）。
- * 使用原生 flex 布局：antd Flex 对空内容不产生盒模型，无法承担占位职责。
- * 批量态（frontend.md §31 #4）：仅当传入 bulkActions 时左区渲染
- * .sf-table-toolbar__panes 双面板（常规/批量恒占 grid-area 1/1，容器高度=max(两态) 不跳变），
- * selectedRowKeys>0 由 SfTable 自动驱动切换，业务页只传 bulkActions；
- * 不传 bulkActions 时结构与此前的单面板完全一致（独立使用本组件的页面零改动）。
+ * 统一列表工具栏（frontend.md §6.3 / §16.1，2026-10-06 批量交互改版）：
+ *
+ * **布局（用户口径）**：批量操作按钮**与其他按钮同一行**（追加在左区既有按钮之后，
+ * 不再单独占一条批量面板）；「已选择 N 条 · 清空」计数**另显示在右端**
+ * （视图工具旁，不与按钮同排）。
+ *
+ * 旧实现为「双面板 grid 叠加」：选中后整个左区被「已选择 N 条 + 按钮 + 清空」
+ * 面板替换，批量按钮独占一条且与页面上其他按钮分离——已废弃。
  */
-export function SfToolbar({ title, extra, children, selectedCount, bulkActions, onClearSelection }: SfToolbarProps) {
+export function SfToolbar({
+  title,
+  extra,
+  children,
+  selectedCount,
+  bulkActions,
+  onClearSelection,
+}: SfToolbarProps) {
   const selected = typeof selectedCount === 'number' && selectedCount > 0
   const rootClassName = ['sf-table-toolbar', selected ? 'sf-table-toolbar--selected' : '']
     .filter(Boolean)
@@ -43,59 +49,44 @@ export function SfToolbar({ title, extra, children, selectedCount, bulkActions, 
         marginBottom: 'var(--sf-space-3)',
       }}
     >
-      {bulkActions != null ? (
-        <div className="sf-table-toolbar__panes">
-          <div
-            className={
-              selected
-                ? 'sf-table-toolbar__pane sf-table-toolbar__pane--hidden'
-                : 'sf-table-toolbar__pane'
-            }
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--sf-space-2)',
-              flexWrap: 'wrap',
-            }}
+      {/* 左区：标题 + 既有动作 + 批量操作按钮（选中时**追加同行**，不替换原按钮） */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--sf-space-2)',
+          flexWrap: 'wrap',
+          flex: 1,
+          minWidth: 0,
+        }}
+      >
+        {title}
+        {children}
+        {selected && bulkActions != null && (
+          <Space size={4} style={{ marginInlineStart: 'var(--sf-space-2)' }}>
+            {bulkActions}
+          </Space>
+        )}
+      </div>
+      {/* 右区：「已选择 N 条 · 清空」（选中时，用户口径：计数另显示、不与按钮同排）+ 视图工具 */}
+      <Flex align="center" gap="var(--sf-space-3)" style={{ flex: '0 0 auto' }}>
+        {selected && bulkActions != null && (
+          <span
+            style={{ fontSize: 'var(--sf-font-size-caption)', color: 'var(--sf-text-secondary)' }}
           >
-            {title}
-            {children}
-          </div>
-          <div
-            className={
-              selected
-                ? 'sf-table-toolbar__pane'
-                : 'sf-table-toolbar__pane sf-table-toolbar__pane--hidden'
-            }
-            style={{ display: 'flex', alignItems: 'center' }}
-          >
-            <SfBatchBar
-              className="sf-table-toolbar__batch"
-              selectedCount={selectedCount ?? 0}
-              onClear={onClearSelection ?? noopClear}
+            已选择 {selectedCount} 条
+            <Button
+              type="link"
+              size="small"
+              style={{ paddingInline: 4 }}
+              onClick={onClearSelection ?? (() => undefined)}
             >
-              {bulkActions}
-            </SfBatchBar>
-          </div>
-        </div>
-      ) : (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 'var(--sf-space-2)',
-            flexWrap: 'wrap',
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
-          {title}
-          {children}
-        </div>
-      )}
-      {extra && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>{extra}</div>
-      )}
+              清空
+            </Button>
+          </span>
+        )}
+        {extra}
+      </Flex>
     </div>
   )
 }

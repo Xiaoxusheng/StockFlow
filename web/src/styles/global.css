@@ -301,39 +301,9 @@ body {
   }
 }
 
-/* #4：工具栏「常规 ⇄ 已选择 N 项」双面板 grid 叠放交叉过渡：两面板恒占 grid-area 1/1，
-   容器高度 = max(两态) 不跳变；进入 180ms（--sf-motion-normal）/ 退出 220ms（--sf-motion-slow，
-   规格约 220ms）；visibility 延迟退场保证键盘焦点不落入隐藏面板；禁 scale/bounce。 */
-.sf-table-toolbar__panes {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-}
-
-.sf-table-toolbar__pane {
-  grid-area: 1 / 1;
-  min-width: 0;
-  transition:
-    opacity var(--sf-motion-normal) var(--sf-motion-ease),
-    transform var(--sf-motion-normal) var(--sf-motion-ease),
-    visibility 0s;
-}
-
-.sf-table-toolbar__pane--hidden {
-  opacity: 0;
-  transform: translateY(-4px);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    opacity var(--sf-motion-slow) var(--sf-motion-ease),
-    transform var(--sf-motion-slow) var(--sf-motion-ease),
-    visibility 0s var(--sf-motion-slow);
-}
-
-/* 面板语境归零 SfBatchBar 自带底距（.sf-batch-bar 声明在前，同特异性此处靠后生效） */
-.sf-table-toolbar__batch {
-  margin-bottom: 0;
-}
+/* #4 批量工具栏（2026-10-06 改版）：原「常规 ⇄ 已选择 N 项」双面板 grid 叠放已废弃——
+   现为批量按钮**追加在工具栏左区既有按钮之后**（同一行，见 SfToolbar），
+   「已选择 N 条 · 清空」计数移至工具栏右端（内联样式）。 */
 
 /* #7：行反馈（from-only keyframe：淡色底→回落行正常底色；颜色由 --sf-success/--sf-danger
    color-mix 12% 派生，Dark 随变量自动切换；先 API 后反馈，类经 useTableRowFeedback + SfTable） */
