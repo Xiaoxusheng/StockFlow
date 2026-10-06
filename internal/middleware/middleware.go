@@ -44,6 +44,12 @@ func errorLogger() *zap.Logger {
 	return errorLog
 }
 
+// ErrorLogger 错误日志器读取口（装配层注入用——router 装配无 logger 形参的组件
+// （如 idempotency Service，效率层一期集成收口）经此处取同一错误日志，保证降级
+// 路径（快照落库失败等）在统一日志面可见而非静默）。未注入时惰性重建内置默认日志
+// （ensureLoggers 同口径），永不返回 nil。
+func ErrorLogger() *zap.Logger { return errorLogger() }
+
 // ensureLoggers 未注入时惰性构建内置默认日志（info/json），保证中间件可独立工作
 // （单测/工具场景）。正常路径 main 必然先 SetLoggers。
 func ensureLoggers() {

@@ -18,6 +18,7 @@ import (
 	"github.com/stockflow/server/internal/datax"
 	"github.com/stockflow/server/internal/devices"
 	"github.com/stockflow/server/internal/health"
+	"github.com/stockflow/server/internal/idempotency"
 	"github.com/stockflow/server/internal/inventory"
 	"github.com/stockflow/server/internal/masterdata"
 	"github.com/stockflow/server/internal/middleware"
@@ -99,6 +100,13 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 	// 错误，域内同样 fail-fast，deployment.md §3 禁止带病启动）。
 	protected := api.Group("")
 	protected.Use(auth.AuthRequired())
+	// 效率层一期 §2.10 集成收口：高风险端点幂等仲裁（internal/idempotency——执行权
+	// 占用 + 响应快照回放；与库存原语行级键两层正交，api.md §7/§9）。组级路由感知
+	// 挂载：仅 idempotentEndpoints 注册表内端点（写方法）进入仲裁，表外端点与 GET
+	// 零干预；必须先于各域 RegisterRoutes（gin 组中间件按注册时点快照链）。
+	// 表项漂移由尾部 verifyIdempotentEndpoints 启动核验 fail-fast。
+	idemSvc := idempotency.NewService(idempotency.NewRepo(db), middleware.ErrorLogger())
+	protected.Use(idempotency.RouteGuard(idemSvc, idempotentEndpoints))
 	auth.RegisterProtectedRoutes(protected, db, rdb, auth.WithWarehouseChecker(warehouse.NewChecker(db)))
 	// masterdata：往来单位删除引用校验读取器（refreaders.go 窄接口；business-flow
 	// §1.4/§1.5"已产生业务记录不可删"——purchase/sales 各自只读自己的单据表）。
@@ -272,6 +280,8 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 
 	// 上传放宽路由核验（启动期 fail-fast，防 datax 路由漂移致 body 上限守卫失效）。
 	verifyRelaxedRoutes(r, uploadLimits)
+	// 幂等挂载端点核验（启动期 fail-fast，防域路由漂移致幂等防护静默失效）。
+	verifyIdempotentEndpoints(r, idempotentEndpoints)
 
 	return r
 }
