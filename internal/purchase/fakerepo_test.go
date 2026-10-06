@@ -38,6 +38,8 @@ type fakeRepo struct {
 	claimGuard chan struct{}    // 串行化抢占判定（模拟行锁）
 
 	nextReceiptID int64
+
+	taskPriorities map[int64]int // 优先级列（fake 单列承载，断言用）
 }
 
 func newFakeRepo(spy *auditSpy) *fakeRepo {
@@ -46,19 +48,20 @@ func newFakeRepo(spy *auditSpy) *fakeRepo {
 		panic("打开假 gorm 失败: " + err.Error())
 	}
 	return &fakeRepo{
-		db:            db,
-		pos:           map[int64]*PurchaseOrder{},
-		poItems:       map[int64][]*PurchaseOrderItem{},
-		inbounds:      map[int64]*InboundOrder{},
-		inbItems:      map[int64][]*InboundItem{},
-		receipts:      map[int64]*Receipt{},
-		rctItems:      map[int64][]*ReceiptItem{},
-		qcs:           map[int64]*QualityOrder{},
-		qcItems:       map[int64][]*QualityItem{},
-		tasks:         map[int64]*PutawayTask{},
-		idemKeys:      map[string]int64{},
-		claimGuard:    make(chan struct{}, 1),
-		nextReceiptID: 1,
+		db:             db,
+		pos:            map[int64]*PurchaseOrder{},
+		poItems:        map[int64][]*PurchaseOrderItem{},
+		inbounds:       map[int64]*InboundOrder{},
+		inbItems:       map[int64][]*InboundItem{},
+		receipts:       map[int64]*Receipt{},
+		rctItems:       map[int64][]*ReceiptItem{},
+		qcs:            map[int64]*QualityOrder{},
+		qcItems:        map[int64][]*QualityItem{},
+		tasks:          map[int64]*PutawayTask{},
+		idemKeys:       map[string]int64{},
+		claimGuard:     make(chan struct{}, 1),
+		taskPriorities: map[int64]int{},
+		nextReceiptID:  1,
 	}
 }
 
@@ -858,6 +861,20 @@ func (f *fakeRepo) UpdatePutawayTaskStatus(_ context.Context, _ *gorm.DB, id int
 		return 0, nil
 	}
 	t.Status = to
+	return 1, nil
+}
+
+// SetPutawayTaskPriority 优先级单列守卫更新建模（终态 COMPLETED/CANCELLED 0 行；
+// 列承载 taskPriorities，updated_by 落列）。
+func (f *fakeRepo) SetPutawayTaskPriority(_ context.Context, _ *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[id]
+	if !ok || t.Status == TaskStatusCompleted || t.Status == TaskStatusCancelled {
+		return 0, nil
+	}
+	t.UpdatedBy = database.ID(by)
+	f.taskPriorities[id] = priority
 	return 1, nil
 }
 

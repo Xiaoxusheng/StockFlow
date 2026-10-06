@@ -1,6 +1,6 @@
 package sales
 
-// HTTP 层数据驱动测试（routes.go 28 端点，单元 sales）：handler 参数绑定 → Service →
+// HTTP 层数据驱动测试（routes.go 32 端点，单元 sales）：handler 参数绑定 → Service →
 // fakeRepo/fakeStock 全链，不依赖 PostgreSQL/Redis（ask 约束；真实 PG 行为见
 // integration_test.go，//go:build integration）。
 //
@@ -423,9 +423,10 @@ func objAt(t *testing.T, m map[string]any, key string) map[string]any {
 	return v
 }
 
-// ---- 路由装配 + 权限面（真实 RegisterRoutes，28 端点冻结表） ----
+// ---- 路由装配 + 权限面（真实 RegisterRoutes，32 端点冻结表） ----
 
-// salesRoutes routes.go:73-112 冻结路由表（method + 路径）。
+// salesRoutes routes.go 冻结路由表（method + 路径；效率层一期 B3 +4：
+// picks/checks batch-claim 与 priority）。
 var salesRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/sales"},
 	{http.MethodPost, "/api/sales"},
@@ -446,10 +447,14 @@ var salesRoutes = []struct{ method, path string }{
 	{http.MethodPut, "/api/picks/:id/claim"},
 	{http.MethodPut, "/api/picks/:id/confirm"},
 	{http.MethodPut, "/api/picks/:id/exception"},
+	{http.MethodPost, "/api/picks/batch-claim"},
+	{http.MethodPut, "/api/picks/:id/priority"},
 	{http.MethodGet, "/api/checks"},
 	{http.MethodPut, "/api/checks/:id/claim"},
 	{http.MethodPut, "/api/checks/:id/confirm"},
 	{http.MethodPut, "/api/checks/:id/reopen"},
+	{http.MethodPost, "/api/checks/batch-claim"},
+	{http.MethodPut, "/api/checks/:id/priority"},
 	{http.MethodGet, "/api/packing"},
 	{http.MethodPost, "/api/packing"},
 	{http.MethodGet, "/api/shipments"},

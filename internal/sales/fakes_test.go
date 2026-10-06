@@ -43,9 +43,12 @@ type fakeRepo struct {
 	batchCands map[string][]BatchCandidate // "wh:sku" → 候选
 	binStock   map[string][]BinStock       // "wh:sku:batch" → 行
 	serials    map[string]SerialState      // serial_no → 状态
-	nextID     int64
-	txDepth    int
-	failNextTx error // Tx 预置失败（模拟底层故障）
+	// pickPriorities/checkPriorities 任务优先级落列承载（效率层一期 B3 SetPick/CheckTaskPriority）。
+	pickPriorities  map[int64]int
+	checkPriorities map[int64]int
+	nextID          int64
+	txDepth         int
+	failNextTx      error // Tx 预置失败（模拟底层故障）
 }
 
 type approvalRow struct {
@@ -62,6 +65,7 @@ func newFakeRepo() *fakeRepo {
 		approvals:  []approvalRow{},
 		batchCands: map[string][]BatchCandidate{}, binStock: map[string][]BinStock{},
 		serials: map[string]SerialState{}, nextID: 1000,
+		pickPriorities: map[int64]int{}, checkPriorities: map[int64]int{},
 	}
 }
 
@@ -140,6 +144,12 @@ func (f *fakeRepo) snapshot() *fakeRepo {
 	for k, v := range f.serials {
 		c.serials[k] = v
 	}
+	for k, v := range f.pickPriorities {
+		c.pickPriorities[k] = v
+	}
+	for k, v := range f.checkPriorities {
+		c.checkPriorities[k] = v
+	}
 	return c
 }
 
@@ -149,6 +159,7 @@ func (f *fakeRepo) restore(c *fakeRepo) {
 		c.allocs, c.picks, c.checks, c.packages, c.packItems, c.shipments
 	f.approvals, f.batchCands, f.binStock, f.serials, f.nextID =
 		c.approvals, c.batchCands, c.binStock, c.serials, c.nextID
+	f.pickPriorities, f.checkPriorities = c.pickPriorities, c.checkPriorities
 }
 
 // ---- 销售订单 ----
@@ -521,6 +532,32 @@ func (f *fakeRepo) MarkPickTaskStatus(tx *gorm.DB, id int64, from, to string, st
 	if stamp.ScannedCode != nil {
 		row.ScannedCode = *stamp.ScannedCode
 	}
+	return 1, nil
+}
+
+// SetPickTaskPriority 优先级单列守卫更新建模（终态 0 行；列承载 pickPriorities）。
+func (f *fakeRepo) SetPickTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.picks[id]
+	if !ok || row.Status == PickStatusPicked || row.Status == PickStatusCancelled {
+		return 0, nil
+	}
+	row.UpdatedBy = by
+	f.pickPriorities[id] = priority
+	return 1, nil
+}
+
+// SetCheckTaskPriority 优先级单列守卫更新建模（终态 DONE/EXCEPTION 0 行）。
+func (f *fakeRepo) SetCheckTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	row, ok := f.checks[id]
+	if !ok || row.Status == CheckStatusDone || row.Status == CheckStatusException {
+		return 0, nil
+	}
+	row.UpdatedBy = by
+	f.checkPriorities[id] = priority
 	return 1, nil
 }
 

@@ -94,6 +94,16 @@ func todayFixture(t *testing.T, log *queryLog, w todayWants) {
 			}
 			return countRow(w.inboundToday)
 		}
+		// 三增量计数（2026-10-06 效率层一期 B3 additive）：summary 端点在四块计数外
+		// 增发 myWorkbenchCounts 单查询，此处回放零值（增量断言归 endpoints_next_test.go）。
+		if strings.Contains(q, "AS today_completed_count") {
+			return fixtureRows([]string{"mine_count", "timeout_count", "today_completed_count"},
+				[]any{int64(0), int64(0), int64(0)})
+		}
+		// 超时阈值读（task.timeout.pick_hours/putaway_hours，数值文本回放）。
+		if strings.Contains(q, "FROM system_configs") && len(args) > 0 {
+			return fixtureRows([]string{"value"}, []any{"4"})
+		}
 		for _, rt := range routes {
 			if strings.Contains(q, rt.match) && (rt.count == "" || strings.Contains(q, rt.count)) {
 				return rt.cols, rt.rows

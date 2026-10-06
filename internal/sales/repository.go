@@ -104,6 +104,9 @@ type Repo interface {
 	CancelPickTasks(tx *gorm.DB, outboundNo string, lineNo int64) error
 	ListPickTasksByOutbound(tx *gorm.DB, outboundNo string) ([]PickTask, error)
 	ListPickTasks(ctx context.Context, q PickQuery) ([]PickTask, int64, error)
+	// SetPickTaskPriority 任务优先级单列守卫更新（效率层一期 B3：终态 0 行；
+	// 迁移 000023 chk_pick_tasks_priority CHECK 0-9 兜底）。
+	SetPickTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error)
 
 	// ---- 复核任务 ----
 	InsertCheckTasks(tx *gorm.DB, tasks []CheckTask) error
@@ -112,6 +115,8 @@ type Repo interface {
 	MarkCheckTaskStatus(tx *gorm.DB, id int64, from, to, result string) (int64, error)
 	ListCheckTasksByOutbound(tx *gorm.DB, outboundNo string) ([]CheckTask, error)
 	ListCheckTasks(ctx context.Context, q CheckQuery) ([]CheckTask, int64, error)
+	// SetCheckTaskPriority 复核任务优先级单列守卫更新（效率层一期 B3，同上）。
+	SetCheckTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error)
 
 	// ---- 打包 ----
 	FindPackageByIdempotencyKey(tx *gorm.DB, key string) (*PackingRecord, error)
@@ -660,4 +665,23 @@ func (r *gormRepository) ListAllocationsPage(ctx context.Context, q AllocationQu
 	var rows []AllocationRecord
 	err := db.Order("id DESC").Limit(q.PageSize).Offset((q.Page - 1) * q.PageSize).Find(&rows).Error
 	return rows, total, err
+}
+
+// SetPickTaskPriority 拣货任务优先级单列守卫更新（效率层一期 B3：终态 PICKED/CANCELLED
+// 拒绝 0 行；值域 0-9 由迁移 000023 chk_pick_tasks_priority CHECK 兜底）。
+func (r *gormRepository) SetPickTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	res := tx.Exec(`
+		UPDATE pick_tasks SET priority = ?, updated_at = now(), updated_by = ?
+		WHERE id = ? AND status NOT IN (?, ?)`,
+		priority, by, id, PickStatusPicked, PickStatusCancelled)
+	return res.RowsAffected, res.Error
+}
+
+// SetCheckTaskPriority 复核任务优先级单列守卫更新（终态 DONE/EXCEPTION 拒绝 0 行）。
+func (r *gormRepository) SetCheckTaskPriority(tx *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	res := tx.Exec(`
+		UPDATE check_tasks SET priority = ?, updated_at = now(), updated_by = ?
+		WHERE id = ? AND status NOT IN (?, ?)`,
+		priority, by, id, CheckStatusDone, CheckStatusException)
+	return res.RowsAffected, res.Error
 }

@@ -27,6 +27,10 @@ type ServiceOption = Option
 //	GET /api/reports/flow-trend                  reports:report:read   出入库流水趋势
 //	GET /api/inventory/summary                   inventory:inventory:list   Dashboard/库存页汇总条
 //	GET /api/inventory/alerts                    inventory:inventory:list   Dashboard/库存页预警条
+//	GET /api/workbench/summary            inventory:inventory:list   工作台入口计数
+//	GET /api/tasks                        inventory:inventory:list   我的任务列表
+//	GET /api/tasks/next                   inventory:inventory:list   自动下一条（效率层一期 B3）
+//	GET /api/workbench/recent-operations  inventory:inventory:list   最近操作（效率层一期 B3）
 //	GET /api/inventory/analytics                 inventory:inventory:list   库存分析
 //	GET /api/inventory/sku-top                   inventory:inventory:list   SKU 库存 TOP N
 //	GET /api/inventory/turnover-trend            inventory:inventory:list   库存周转趋势
@@ -113,4 +117,10 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	// 冲突——全域唯一 /api/prints/tasks 属 prints 组前缀不同）。
 	rg.GET("/workbench/summary", RequirePerm(auth.PermInventoryList), h.workbenchSummary)
 	rg.GET("/tasks", RequirePerm(auth.PermInventoryList), h.myTasks)
+
+	// 效率层一期 B3（2026-10-06——完成后自动下一条 + 最近操作；挂同码
+	// inventory:inventory:list，§2.4/§2.5 口径见 workbench.go 文件尾注；
+	// /api/tasks/next 静态段与 /api/tasks 同组共存，无 gin 路由冲突）。
+	rg.GET("/tasks/next", RequirePerm(auth.PermInventoryList), h.nextTask)
+	rg.GET("/workbench/recent-operations", RequirePerm(auth.PermInventoryList), h.recentOperations)
 }

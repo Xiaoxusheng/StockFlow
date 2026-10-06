@@ -76,6 +76,9 @@ type Repository interface {
 	ClaimPutawayTask(ctx context.Context, tx *gorm.DB, id, claimedBy int64) (int64, error)
 	UpdatePutawayTaskCols(ctx context.Context, tx *gorm.DB, id int64, cols map[string]any) error
 	UpdatePutawayTaskStatus(ctx context.Context, tx *gorm.DB, id int64, from, to string, by int64) (int64, error)
+	// SetPutawayTaskPriority 任务优先级单列守卫更新（效率层一期 B3：终态 0 行；
+	// 迁移 000023 chk_putaway_tasks_priority CHECK 0-9 兜底）。
+	SetPutawayTaskPriority(ctx context.Context, tx *gorm.DB, id int64, priority int, by int64) (int64, error)
 	CountTasksByInbound(ctx context.Context, inboundNo string) (map[string]int64, error)
 	ListCompletedPendingTasksBySKU(ctx context.Context, inboundNo string, skuID int64) ([]*PutawayTask, error)
 
@@ -685,6 +688,22 @@ func (r *repo) UpdatePutawayTaskStatus(ctx context.Context, tx *gorm.DB, id int6
 		TaskStatusCompleted: {"completed_at"},
 	}
 	return updateStatusGuarded(tx.WithContext(ctx), &PutawayTask{}, id, from, to, timeCols, nil, by)
+}
+
+// SetPutawayTaskPriority 任务优先级单列守卫更新（效率层一期 B3：终态 COMPLETED/CANCELLED
+// 拒绝 0 行；值域 0-9 由迁移 000023 chk_putaway_tasks_priority CHECK 兜底）。
+func (r *repo) SetPutawayTaskPriority(ctx context.Context, tx *gorm.DB, id int64, priority int, by int64) (int64, error) {
+	q := tx.WithContext(ctx).Model(&PutawayTask{}).
+		Where("id = ? AND status NOT IN (?, ?)", id, TaskStatusCompleted, TaskStatusCancelled).
+		Updates(map[string]any{
+			"priority":   priority,
+			"updated_at": database.Now(),
+			"updated_by": by,
+		})
+	if q.Error != nil {
+		return 0, q.Error
+	}
+	return q.RowsAffected, nil
 }
 
 func (r *repo) CountTasksByInbound(ctx context.Context, inboundNo string) (map[string]int64, error) {

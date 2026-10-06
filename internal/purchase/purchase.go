@@ -76,6 +76,10 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.GET("/putaway/recommend", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskRecommend(c, svc) })
 	rg.GET("/putaway/:id", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskDetail(c, svc) })
 	rg.POST("/putaway/:id/claim", auth.RequirePermission(PermPutawayClaim), func(c *gin.Context) { handleTaskClaim(c, svc) })
+	// 批量领取（效率层一期 B3：复用 claim 权限点，零新码——§2.7）。
+	rg.POST("/putaway/batch-claim", auth.RequirePermission(PermPutawayClaim), func(c *gin.Context) { handleBatchClaimPutaway(c, svc) })
+	// 优先级（效率层一期 B3：assign 权限点；迁移 000023 priority 列写入者——§2.4）。
+	rg.PUT("/putaway/:id/priority", auth.RequirePermission(PermPutawayAssign), func(c *gin.Context) { handleTaskPriority(c, svc) })
 	// 暂停/恢复（迁移 000017 作业过程态）：挂 execute 权限点——plan §9.1 动作词域
 	// "execute 作业执行（…上架…）"的构成部分，不发明清单外动作词（判据 9）。
 	rg.POST("/putaway/:id/pause", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskPause(c, svc) })

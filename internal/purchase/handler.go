@@ -868,3 +868,52 @@ func handleTaskExecute(c *gin.Context, svc *Service) {
 	}
 	response.OK(c, v)
 }
+
+// ---- 批量领取与优先级（效率层一期 B3，docs/api.md §9 批量结果契约） ----
+
+// @Summary POST /api/putaway/batch-claim
+// @Tags 采购入库
+// @Accept json
+// @Produce json
+// @Param body body BatchClaimInput true "请求体（ids）"
+// @Success 200 {object} response.Envelope "统一响应信封（批量结果契约）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/putaway/batch-claim [post]
+func handleBatchClaimPutaway(c *gin.Context, svc *Service) {
+	var req BatchClaimInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	v, err := svc.BatchClaimPutawayTasks(c.Request.Context(), actorOf(c), req)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, v)
+}
+
+// @Summary PUT /api/putaway/:id/priority（任务优先级，0-9；终态 409）
+// @Tags 采购入库
+// @Accept json
+// @Produce json
+// @Param body body TaskPriorityInput true "请求体（priority 0-9）"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封（{id, priority}）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Failure 409 {object} response.Envelope "终态任务拒绝"
+// @Router /api/putaway/{id}/priority [put]
+func handleTaskPriority(c *gin.Context, svc *Service) {
+	id, ok := pathID(c, "id")
+	if !ok {
+		return
+	}
+	var req TaskPriorityInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	if err := svc.SetPutawayTaskPriority(c.Request.Context(), actorOf(c), id, req); err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, gin.H{"id": id, "priority": *req.Priority})
+}

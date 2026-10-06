@@ -686,6 +686,106 @@ func (h *handler) reopenCheck(c *gin.Context) {
 	response.OK(c, t)
 }
 
+// ---- 批量领取与优先级（效率层一期 B3，docs/api.md §9 批量结果契约） ----
+
+// @Summary POST /api/picks/batch-claim
+// @Tags 销售出库
+// @Accept json
+// @Produce json
+// @Param body body BatchClaimInput true "请求体（ids）"
+// @Success 200 {object} response.Envelope "统一响应信封（批量结果契约）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/picks/batch-claim [post]
+func (h *handler) batchClaimPicks(c *gin.Context) {
+	var in BatchClaimInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	res, err := h.svc.BatchClaimPicks(c.Request.Context(), actorOf(c), in)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.OK(c, res)
+}
+
+// @Summary POST /api/checks/batch-claim
+// @Tags 销售出库
+// @Accept json
+// @Produce json
+// @Param body body BatchClaimInput true "请求体（ids）"
+// @Success 200 {object} response.Envelope "统一响应信封（批量结果契约）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/checks/batch-claim [post]
+func (h *handler) batchClaimChecks(c *gin.Context) {
+	var in BatchClaimInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	res, err := h.svc.BatchClaimChecks(c.Request.Context(), actorOf(c), in)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.OK(c, res)
+}
+
+// @Summary PUT /api/picks/:id/priority
+// @Tags 销售出库
+// @Accept json
+// @Produce json
+// @Param body body TaskPriorityInput true "请求体（priority 0-9）"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封（{id, priority}）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Failure 409 {object} response.Envelope "终态任务拒绝"
+// @Router /api/picks/{id}/priority [put]
+func (h *handler) setPickPriority(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var in TaskPriorityInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	if err := h.svc.SetPickTaskPriority(c.Request.Context(), actorOf(c), id, in); err != nil {
+		fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"id": id, "priority": *in.Priority})
+}
+
+// @Summary PUT /api/checks/:id/priority
+// @Tags 销售出库
+// @Accept json
+// @Produce json
+// @Param body body TaskPriorityInput true "请求体（priority 0-9）"
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封（{id, priority}）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Failure 409 {object} response.Envelope "终态任务拒绝"
+// @Router /api/checks/{id}/priority [put]
+func (h *handler) setCheckPriority(c *gin.Context) {
+	id, ok := parseIDParam(c, "id")
+	if !ok {
+		return
+	}
+	var in TaskPriorityInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	if err := h.svc.SetCheckTaskPriority(c.Request.Context(), actorOf(c), id, in); err != nil {
+		fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"id": id, "priority": *in.Priority})
+}
+
 // ---- 打包 /api/packing ----
 
 // @Summary GET /api/packing

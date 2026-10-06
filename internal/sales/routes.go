@@ -37,11 +37,15 @@ type RouteOption = Option
 //	PUT    /api/picks/{id}/claim      sales:pick:claim       领取（原子抢占）
 //	PUT    /api/picks/{id}/confirm    sales:pick:execute     拣货确认
 //	PUT    /api/picks/{id}/exception  sales:pick:execute     缺货/少货/库位异常上报
+//	POST   /api/picks/batch-claim     sales:pick:claim       批量领取（效率层一期 B3，批量结果契约）
+//	PUT    /api/picks/{id}/priority   sales:pick:assign      任务优先级（效率层一期 B3）
 //	GET    /api/checks                sales:check:list       复核任务列表
 //	PUT    /api/checks/{id}/claim     sales:check:claim      领取（原子指派）
 //	PUT    /api/checks/{id}/confirm   sales:check:execute    复核确认（通过/五类异常）
 //	PUT    /api/checks/{id}/reopen    sales:check:execute    复核异常重开（EXCEPTION→PENDING，
 //	                                  异常处置后重新复核——出库单恢复 CHECKED 推进通路）
+//	POST   /api/checks/batch-claim    sales:check:claim      批量领取（效率层一期 B3）
+//	PUT    /api/checks/{id}/priority  sales:check:assign     任务优先级（效率层一期 B3）
 //	GET    /api/packing               sales:packing:list     打包记录列表
 //	POST   /api/packing               sales:packing:execute  打包（幂等键）
 //	GET    /api/shipments             sales:shipment:list    发货单列表
@@ -95,12 +99,17 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	rg.PUT("/picks/:id/claim", RequirePerm(PermPickClaim), h.claimPick)
 	rg.PUT("/picks/:id/confirm", RequirePerm(PermPickExecute), h.confirmPick)
 	rg.PUT("/picks/:id/exception", RequirePerm(PermPickExecute), h.reportPickException)
+	// 批量领取（效率层一期 B3：复用 claim 权限点，零新码——§2.7）与优先级（assign 码）。
+	rg.POST("/picks/batch-claim", RequirePerm(PermPickClaim), h.batchClaimPicks)
+	rg.PUT("/picks/:id/priority", RequirePerm(PermPickAssign), h.setPickPriority)
 
 	// —— 复核 ——
 	rg.GET("/checks", RequirePerm(PermCheckList), h.listChecks)
 	rg.PUT("/checks/:id/claim", RequirePerm(PermCheckClaim), h.claimCheck)
 	rg.PUT("/checks/:id/confirm", RequirePerm(PermCheckExecute), h.confirmCheck)
 	rg.PUT("/checks/:id/reopen", RequirePerm(PermCheckExecute), h.reopenCheck)
+	rg.POST("/checks/batch-claim", RequirePerm(PermCheckClaim), h.batchClaimChecks)
+	rg.PUT("/checks/:id/priority", RequirePerm(PermCheckAssign), h.setCheckPriority)
 
 	// —— 打包 ——
 	rg.GET("/packing", RequirePerm(PermPackingList), h.listPacking)

@@ -38,6 +38,7 @@ package reports
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -919,4 +920,364 @@ func (h *handler) myTasks(c *gin.Context) {
 		return
 	}
 	listOut(c, items, page, pageSize, total)
+}
+
+// ---------- 完成后自动下一条 + 最近操作（2026-10-06 效率层一期 B3，docs/api.md §9 契约）----------
+//
+//	GET /api/tasks/next                  自动下一条（B7 候选池 + 真实 SQL ORDER BY）
+//	GET /api/workbench/recent-operations 最近操作（本人 operation_logs 尾 N 条）
+//
+// 只读红线：两端点均为参数化 SELECT，零写语句（guard-readonly，同本文件既有口径）。
+// 口径披露（§2.4/B8 冻结）：候选池=(本人已领取且进行中) OR (PENDING 未领取)；
+// 超时层仅 putaway/picking（阈值 system_configs task.timeout.putaway_hours/pick_hours，
+// 缺省 4 小时——sysops/configs.go:51-54 冻结 seed 键，本包只读直查同值）；checking 无
+// 超时层；receipt/exception 无 priority 列、仅 created_at ASC（先来先办）；exception
+// 分支另加 assignee=me 处理中 > OPEN 前置层，且 exceptions 无仓库列——warehouse_id
+// 过滤对 exception 分支不生效。
+
+// next 任务类型白名单（五值；packing/moving/counting 沿 validTaskType 裁决 400 invalidParam）。
+func validNextTaskType(t string) bool {
+	switch t {
+	case "putaway", "picking", "checking", "receipt", "exception":
+		return true
+	}
+	return false
+}
+
+// 超时阈值配置键（sysops/task_timeout.go cfgKeyTaskTimeout* 同源字面量——sysops 助手
+// 未导出，本包为平台包禁 import 各域包，按平台表直查同值；键漂移由 seed 同源保证）。
+const (
+	cfgTaskTimeoutPickHours    = "task.timeout.pick_hours"
+	cfgTaskTimeoutPutawayHours = "task.timeout.putaway_hours"
+)
+
+// defTaskTimeoutHours 超时阈值缺省值（sysops/task_timeout.go defTaskTimeoutHours 同源：4 小时）。
+const defTaskTimeoutHours = 4
+
+// taskTimeoutHours 读单枚超时阈值（小时）：行缺失/空值走缺省（Scan 无行零值，sysops
+// configValue 同口径）；值非法 fail-closed 上抛（不静默降级，防排序层口径漂移）。
+func (r *repository) taskTimeoutHours(ctx context.Context, key string) (int, error) {
+	var v string
+	if err := r.db.WithContext(ctx).Raw(`SELECT value FROM system_configs WHERE key = ?`, key).Scan(&v).Error; err != nil {
+		return 0, fmt.Errorf("reports: 超时阈值 %s 读取失败: %w", key, err)
+	}
+	raw := strings.TrimSpace(v)
+	if raw == "" {
+		return defTaskTimeoutHours, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("reports: 配置 %s 数值非法: %q（必须为正整数）", key, v)
+	}
+	return n, nil
+}
+
+// taskTimeoutCutoffs 两类任务超时截止线（now − 阈值小时；now 由 Service 可注入时钟提供）。
+func (r *repository) taskTimeoutCutoffs(ctx context.Context, now time.Time) (pick, putaway time.Time, err error) {
+	pickHours, err := r.taskTimeoutHours(ctx, cfgTaskTimeoutPickHours)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	putawayHours, err := r.taskTimeoutHours(ctx, cfgTaskTimeoutPutawayHours)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	return now.Add(-time.Duration(pickHours) * time.Hour), now.Add(-time.Duration(putawayHours) * time.Hour), nil
+}
+
+// next 任务分支（列投影与 /api/tasks 三分支同形——myTaskItemDTO 复用；WHERE 为 B7
+// 候选池而非 /api/tasks 的 assignee 硬过滤，否则未领取任务永不可达）。
+// 候选池值域与排序层均限活动态：超时层用 created_at <= 截止线（scan 同口径）。
+// %1=仓库范围片段（scopeOf） %2=warehouse_id 收窄片段 %3=current_task_id 排除片段
+// （均代码常量拼接面；assignee/截止线占位符为字面 ?）。
+const (
+	nextTaskPutawayBranch = `
+SELECT pt.id, pt.putaway_no AS task_no, 'putaway' AS task_type,
+       pt.inbound_no AS source_no, w.name AS warehouse_name,
+       pt.qty::float8 AS total_qty, 0::float8 AS completed_qty,
+       CASE pt.status WHEN 'PENDING' THEN 'pending' ELSE 'in_progress' END AS status,
+       pt.status AS raw_status, COALESCE(u.real_name, '') AS assignee_name,
+       pt.created_at, pt.completed_at
+FROM putaway_tasks pt
+JOIN warehouses w ON w.id = pt.target_warehouse_id
+LEFT JOIN users u ON u.id = pt.claimed_by
+WHERE ((pt.claimed_by = ? AND pt.status IN ('IN_PROGRESS', 'PAUSED')) OR (pt.claimed_by = 0 AND pt.status = 'PENDING'))
+  AND %s AND %s AND %s
+ORDER BY (CASE WHEN pt.claimed_by = ? AND pt.status IN ('IN_PROGRESS', 'PAUSED') THEN 0 ELSE 1 END),
+         pt.priority DESC,
+         (CASE WHEN pt.created_at <= ? THEN 0 ELSE 1 END),
+         pt.created_at, pt.id
+LIMIT 1`
+	nextTaskPickBranch = `
+SELECT pk.id, pk.pick_no AS task_no, 'picking' AS task_type,
+       pk.outbound_no AS source_no, w.name AS warehouse_name,
+       pk.qty::float8 AS total_qty, pk.picked_qty::float8 AS completed_qty,
+       CASE pk.status WHEN 'PENDING' THEN 'pending' ELSE 'in_progress' END AS status,
+       pk.status AS raw_status, pk.assignee_name,
+       pk.created_at, pk.picked_at AS completed_at
+FROM pick_tasks pk
+JOIN warehouses w ON w.id = pk.warehouse_id
+WHERE ((pk.assignee_id = ? AND pk.status IN ('CLAIMED', 'PICKING')) OR (pk.assignee_id = 0 AND pk.status = 'PENDING'))
+  AND %s AND %s AND %s
+ORDER BY (CASE WHEN pk.assignee_id = ? AND pk.status IN ('CLAIMED', 'PICKING') THEN 0 ELSE 1 END),
+         pk.priority DESC,
+         (CASE WHEN pk.created_at <= ? THEN 0 ELSE 1 END),
+         pk.created_at, pk.id
+LIMIT 1`
+	// checking：三态无 CLAIMED 进行中态（000008:229），候选=未完成即 PENDING（本人已指派或未指派）；
+	// 排序无超时层（一期不新增 task.timeout.check_hours，§2.4 裁决）。
+	nextTaskCheckBranch = `
+SELECT ck.id, ck.check_no AS task_no, 'checking' AS task_type,
+       ck.outbound_no AS source_no, w.name AS warehouse_name,
+       ck.qty::float8 AS total_qty, 0::float8 AS completed_qty,
+       'pending' AS status, ck.status AS raw_status, ck.assignee_name,
+       ck.created_at, ck.done_at AS completed_at
+FROM check_tasks ck
+JOIN warehouses w ON w.id = ck.warehouse_id
+WHERE ck.status = 'PENDING' AND ck.assignee_id IN (?, 0)
+  AND %s AND %s AND %s
+ORDER BY (CASE WHEN ck.assignee_id = ? THEN 0 ELSE 1 END),
+         ck.priority DESC,
+         ck.created_at, ck.id
+LIMIT 1`
+	// receipt：无领取语义/无 priority 列（B8）——RECEIVING 全量候选，仅 created_at ASC；
+	// inbound_orders 内嵌软删（迁移 000016），与列表页可见集对齐。
+	nextTaskReceiptBranch = `
+SELECT io.id, io.inbound_no AS task_no, 'receipt' AS task_type,
+       io.source_no AS source_no, w.name AS warehouse_name,
+       0::float8 AS total_qty, 0::float8 AS completed_qty,
+       'in_progress' AS status, io.status AS raw_status, '' AS assignee_name,
+       io.created_at, NULL AS completed_at
+FROM inbound_orders io
+JOIN warehouses w ON w.id = io.warehouse_id
+WHERE io.status = 'RECEIVING' AND io.deleted_at IS NULL
+  AND %s AND %s AND %s
+ORDER BY io.created_at, io.id
+LIMIT 1`
+	// exception：exceptions 无仓库列（000010 DDL）——scopeOf/warehouse_id 均不生效，
+	// 仅保留 current_task_id 排除；候选=OPEN（可认领）∪ 本人处理中（ASSIGNED/PROCESSING
+	// 已有处理人，不做跨人抢任务，§2.4「不做任务自动分配」同口径）；排序=mine 处理中 > OPEN，
+	// 无 priority 层（B8）。
+	nextTaskExceptionBranch = `
+SELECT e.id, e.exception_no AS task_no, 'exception' AS task_type,
+       e.source_no AS source_no, '' AS warehouse_name,
+       0::float8 AS total_qty, 0::float8 AS completed_qty,
+       CASE e.status WHEN 'OPEN' THEN 'pending' ELSE 'in_progress' END AS status,
+       e.status AS raw_status, e.assignee_name,
+       e.created_at, NULL AS completed_at
+FROM exceptions e
+WHERE (e.status = 'OPEN' OR (e.status IN ('ASSIGNED', 'PROCESSING') AND e.assignee_id = ?))
+  AND %s AND %s
+ORDER BY (CASE WHEN e.assignee_id = ? AND e.status IN ('ASSIGNED', 'PROCESSING') THEN 0 ELSE 1 END),
+         e.created_at, e.id
+LIMIT 1`
+)
+
+// nextTaskQuery /api/tasks/next 查询入参（userID 为候选池与排序层共用归因）。
+type nextTaskQuery struct {
+	userID      int64
+	excludeID   int64 // current_task_id（0=未提供，不排除）
+	warehouseID int64 // 收窄过滤器（与 scopeOf 求交；exception 分支不生效）
+	sc          Scope
+}
+
+// nextTask 自动下一条（单行 SELECT LIMIT 1；排序为真实 SQL ORDER BY，严禁前端推算）。
+func (r *repository) nextTask(ctx context.Context, q nextTaskQuery, taskType string, pickCutoff, putawayCutoff time.Time) (*myTaskItemDTO, error) {
+	scCond, scArgs := q.sc.cond("")
+	whCond, whArgs := "1 = 1", []any{}
+	if q.warehouseID > 0 {
+		whCond, whArgs = "w.id = ?", []any{q.warehouseID}
+	}
+	exCond, exArgs := "1 = 1", []any{}
+	if q.excludeID > 0 {
+		exCond = "id <> ?"
+		exArgs = []any{q.excludeID}
+	}
+	var sqlStr string
+	var args []any
+	switch taskType {
+	case "putaway":
+		scCond, scArgs = q.sc.cond("pt.target_warehouse_id")
+		exCond, exArgs = "1 = 1", []any{}
+		if q.excludeID > 0 {
+			exCond, exArgs = "pt.id <> ?", []any{q.excludeID}
+		}
+		sqlStr = fmt.Sprintf(nextTaskPutawayBranch, scCond, whCond, exCond)
+		args = append([]any{q.userID}, scArgs...)
+		args = append(args, whArgs...)
+		args = append(args, exArgs...)
+		args = append(args, q.userID, putawayCutoff)
+	case "picking":
+		scCond, scArgs = q.sc.cond("pk.warehouse_id")
+		exCond, exArgs = "1 = 1", []any{}
+		if q.excludeID > 0 {
+			exCond, exArgs = "pk.id <> ?", []any{q.excludeID}
+		}
+		sqlStr = fmt.Sprintf(nextTaskPickBranch, scCond, whCond, exCond)
+		args = append([]any{q.userID}, scArgs...)
+		args = append(args, whArgs...)
+		args = append(args, exArgs...)
+		args = append(args, q.userID, pickCutoff)
+	case "checking":
+		scCond, scArgs = q.sc.cond("ck.warehouse_id")
+		exCond, exArgs = "1 = 1", []any{}
+		if q.excludeID > 0 {
+			exCond, exArgs = "ck.id <> ?", []any{q.excludeID}
+		}
+		sqlStr = fmt.Sprintf(nextTaskCheckBranch, scCond, whCond, exCond)
+		args = append([]any{q.userID}, scArgs...)
+		args = append(args, whArgs...)
+		args = append(args, exArgs...)
+		args = append(args, q.userID)
+	case "receipt":
+		scCond, scArgs = q.sc.cond("io.warehouse_id")
+		exCond, exArgs = "1 = 1", []any{}
+		if q.excludeID > 0 {
+			exCond, exArgs = "io.id <> ?", []any{q.excludeID}
+		}
+		sqlStr = fmt.Sprintf(nextTaskReceiptBranch, scCond, whCond, exCond)
+		args = append(append(append([]any{}, scArgs...), whArgs...), exArgs...)
+	case "exception":
+		// 无仓库列：scopeOf/warehouse_id 不生效，仅 current_task_id 排除（B8 口径）。
+		exCond, exArgs = "1 = 1", []any{}
+		if q.excludeID > 0 {
+			exCond, exArgs = "e.id <> ?", []any{q.excludeID}
+		}
+		sqlStr = fmt.Sprintf(nextTaskExceptionBranch, exCond, "1 = 1") // 第二槽=仓库条件位，exception 无仓库列不生效
+		args = append([]any{q.userID}, exArgs...)
+		args = append(args, q.userID)
+	default:
+		return nil, fmt.Errorf("reports: 未知的 next 任务类型 %q", taskType) // handler 白名单已保证
+	}
+	items := make([]myTaskItemDTO, 0)
+	if err := r.db.WithContext(ctx).Raw(sqlStr, args...).Scan(&items).Error; err != nil {
+		return nil, fmt.Errorf("reports: 自动下一条查询失败: %w", err)
+	}
+	if len(items) == 0 {
+		return nil, nil
+	}
+	return &items[0], nil
+}
+
+// NextTask 自动下一条（服务层透传；超时截止线按配置计算，S.now 可注入）。
+func (s *Service) NextTask(ctx context.Context, sc Scope, userID int64, taskType string, excludeID, warehouseID int64) (*myTaskItemDTO, error) {
+	pickCutoff, putawayCutoff, err := s.repo.taskTimeoutCutoffs(ctx, s.now())
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.nextTask(ctx, nextTaskQuery{
+		userID: userID, excludeID: excludeID, warehouseID: warehouseID, sc: sc,
+	}, taskType, pickCutoff, putawayCutoff)
+}
+
+// nextTask GET /api/tasks/next。
+//
+// @Summary GET /api/tasks/next
+// @Tags 报表
+// @Produce json
+// @Param task_type query string true "任务类型 putaway|picking|checking|receipt|exception"
+// @Param current_task_id query int false "排除的当前任务 ID（完成后取下一条场景）"
+// @Param warehouse_id query int false "仓库收窄过滤（与数据权限求交；exception 分支不生效）"
+// @Success 200 {object} response.Envelope "统一响应信封（{has_next, task}）"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/tasks/next [get]
+func (h *handler) nextTask(c *gin.Context) {
+	taskType := c.Query("task_type")
+	if !validNextTaskType(taskType) {
+		response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{
+			"field": "task_type", "reason": "必须为 putaway|picking|checking|receipt|exception（packing/moving/counting 暂不映射）",
+		}))
+		return
+	}
+	currentID, ok := parseInt64Query(c, "current_task_id")
+	if !ok {
+		return
+	}
+	if currentID < 0 {
+		response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{
+			"field": "current_task_id", "reason": "必须为 >=0 的整数",
+		}))
+		return
+	}
+	warehouseID, ok := parseInt64Query(c, "warehouse_id")
+	if !ok {
+		return
+	}
+	if warehouseID < 0 {
+		response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{
+			"field": "warehouse_id", "reason": "必须为 >=0 的整数",
+		}))
+		return
+	}
+	uc, ok := auth.CurrentUser(c)
+	if !ok {
+		response.Err(c, response.NewError(response.CodeUnauthorized, nil))
+		return
+	}
+	task, err := h.svc.NextTask(c.Request.Context(), scopeOf(c), uc.UserID, taskType, currentID, warehouseID)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, gin.H{"has_next": task != nil, "task": task})
+}
+
+// recentOperationDTO GET /api/workbench/recent-operations 行（time=operation_logs.created_at）。
+type recentOperationDTO struct {
+	Time       database.JSONTime `gorm:"column:created_at" json:"time"`
+	Action     string            `json:"action"`
+	Module     string            `json:"module"`
+	ObjectType string            `gorm:"column:object_type" json:"object_type"`
+	ObjectID   int64             `gorm:"column:object_id" json:"object_id"`
+	Success    bool              `json:"success"`
+	ErrorCode  string            `gorm:"column:error_code" json:"error_code"`
+	RequestID  string            `gorm:"column:request_id" json:"request_id"`
+}
+
+// recentOperations 本人 operation_logs 尾 N 条（只读 SELECT；零新表零新写入点——
+// 写入仍只发生在既有 middleware.Audit，§2.5）。
+func (r *repository) recentOperations(ctx context.Context, userID int64, limit int) ([]recentOperationDTO, error) {
+	rows := make([]recentOperationDTO, 0)
+	err := r.db.WithContext(ctx).Raw(`
+		SELECT created_at, action, module, object_type, object_id, success, error_code, request_id
+		FROM operation_logs
+		WHERE user_id = ?
+		ORDER BY id DESC
+		LIMIT ?`, userID, limit).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("reports: 最近操作查询失败: %w", err)
+	}
+	return rows, nil
+}
+
+// RecentOperations 最近操作（服务层透传）。
+func (s *Service) RecentOperations(ctx context.Context, userID int64, limit int) ([]recentOperationDTO, error) {
+	return s.repo.recentOperations(ctx, userID, limit)
+}
+
+// recentOperations GET /api/workbench/recent-operations。
+//
+// @Summary GET /api/workbench/recent-operations
+// @Tags 报表
+// @Produce json
+// @Param limit query int false "返回条数（缺省 10，1–50）"
+// @Success 200 {object} response.Envelope "统一响应信封（{items:[...]}) "
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/workbench/recent-operations [get]
+func (h *handler) recentOperations(c *gin.Context) {
+	limit, ok := parseLimitQuery(c)
+	if !ok {
+		return
+	}
+	uc, ok := auth.CurrentUser(c)
+	if !ok {
+		response.Err(c, response.NewError(response.CodeUnauthorized, nil))
+		return
+	}
+	rows, err := h.svc.RecentOperations(c.Request.Context(), uc.UserID, limit)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, gin.H{"items": rows})
 }

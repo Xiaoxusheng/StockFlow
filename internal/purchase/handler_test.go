@@ -147,6 +147,8 @@ func registerTestRoutes(rg *gin.RouterGroup, svc *Service) {
 	rg.GET("/putaway/recommend", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskRecommend(c, svc) })
 	rg.GET("/putaway/:id", auth.RequirePermission(PermPutawayRead), func(c *gin.Context) { handleTaskDetail(c, svc) })
 	rg.POST("/putaway/:id/claim", auth.RequirePermission(PermPutawayClaim), func(c *gin.Context) { handleTaskClaim(c, svc) })
+	rg.POST("/putaway/batch-claim", auth.RequirePermission(PermPutawayClaim), func(c *gin.Context) { handleBatchClaimPutaway(c, svc) })
+	rg.PUT("/putaway/:id/priority", auth.RequirePermission(PermPutawayAssign), func(c *gin.Context) { handleTaskPriority(c, svc) })
 	rg.POST("/putaway/:id/pause", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskPause(c, svc) })
 	rg.POST("/putaway/:id/resume", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskResume(c, svc) })
 	rg.POST("/putaway/:id/execute", auth.RequirePermission(PermPutawayExecute), func(c *gin.Context) { handleTaskExecute(c, svc) })

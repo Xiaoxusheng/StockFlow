@@ -36,6 +36,8 @@ func wantRoutes() []string {
 		"GET /putaway", "GET /putaway/recommend", "GET /putaway/:id",
 		"POST /putaway/:id/claim", "POST /putaway/:id/pause", "POST /putaway/:id/resume",
 		"POST /putaway/:id/execute",
+		// —— 效率层一期 B3（2026-10-06）：批量领取 + 任务优先级 ——
+		"POST /putaway/batch-claim", "PUT /putaway/:id/priority",
 	}
 	sort.Strings(routes)
 	return routes
