@@ -1,5 +1,6 @@
-import { Alert, Button, Drawer, Space, Typography } from 'antd'
+import { Alert, Button, Drawer, Space, Table, Typography } from 'antd'
 import { RedoOutlined } from '@ant-design/icons'
+import type { TableProps } from 'antd'
 import type { BatchResult, BatchResultItemStatus } from '@/api/printing'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 
@@ -28,8 +29,36 @@ const ITEM_STATUS_META: Record<BatchResultItemStatus, { label: string; semantic:
   skipped: { label: '已跳过', semantic: 'warning' },
 }
 
+/** 逐条结果列（对象 ID + 三态标签；完整原因经行展开查看） */
+const RESULT_COLUMNS: TableProps<BatchResultItemShape>['columns'] = [
+  {
+    title: '对象',
+    dataIndex: 'id',
+    ellipsis: { showTitle: false },
+    render: (id: string) => (
+      <Text style={{ fontFamily: 'var(--sf-font-family-mono, monospace)' }} ellipsis={{ tooltip: id }}>
+        {id}
+      </Text>
+    ),
+  },
+  {
+    title: '结果',
+    dataIndex: 'status',
+    width: 88,
+    align: 'right',
+    render: (_: unknown, record) => {
+      const meta = ITEM_STATUS_META[record.status]
+      return <SfStatusTag label={meta.label} semantic={meta.semantic} />
+    },
+  },
+]
+
+/** 行形状（BatchResultItem 同构；就地声明避免与 api 类型循环依赖的导出面扩大） */
+type BatchResultItemShape = BatchResult['results'][number]
+
 /**
  * 统一批量结果抽屉（§2.7）：计数条 + 逐条列表 + SfStatusTag 三态 + 【仅重试失败】。
+ * 失败行（含带原因的跳过行）**可展开查看完整原因**（错误码支持复制，便于对照错误码表排查）。
  * 验收场景 4（批量打印 100→96/3/1，仅重试失败 3 张）的统一承载面；
  * 批量领取（putaway/picks/checks batch-claim）接线复用同一组件。
  */
@@ -83,41 +112,40 @@ export function BatchResultDrawer({ open, result, onRetry, retrying, onClose }: 
             <Alert
               type="warning"
               showIcon
-              message="存在失败项：重试仅重新提交失败对象，成功项绝不重跑"
+              message="存在失败项：点击行首箭头展开查看原因；重试仅重新提交失败对象，成功项绝不重跑"
             />
           )}
 
-          {/* 逐条列表（后端 results 全量返回；500 行内逐条渲染，超长由滚动承载） */}
-          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-            {result.results.map((item, index) => {
-              const meta = ITEM_STATUS_META[item.status]
-              return (
-                <div
-                  key={`${item.id}-${index}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    gap: 'var(--sf-space-2)',
-                    padding: '6px 0',
-                    borderBottom: '1px solid var(--sf-border-subtle)',
-                  }}
-                >
-                  <Text style={{ minWidth: 0 }} ellipsis={{ tooltip: item.id }}>
-                    {item.id}
+          {/* 逐条列表（后端 results 全量返回；失败/带原因行可展开看完整 reason——ask 验收口径） */}
+          <Table<BatchResultItemShape>
+            size="small"
+            rowKey="id"
+            columns={RESULT_COLUMNS}
+            dataSource={result.results}
+            pagination={
+              result.results.length > 20
+                ? { pageSize: 20, size: 'small', showSizeChanger: false, showTotal: (t) => `共 ${t} 条` }
+                : false
+            }
+            expandable={{
+              // 失败行必可展开；skipped 亦可能带原因（幂等命中/已处目标态说明）
+              rowExpandable: (record) => record.status === 'failed' || Boolean(record.reason),
+              expandedRowRender: (record) =>
+                record.reason ? (
+                  <Typography.Paragraph
+                    copyable={{ text: record.reason, tooltips: ['复制原因', '已复制'] }}
+                    style={{ margin: 0, fontSize: 12 }}
+                    type={record.status === 'failed' ? 'danger' : undefined}
+                  >
+                    {record.reason}
+                  </Typography.Paragraph>
+                ) : (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    无原因信息
                   </Text>
-                  <Space size={8} style={{ flexShrink: 0 }}>
-                    {item.reason && (
-                      <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: item.reason }}>
-                        {item.reason}
-                      </Text>
-                    )}
-                    <SfStatusTag label={meta.label} semantic={meta.semantic} />
-                  </Space>
-                </div>
-              )
-            })}
-          </div>
+                ),
+            }}
+          />
         </Space>
       )}
     </Drawer>

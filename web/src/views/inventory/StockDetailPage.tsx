@@ -698,15 +698,37 @@ export default function StockDetailPage() {
         </div>
       )}
 
-      {/* §2.6 上下文导航（验收场景 7）：该 SKU 的关联业务一屏直达——
-          权限 fail-closed 过滤，缺必需参数的关联项不渲染；跳转带真实支持的白名单过滤参数 */}
+      {/* §2.6 上下文导航（验收场景 7）：库存行视角（来源/去向/批次/库位）+ SKU 视角
+          （库存/流水/调拨/盘点/追溯）双区块一屏直达——权限 fail-closed 过滤，缺必需参数的
+          关联项不渲染；点击优先 Drawer 内嵌（不离开当前页），跳转带真实支持的白名单过滤参数 */}
       {summary && (
         <div style={{ marginBottom: 16 }}>
           <SfDetailSection title="关联业务">
-            <SfRelationNav
-              entity="sku"
-              context={{ sku_id: summary.sku_id, warehouse_id: summary.warehouse_id }}
-            />
+            <Flex vertical gap={8}>
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  本库存行
+                </Typography.Text>
+                <SfRelationNav
+                  entity="stock"
+                  context={{
+                    sku_id: summary.sku_id,
+                    batch_id: summary.batch_id,
+                    bin_id: summary.bin_id,
+                    warehouse_id: summary.warehouse_id,
+                  }}
+                />
+              </div>
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>
+                  SKU 视角
+                </Typography.Text>
+                <SfRelationNav
+                  entity="sku"
+                  context={{ sku_id: summary.sku_id, warehouse_id: summary.warehouse_id }}
+                />
+              </div>
+            </Flex>
           </SfDetailSection>
         </div>
       )}
