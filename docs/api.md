@@ -284,6 +284,7 @@ release:{exception_no}:{lock_id}                             异常解冻
 ```
 
 - 请求显式幂等键（`Idempotency-Key` 头）优先；未提供时按上表构成在服务端确定性生成——同一单据同一动作重试必然命中重放（返回既有结果，不再扣减），部分行重放视为矛盾请求整体回滚。
+- **端点级幂等仲裁（2026-10-06 效率层一期集成收口新增，迁移 000024 `idempotency_keys` 表）**：高风险端点经 `internal/idempotency` 组级路由感知中间件挂载——首次请求占用执行权（INSERT ... ON CONFLICT 恰一方，数据库唯一索引 `uk_idempotency_keys(key,user_id,endpoint)` 为仲裁真相源）并真实执行，响应（含失败信封）落快照；同键同用户同端点重复提交回放首次响应（HTTP 状态与体一致，信封体 `request_id` 改写为当前请求）；并发同键余者 409 `IDEMPOTENCY_IN_PROGRESS`；同键换载荷（请求体 SHA-256 不符）409 `IDEMPOTENCY_REQUEST_MISMATCH`；键值域 `[A-Za-z0-9._:-]{1,64}`（400 `IDEMPOTENCY_KEY_INVALID`），panic 中断自动释放占用（同键重试重新执行）。挂载端点（key=`method + gin 路由模式`，组级白名单见 `internal/router/idempotency_mount.go`，漂移由启动核验 fail-fast）：POST /api/receipts、POST /api/putaway/:id/execute、POST /api/transfers/:id/approve|outbound|arrive|receive、PUT /api/picks/:id/confirm、PUT /api/checks/:id/confirm、POST /api/packing、POST /api/shipments、POST /api/counts/:id/complete、POST /api/putaway/batch-claim、POST /api/picks/batch-claim、POST /api/checks/batch-claim、POST /api/prints/tasks、POST /api/imports/:id/retry-failed。一期全表灰度（无键放行不缓存），前端提交点接 `useIdempotentMutation` 附键后即获防护，逐端点升级 Required（缺键 400 `IDEMPOTENCY_KEY_REQUIRED`）属后续批次。与本节行级幂等两层正交并存：挂载端点同时消费头键的（收货/打包/发货/stockops 流水路径），头键既进行级合成又进端点快照，语义兼容；重复提交优先命中端点快照回放（不再触达业务层），无键重复提交仍由行级唯一索引兜底。
 - **行级幂等键 × 头键合成规则（2026-10-06 效率层一期冻结）**：stockops 产生库存流水的写路径（调拨 approve/execute、移库、盘点完成产生的调整）中，`Idempotency-Key` 头**不得直接**灌给每行原语——同请求 N 行同键会撞 `uk_inventory_ledgers_idempotency_key` 唯一索引、批量中断。合成规则：头键存在且非空 → 行级键 = `{头键}:{原行级通式}`（新命名空间：同头键重试=同行键，命中部分唯一索引即原语重放既有结果，不重复扣加库存/流水）；头键缺省 → 行级键与上表存量通式形态完全一致（零行为变化）。头键 ≤32 字符、超长 400 invalidParam（落笔前核验拼接结果 ≤ inventory_ledgers.idempotency_key 列宽 varchar(128)，超限下调头键上限）。适用边界：仅产生 ledger 流水的写路径引入头键透传；单据创建类端点（POST /transfers、POST /counts）一期不引入（无单据级幂等键存储列）。服务端实际消费头键的端点以各域契约为准（收货、打包/发货既有，stockops 流水路径随本规则新增）；对不消费头键的提交点（上架 execute/拣货确认/复核/批量领取/盘点登记），前端附头仅得按钮防双击，服务端防重按既有派生键通式或状态机原子抢占执行。
 
 ---
@@ -899,3 +900,40 @@ retry-failed（B4，8.9 前置核验结论）：
 
 工作台汇总（B3）：timeout_count / mine_count / today_completed_count 已交付，
 既有四计数形状不变。
+
+全局搜索（B2 补录）：items 形状为八字段——在契约先行节七字段基础上增
+`navigation:{kind,id}` 跳转标识（kind 权威值=type 本值 sku/product/barcode/batch/
+serial/bin/warehouse/customer/supplier；doc 组=具体单据 kind purchase_order/
+inbound_order/sales_order/outbound_order/transfer_order/count_order/exception；
+logistics=shipment；id=业务 ID 字符串形态）。前端 searchTargets 可直接消费
+navigation.kind（单号前缀映射保留为回退）。
+
+### 2026-10-06 效率层一期集成收口披露（router 装配 / 幂等挂载 / 批量结果收敛——同日集成波次，旧节零改动）
+
+```text
+幂等中间件挂载（§7 端点级仲裁的实现落位）：
+- 组级路由感知挂载（internal/idempotency.RouteGuard，注册表 internal/router/
+  idempotency_mount.go）：挂 protected 组 AuthRequired 之后、各域 RegisterRoutes
+  之前；仅白名单端点（写方法 + FullPath 命中）进入仲裁，表外端点与 GET 零干预。
+  与逐路由行内挂载语义等价——装配改动集中在 router 层，白名单漂移由启动核验
+  fail-fast（verifyRelaxedRoutes 同款）。挂载端点清单见 §7 新增条目（16 条）。
+- 实现批 ask 清单 12 项差异披露：①「入库确认 POST /api/inbounds/:id/confirm」
+  与②「库存调整写端点」在域内均不存在（purchase 入库确认入口即收货确认；调整单
+  由盘点完成生成，inventory 域仅 GET 列表）——不造路由，如实不挂；调拨 execute
+  按 outbound/arrive/receive 三段全挂。
+- 灰度形态：全表 Required=false（无 Idempotency-Key 头放行不缓存）。retry-failed
+  实现批建议 RequiredMiddleware，但已交付前端 dataApi.imports.retryFailed
+  （web/src/api/data.ts:336）未附键，Required 即刻 400 打断重导入口——本期同表
+  灰度，升级随前端提交点接 useIdempotentMutation 批次（followup）。
+
+批量结果收敛（§2.7 统一结构 internal/batchresult）：
+- POST /api/prints/tasks 响应类型收敛至 batchresult.Result（私有 TaskBatchResult/
+  TaskBatchItem 删除）——JSON 契约零变化（id 恒字符串、reason omitempty、skipped
+  可携 DUPLICATE_DATA_ID reason），前端零感知。
+- batch-claim ×3（sales/purchase）暂不收敛：results[].id 现为 JSON 数字、统一结构
+  为字符串（api.md §2 冻结口径），收敛即改契约且重试流以 results[].id 回填请求
+  ids（数字→字符串会使服务端整数绑定 400）——须先改 api.md 再同步前端消费点
+  （web/src/api/task.ts 等），挂账后续批次。
+- reports routes_test 冻结清单补录 GET /api/workbench/recent-operations 与
+  GET /api/tasks/next（B3 交付端点，防回退）。
+```

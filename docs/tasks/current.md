@@ -21,6 +21,8 @@
 **当前进度（2026-10-06 后端波次收口）**：B1–B4 后端波次与集成收口完成（权限三码 cb51539 先行；router.go 装配 search/userpref；make swag 252 路径 8 新端点就位；api.md §9 增「后端交付披露」节记录实现差异——skus 无 name 列搜索修正/打印 DUPLICATE_DATA_ID 等 reason/retry-failed 事务核验通过/头键 32 上限核验/moves 存量无行级键披露；migrations_test 增个人态表类别）。门禁：全量 go build/vet/test 绿；迁移 000020–000023 一次性库往返验证通过；dev 库 stockflow 已升至 23。
 **下一步（按计划 §6 波次）**：F1/F2 前端组件并行（GlobalSearch/ShortcutProvider 族/SfViewBar/SfTable 受控列/BatchResultDrawer 等，见 §5）→ F3 页面接入 → 打印消费点 PrintingCenterPage/SfQrPrintModal 适配批量结果形态（后端 409 语义已废止，前端不适配即行为错）→ frontend.md/scanner.md/testing.md 增量随 F 波次交付 → push 后验证 CI go test -race 关卡。
 
+**当前进度（2026-10-06 后端集成收口·幂等与批量结果波次，已完成）**：① 幂等中间件挂载——internal/idempotency（C 交付）增 RouteGuard 组级路由感知形态，挂 protected 组 AuthRequired 后、各域 RegisterRoutes 前；端点注册表 internal/router/idempotency_mount.go（16 条，覆盖 ask 12 项可落端点；「入库确认 POST /api/inbounds/:id/confirm」「库存调整写端点」域内不存在如实不挂）+ verifyIdempotentEndpoints 启动核验 fail-fast；一期全表灰度 Required=false（前端 retryFailed 未附键，Required 即刻 400 打断重导入口，升级随前端接 useIdempotentMutation 批次）。② 批量结果统一结构——printing CreateTask 收敛至 internal/batchresult（JSON 契约零变化）；batch-claim ×3 挂账（results[].id 数字→字符串为跨栈契约变化，先 api.md 后前端）；reports routes_test 冻结清单补录 recent-operations/tasks-next。③ 迁移 000024 真库验证——一次性库 up→24→down 全级→再 up 往返通过（表+双索引就位）；dev 库 stockflow 23→24。④ 文档——api.md §7 端点级幂等仲裁条目 + §9 集成收口披露节（含搜索 navigation 八字段补录）、database.md §2/§6 补 000024、changelog 同日条目。门禁：gofmt -l 空、build/vet（±integration tags）/test -count=1 28 包全绿。遗留：孤儿 PROCESSING 行 sysops 清理作业、Required 逐端点升级、batch-claim 收敛（见 changelog 同日条目）。
+
 ## 2026-10-06 作业效率提升层一期·前端 F 波次（已交付，本会话收口）
 
 **范围**：计划 §6 F1（全局层）/F2（表格与批量）/F3（页面接入）。后端 B1–B4 + 集成收口已于同日先落库（ae85b0e→b6665b6）。

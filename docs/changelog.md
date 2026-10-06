@@ -14,6 +14,16 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：效率层一期后端集成收口（幂等中间件挂载 + 批量结果收敛 + 迁移 000024）
+
+- **背景**：三位并行实现者交付落库/在途后（B1 用户态 ae85b0e、B2 搜索 315565d+导航补齐、B3 任务流 0b8e8a6、B4 批量与导入 b220dea、C 幂等/批量结果/错误 Excel 在途），本波次按各 wiringNotes 完成集成装配：router 挂载、批量端点统一结构、迁移收口、文档回写。只做接线与必要小修，不重写他人实现。
+- **幂等中间件挂载（效率层一期 §2.10，迁移 000024 idempotency_keys）**：新包 `internal/idempotency`（C 交付：执行权仲裁 + 响应快照回放 + 中间件）新增 `RouteGuard` 组级路由感知挂载形态（`internal/idempotency/routeguard.go` + 包内三单测）——挂 protected 组 AuthRequired 之后、各域 RegisterRoutes 之前，仅白名单端点（写方法 + FullPath 命中）进入仲裁，表外端点与 GET 零干预；端点注册表 `internal/router/idempotency_mount.go`（16 条）由 router 唯一持有，漂移由 `verifyIdempotentEndpoints` 启动核验 fail-fast（verifyRelaxedRoutes 同款）。与逐路由行内挂载语义等价，装配改动集中在 router 层（实现批建议的域路由行插入需改八个域包 Option 面，集成裁决取组级形态并已披露）。挂载清单覆盖 ask 12 项中可落的 13 端点：收货确认/上架执行/调拨 approve+outbound+arrive+receive/拣货确认/复核确认/打包/发货/盘点完成调整/batch-claim×3/prints/tasks/imports retry-failed；差异如实披露——「入库确认 POST /api/inbounds/:id/confirm」与「库存调整写端点」域内不存在不造路由，调拨 execute 按三段全挂。一期全表灰度（Required=false）：前端 `dataApi.imports.retryFailed`（web/src/api/data.ts:336）未附键，实现批建议的 RequiredMiddleware 即刻 400 打断重导入口，故升级随前端接 `useIdempotentMutation` 批次（api.md §7/§9 披露）。错误日志经 `middleware.ErrorLogger()`（新增导出只读取口）注入，降级路径（快照落库失败等）不再静默。
+- **批量结果统一结构接入（§2.7，internal/batchresult）**：`POST /api/prints/tasks` 收敛至 `batchresult.Result`（私有 TaskBatchResult/TaskBatchItem 删除，JSON 契约零变化——id 恒字符串、reason omitempty、skipped 携 DUPLICATE_DATA_ID reason 经 Item 直构，前端零感知）；batch-claim ×3（sales/purchase）暂不收敛并挂账——results[].id 现为 JSON 数字、统一结构为字符串（api.md §2 冻结口径），收敛即改契约且重试流以 results[].id 回填请求 ids，须先改 api.md 再同步前端消费点（batchresult.go 尾注更新收敛路径）。reports routes_test 冻结清单补录 `GET /api/workbench/recent-operations` 与 `GET /api/tasks/next`（B3 交付端点防回退）。
+- **迁移 000024 真库验证**：本地便携 PG16 一次性库 `stockflow_it_000024` 全量 **up→24 → down 全级→0 表 → 再 up→24 往返验证通过**（idempotency_keys 表 + uk_idempotency_keys/idx_idempotency_keys_created_at 双索引就位，验证后即删库）；开发库 stockflow 同步 23→24（纯 additive）。计划 T15 口径（up/down 双向）在本环境闭环。
+- **文档收口**：api.md §7 增「端点级幂等仲裁」条目（语义/错误码/16 端点清单/两层正交口径）；§9 增「2026-10-06 效率层一期集成收口披露」节（幂等挂载差异与灰度裁决、批量结果收敛与 batch-claim 挂账）+ 搜索 items 八字段 navigation 补录（B2 followup）；database.md §2 实体清单增 idempotency_keys、效率层注记补 000024 条目（原「通用幂等结果缓存表不做」裁决被实现批 ask 升级覆盖，注记留痕）、§6 补录索引。
+- **门禁（本会话实测）**：`gofmt -s -w cmd internal` 后 `gofmt -l cmd internal` 空（顺带修齐三处既有未格式化提交文件 purchase/models.go、sales/models.go、database/dev_seed_test.go——gofmt 1.27 注释/标签规则，CI lint 关卡要求）；`go build ./...`、`go vet ./...`、`go vet -tags integration ./...`、`go test -count=1 ./...` 28 包全 ok（含 search——B1 报告的 TestNavigationKinds 失败已随 B2 在途改动收敛为绿）。
+- **遗留挂账**：① 孤儿 PROCESSING 行 sysops 定时清理作业（idx 已备好，归 sysops 波次）；② 前端提交点接 `useIdempotentMutation` 后逐端点升级 Required；③ batch-claim ×3 收敛 batchresult（跨栈契约变化，先 api.md 后前端）；④ C 波次挂账的 -race（本机无 C 编译器，CI ubuntu-latest 关卡承载）与 api.md §7 幂等表契约行已随本轮补齐。
+
 ## [2026-10-06] 修复：列表页查询区与表格统一——控件等宽化 + 单元格不折行
 
 - **触发**：用户反馈列表页「搜索框大小不一致」「表格不要换行」。在复核管理（1161px 视口）实测复现三处：① 同一行内输入框 95~151px、下拉框 191~219px 并存（**label 自然宽度参与 flex 分配**，label 越长控件越窄，出库单号 123px 对状态下拉 191px）；② 表格「出库单号」列 `OUT-20261006-000006` 被断成两行，行高在 45/62px 之间不齐；③ 视图工具组（含 SfViewBar + 自动刷新，536px）把「查询/重置」一并拖到第二行。
