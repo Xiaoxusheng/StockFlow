@@ -14,6 +14,15 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：效率层一期清偿轮——批量领取接线 + 任务优先级行内设置（含后端 priority 下发补齐）
+
+- **背景**：同日 F1–F3 前端交付后遗留七项待清偿。本轮清掉其中两项**会致能力失真**的缺口：批量领取端点已交付却无前端入口（批量结果抽屉空转）、优先级端点已交付却无设置入口与列表回显（`/api/tasks/next` 的 priority 排序层无数据来源 = 假能力）。
+- **后端缺口补齐（22e1856）**：三张任务表模型（`internal/sales/models.go` 的 PickTask/CheckTask、`internal/purchase/models.go` 的 PutawayTask）补 `Priority int16`（json `priority`）。迁移 000023 已建列、写入端点与排序层均已交付，但列表查询走 GORM `Model(...).Find` 的 `SELECT *` 而模型未映射该列 → 前端拿不到优先级值。纯 additive，既有契约消费方零破坏。
+- **批量领取前端接线（803ef67）**：`api/outbound.ts` 补 `picks.batchClaim` / `checks.batchClaim`（`putaway.batchClaim` 已有）；拣货页、复核页接受控多选 + 工具栏「批量领取（N）」+ `BatchResultDrawer`（全站唯一结果承载面，「仅重试失败」以失败 ids 重发同一端点）；「我的任务」页按行 `task_type` 分组调用三个批量端点后**合并为一份批量结果**（聚合列表的行 id 即各任务表主键），并顺带接入 SfViewBar 与任务页自动刷新。
+- **任务优先级行内设置（803ef67）**：api 层补 `picks/checks/putaway.setPriority`（响应 `{id,priority}` 供就地回显）+ `TASK_PRIORITY_OPTIONS`（0–9，对齐迁移 000023 CHECK 值域）；拣货/复核列表新增「优先级」列（持 `sales:pick|check:assign` 时行内 Select 可编辑，终态 PICKED/CANCELLED、DONE/EXCEPTION 禁用，后端同码 409 兜底）；Pad 上架任务信息卡加优先级设置（持 `purchase:putaway:assign`）。
+- **门禁**：后端 `go build/vet/test ./...` 全量绿；前端 typecheck EXIT=0、lint 0 错误（3 存量警告）、build EXIT=0。
+- **遗留更新（截至本轮，7 → 4 项）**：✅ 已清 ①批量领取前端接线、⑤优先级行内设置入口（含后端下发）；**仍挂账**：② PC 出库四作业页（拣货/复核/打包/发货）未接 `SfCompleteNextButton`（Pad 收货/上架已接）；③ 列表页「导出当前视图」仅库存页透传真实筛选（其余页维持既有 SfExportButton 形态）；④ `useIdempotentMutation` 已就绪但未切换既有提交点（收货/打包/发货仍用手工幂等键，功能等价）；⑥ 浏览器渲染实测与 reduced-motion/暗色人工走查未执行（无浏览器自动化工具链，与既往轮口径一致）。
+
 ## [2026-10-06] 功能：作业效率提升层一期前端交付（F1–F3 波次 + 页面接入收口）
 
 - **依据**：docs/plans/2026-10-06-efficiency-layer-phase1.md §2/§5/§6（F1 全局层、F2 表格与批量、F3 页面接入）+ api.md §9「2026-10-06 作业效率提升层一期」契约节（后端 B1–B4 已于同日先交付）。本节由多会话协同完成，分工与落地差异如实记录如下。

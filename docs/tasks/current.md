@@ -34,7 +34,9 @@
 
 **口径变更（必读）**：① **打印创建后不再直达预览页**——后端批量结果契约不返回新任务 ID（api.md §9 形状），改为「结果抽屉 → 关闭时提示并跳打印中心」，由任务列表进预览；② `usePagedList` 新增 additive 可选 `refetchInterval` 透传（原「禁改该文件」属 urlSync 协调期约束，urlSync 完成后解禁，缺省行为不变）；③ `BatchResultDrawer` 为全站唯一批量结果承载面（禁各页自写结果弹窗）。
 
-**遗留（如实挂账）**：批量领取 batch-claim 前端未接线（后端已交付、抽屉已就绪，缺列表页多选+按钮）；PC 出库四作业页未接「完成并处理下一条」（Pad 已接）；导出当前视图仅库存页透传真实筛选；useIdempotentMutation 未切换既有提交点（功能等价）；任务优先级行内设置入口未接；浏览器渲染/reduced-motion/暗色人工走查未执行（无自动化工具链）。
+**清偿轮（2026-10-06 续，commit 22e1856 / 803ef67）**：清掉两项会致能力失真的缺口——① **批量领取前端接线**（拣货/复核/我的任务三处：多选 + 批量领取 + BatchResultDrawer，`api/outbound.ts` 补 picks/checks batchClaim；我的任务页按行 task_type 分组调用后合并结果）；② **任务优先级行内设置入口**（拣货/复核列表优先级列 + Pad 上架信息卡；为此补**后端 priority 字段下发**——三张任务表模型此前未映射迁移 000023 的 priority 列，导致 `/api/tasks/next` 排序层无数据来源）。门禁：后端 go build/vet/test 全量绿、前端 typecheck/lint/build 全绿。
+
+**遗留（截至清偿轮，剩 4 项）**：② PC 出库四作业页（拣货/复核/打包/发货）未接「完成并处理下一条」（Pad 收货/上架已接）；③ 导出当前视图仅库存页透传真实筛选（其余页维持既有 SfExportButton 形态）；④ useIdempotentMutation 已就绪但未切换既有提交点（收货/打包/发货仍用手工幂等键，功能等价）；⑥ 浏览器渲染/reduced-motion/暗色人工走查未执行（无自动化工具链）。
 
 **并行会话说明**：本轮工作区存在另一会话的在途产物（PackingPage/ShipmentPage 打包/发货写端点接线、PadPutawayPage 扫码接入、SfTable 受控列半成品、SfViewBar 组件主体）——已由本会话补齐其缺口（SfTable 派生值定义、SfViewBar 缺失 import、BatchResultDrawer 类型来源）并统一收口，禁止重复实现同一能力。
 
