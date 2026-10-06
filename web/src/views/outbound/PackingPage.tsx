@@ -1,28 +1,71 @@
-import { useMemo } from 'react'
-import { Card, Typography } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { Alert, Button, Card, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
+import { PlusOutlined } from '@ant-design/icons'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
-import { outboundTaskApi, type PackingRecord, type PackingRecordQuery } from '@/api/outbound'
-import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import {
+  PACKING_EXECUTE_PERMISSION,
+  outboundApi,
+  outboundTaskApi,
+  type OutboundOrderItem,
+  type PackingRecord,
+  type PackingRecordQuery,
+} from '@/api/outbound'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
+import { resolveErrorMessage } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { formatNumber } from '@/utils/format'
 
 const { Link, Text } = Typography
+
+/** 出库单状态中文（弹窗内提示用；完整状态列见 OutboundPage OB_STATUS_TAG） */
+const OB_STATUS_LABEL: Record<string, string> = {
+  PENDING_ALLOCATE: '待分配',
+  ALLOCATED: '已分配',
+  PICKING: '拣货中',
+  PICKED: '已拣货',
+  CHECKED: '已复核',
+  PACKED: '已打包',
+  PARTIAL_SHIPPED: '部分发货',
+  SHIPPED_ALL: '全部发货',
+  CANCELLED: '已取消',
+  CLOSED: '已关闭',
+}
 
 /**
  * 打包管理（GET /api/packing，后端 M2 已交付）：列表列回对 PackingRecord 裸模型——
  * 包裹编号/包装材料/长宽高/重量/体积/快递公司/快递单号（business-flow.md §8.4 全列），
  * 一单允许多包裹。模型无状态字段，不渲染状态列（裸模型回对，不虚构状态）。
- * 仓库 ID 经基础资料 options 本地映射，失败降级为 ID；
- * 打包写端点（POST /api/packing）已注册，交互设计不在本轮范围，列表只读。
+ * 打包写端点（POST /api/packing，sales:packing:execute）：出库单须 CHECKED（service_outbound.go:791），
+ * 逐行填本包打包量（≤ qty - qty_packed，ErrPackExceed），全部明细打包完成推进 CHECKED→PACKED；
+ * 幂等键 randomUUID 防双击重提（后端 Idempotency-Key 命中回放 replay=true）。
+ * 仓库 ID 经基础资料 options 本地映射，失败降级为 ID。
  */
 export default function PackingPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  const canPack = canAccess(user, PACKING_EXECUTE_PERMISSION)
+
+  /** 打包弹窗开关 */
+  const [packOpen, setPackOpen] = useState(false)
+  /** 打包弹窗：选中的出库单号（undefined=未选） */
+  const [packNo, setPackNo] = useState<string>()
+  /** 逐行本包打包量（line_no → qty；详情到位时初始化为剩余量） */
+  const [rowQty, setRowQty] = useState<Record<number, number>>({})
+  /** 可选物流/材料字段 */
+  const [material, setMaterial] = useState('')
+  const [carrier, setCarrier] = useState('')
+  const [trackingNo, setTrackingNo] = useState('')
+  const [remark, setRemark] = useState('')
+
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<PackingRecord, PackingRecordQuery>({
     queryKey: ['outbound', 'packing'],
@@ -39,6 +82,86 @@ export default function PackingPage() {
     () => buildWarehouseMaps(warehouseOptions.data ?? []).name,
     [warehouseOptions.data],
   )
+  const skuOptions = useQuery({
+    queryKey: ['outbound', 'sku-options'],
+    queryFn: fetchSkuOptions,
+  })
+  const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
+
+  /** 可打包出库单（CHECKED；remote options，前端限前 50 单，精确单号可手搜过滤） */
+  const packable = useQuery({
+    queryKey: ['outbound', 'packable-orders'],
+    queryFn: () => outboundApi.list({ status: 'CHECKED', page: 1, pageSize: 50 }),
+    enabled: canPack,
+  })
+
+  /** 选中出库单的详情（items 供逐行填打包量） */
+  const detail = useQuery({
+    queryKey: ['outbound', 'pack-detail', packNo],
+    queryFn: () => outboundApi.get(packNo!),
+    enabled: !!packNo,
+  })
+  const detailItems: OutboundOrderItem[] = detail.data?.items ?? []
+  const detailStatus = detail.data?.outbound.status
+  const packableOrder = detailStatus === 'CHECKED'
+
+  /** 详情到位 → 行打包量初始化为剩余量（qty - qty_packed，全量打包为最常见操作） */
+  useEffect(() => {
+    if (!detail.data) return
+    const init: Record<number, number> = {}
+    for (const it of detail.data.items) {
+      const remain = it.qty - it.qty_packed
+      if (remain > 0) init[it.line_no] = remain
+    }
+    setRowQty(init)
+  }, [detail.data])
+
+  const resetModal = () => {
+    setPackNo(undefined)
+    setRowQty({})
+    setMaterial('')
+    setCarrier('')
+    setTrackingNo('')
+    setRemark('')
+  }
+
+  const packMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof outboundTaskApi.packing.pack>[0]) =>
+      outboundTaskApi.packing.pack(payload),
+    onSuccess: (r) => {
+      message.success(
+        r.replay
+          ? `打包请求为幂等重放，包裹 ${r.package.package_no} 已存在`
+          : `打包完成：包裹 ${r.package.package_no}`,
+      )
+      queryClient.invalidateQueries({ queryKey: ['outbound', 'packing'] })
+      queryClient.invalidateQueries({ queryKey: ['outbound', 'packable-orders'] })
+      setPackOpen(false)
+      resetModal()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  const totalLines = detailItems.filter((it) => (rowQty[it.line_no] ?? 0) > 0).length
+  const submitPack = () => {
+    if (!packNo) return
+    const lines = detailItems
+      .map((it) => ({ line_no: it.line_no, qty: rowQty[it.line_no] ?? 0 }))
+      .filter((l) => l.qty > 0)
+    if (lines.length === 0) {
+      message.warning('请至少为一行填写大于 0 的打包数量')
+      return
+    }
+    packMutation.mutate({
+      outbound_no: packNo,
+      lines,
+      ...(material.trim() ? { packing_material: material.trim() } : {}),
+      ...(carrier.trim() ? { carrier: carrier.trim() } : {}),
+      ...(trackingNo.trim() ? { tracking_no: trackingNo.trim() } : {}),
+      ...(remark.trim() ? { remark: remark.trim() } : {}),
+      idempotency_key: crypto.randomUUID(),
+    })
+  }
 
   const columns: ColumnsType<PackingRecord> = [
     { title: '包裹编号', dataIndex: 'package_no', width: 160, fixed: 'left' },
@@ -112,6 +235,13 @@ export default function PackingPage() {
       <SfPageHeader
         title="打包管理"
         subtitle="打包记录：包裹 / 包装材料 / 快递信息（一单允许多包裹）"
+        extra={
+          canPack ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setPackOpen(true)}>
+              新建打包
+            </Button>
+          ) : undefined
+        }
       />
       <Card size="small">
         <SfSearchForm
@@ -146,6 +276,148 @@ export default function PackingPage() {
           scrollX={1470}
         />
       </Card>
+
+      {/* 新建打包弹窗：选 CHECKED 出库单 → 逐行填本包打包量（默认剩余量）→ 可选物流字段。
+          状态非 CHECKED 时禁提交（后端 service_outbound.go:791 同口径守卫，前端拦截仅为体验） */}
+      <Modal
+        open={packOpen}
+        title="新建打包"
+        okText="确认打包"
+        okButtonProps={{ disabled: !!packNo && !packableOrder, loading: packMutation.isPending }}
+        onCancel={() => {
+          setPackOpen(false)
+          resetModal()
+        }}
+        onOk={submitPack}
+        width={720}
+      >
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+          <div>
+            <div style={{ marginBottom: 4 }}>出库单（仅已复核 CHECKED）</div>
+            <Select
+              showSearch
+              placeholder="选择出库单"
+              style={{ width: '100%' }}
+              value={packNo}
+              loading={packable.isFetching}
+              filterOption={(input, option) =>
+                String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              onChange={(v: string) => {
+                setPackNo(v)
+                setRowQty({})
+              }}
+              options={(packable.data?.items ?? []).map((o) => ({
+                label: `${o.outbound_no}（${o.so_no || '-'}）`,
+                value: o.outbound_no,
+              }))}
+              notFoundContent={
+                packable.isError
+                  ? `出库单列表加载失败：${resolveErrorMessage(packable.error)}（需 sales:outbound:list）`
+                  : packable.isFetching
+                    ? '加载中…'
+                    : '没有可打包的出库单'
+              }
+            />
+          </div>
+          <div>
+            <div style={{ marginBottom: 4 }}>包装材料 / 快递</div>
+            <Input
+              placeholder="包装材料（可选）"
+              value={material}
+              onChange={(e) => setMaterial(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {packNo && detail.isFetching && <div style={{ padding: '16px 0' }}>明细加载中…</div>}
+        {packNo && detail.isError && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="出库单明细加载失败"
+            description={`${resolveErrorMessage(detail.error)}（需出库单查看权限 sales:outbound:read）`}
+          />
+        )}
+        {packNo && detailStatus && !packableOrder && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={`出库单当前为「${OB_STATUS_LABEL[detailStatus] ?? detailStatus}」，仅已复核（CHECKED）状态可打包`}
+          />
+        )}
+        {packNo && detailStatus && packableOrder && (
+          <>
+            <div style={{ marginBottom: 8, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Tag color="processing">{OB_STATUS_LABEL[detailStatus]}</Tag>
+              <Text type="secondary">打包量默认取该行剩余量（应拣 − 已打包），可按需改小；本次将打包 {totalLines} 行</Text>
+            </div>
+            <div style={{ maxHeight: 300, overflow: 'auto', border: '1px solid var(--sf-border, #f0f0f0)', borderRadius: 6 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', color: 'var(--sf-text-secondary, #888)' }}>
+                    <th style={thStyle}>行号</th>
+                    <th style={thStyle}>SKU</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>应拣 / 已打包</th>
+                    <th style={{ ...thStyle, textAlign: 'right' }}>本包打包量</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailItems.map((it) => {
+                    const remain = it.qty - it.qty_packed
+                    return (
+                      <tr key={it.line_no}>
+                        <td style={tdStyle}>{it.line_no}</td>
+                        <td style={tdStyle}>{skuMaps.code.get(idKey(it.sku_id)) ?? idKey(it.sku_id)}</td>
+                        <td style={{ ...tdStyle, textAlign: 'right' }} className="sf-num">
+                          {formatNumber(it.qty)} / {formatNumber(it.qty_packed)}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: 'right' }}>
+                          <InputNumber
+                            size="small"
+                            min={0}
+                            max={remain}
+                            step={1}
+                            value={rowQty[it.line_no]}
+                            disabled={remain <= 0}
+                            onChange={(v) =>
+                              setRowQty((prev) => ({ ...prev, [it.line_no]: Number(v ?? 0) }))
+                            }
+                          />
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 12 }}>
+              <Input
+                placeholder="快递公司（可选）"
+                value={carrier}
+                onChange={(e) => setCarrier(e.target.value)}
+              />
+              <Input
+                placeholder="快递单号（可选）"
+                value={trackingNo}
+                onChange={(e) => setTrackingNo(e.target.value)}
+              />
+            </div>
+            <Input.TextArea
+              rows={2}
+              style={{ marginTop: 12 }}
+              placeholder="备注（可选）"
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+            />
+          </>
+        )}
+      </Modal>
     </div>
   )
 }
+
+const thStyle: CSSProperties = { padding: '8px 12px', borderBottom: '1px solid var(--sf-border, #f0f0f0)', position: 'sticky', top: 0, background: 'var(--sf-bg-container, #fff)' }
+const tdStyle: CSSProperties = { padding: '6px 12px', borderBottom: '1px solid var(--sf-border, #f0f0f0)' }

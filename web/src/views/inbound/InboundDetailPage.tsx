@@ -14,6 +14,7 @@ import {
 import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
+import { SfRelationNav } from '@/components/common/SfRelationNav'
 import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
@@ -262,6 +263,17 @@ export default function InboundDetailPage() {
               { key: 'createdAt', label: '创建时间', children: formatDateTime(order.created_at) },
               { key: 'remark', label: '备注', children: order.remark || '-', span: 2 },
             ]}
+          />
+        </SfDetailSection>
+                {/* §2.6 上下文导航：入库单 → 收货记录 / 质检单 / 上架任务 / 库存 / 来源采购单 */}
+        <SfDetailSection title="关联业务">
+          <SfRelationNav
+            entity="inbound"
+            context={{
+              inbound_no: order.inbound_no,
+              warehouse_id: order.warehouse_id,
+              source_no: order.source_no,
+            }}
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">

@@ -6,9 +6,11 @@ import {
   PRINT_OPTIONS_PAGE_SIZE,
   printingApi,
   resolvePaperLabel,
+  type BatchResult,
   type PrintTemplateItem,
 } from '@/api/printing'
-import { ApiError, resolveErrorMessage } from '@/api/client'
+import { resolveErrorMessage } from '@/api/client'
+import { BatchResultDrawer } from '@/components/batch/BatchResultDrawer'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 
@@ -44,11 +46,16 @@ export interface SfQrPrintModalProps {
  * 从 PRINT_SKU_DISABLED（409）错误的 details 中提取停用 SKU 编码清单
  * （internal/printing/errors.go:70-74 NewDataDisabledError：details.disabled_ids = 编码数组）。
  */
-function extractDisabledIds(error: unknown): string[] {
-  if (!(error instanceof ApiError)) return []
-  const details = error.details as { disabled_ids?: unknown } | undefined
-  if (!details || !Array.isArray(details.disabled_ids)) return []
-  return details.disabled_ids.filter((v): v is string => typeof v === 'string')
+/**
+ * 从批量结果中提取「停用 SKU」失败项的 data_id（=SKU 数字 id 文本）。
+ * 2026-10-06 效率层一期：POST /api/prints/tasks 改为批量结果形态（api.md §9），
+ * 原 409 + details.disabled_ids 整体拒绝语义废止——不可打印对象逐条 failed(reason=PRINT_SKU_DISABLED)。
+ */
+const PRINT_SKU_DISABLED = 'PRINT_SKU_DISABLED'
+function failedIdsByReason(result: BatchResult | null, reason: string): string[] {
+  return (result?.results ?? [])
+    .filter((item) => item.status === 'failed' && item.reason === reason)
+    .map((item) => item.id)
 }
 
 /**
@@ -106,6 +113,11 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
 
   const overLimit = submitSkus.length > MAX_DATA_IDS
 
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
+  /** data_id（SKU 数字 id 文本）→ SKU 编码：把后端逐条结果还原成可读清单 */
+  const codeById = useMemo(() => new Map(skus.map((s) => [String(s.id), s.code])), [skus])
+
   const createMutation = useMutation({
     mutationFn: (targets: SfQrPrintSku[]) =>
       printingApi.tasks.create({
@@ -114,16 +126,42 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
         data_ids: targets.map((s) => String(s.id)),
         copies: copiesValue,
       }),
-    onSuccess: (task) => {
-      messageApi.success(`打印任务 ${task.print_no} 已创建，即将进入预览`)
-      onClose()
-      navigate(`/data/printing/preview?taskId=${task.id}`)
-    },
-    onError: (error) => {
-      const disabled = extractDisabledIds(error)
+    onSuccess: (result) => {
+      // 批量结果形态（api.md §9 效率层节）：逐条 success/failed/skipped，统一经 BatchResultDrawer 呈现
+      setBatchResult(result)
+      setResultOpen(true)
+      const disabled = failedIdsByReason(result, PRINT_SKU_DISABLED)
+        .map((id) => codeById.get(id))
+        .filter((code): code is string => !!code)
       if (disabled.length > 0) setBackendDisabledCodes(disabled)
     },
+    onError: () => {
+      // 整请求参数错误 / 网络错误 → 下方 Alert 如实展示（409 整体拒绝分支已废止）
+    },
   })
+
+  /**
+   * 结果抽屉关闭：成功项已建任务 → 关闭弹窗并引导到打印中心。
+   * 后端批量结果不返回新任务 ID（api.md §9 冻结形状仅逐条 data_id 结果），
+   * 无法直达 /data/printing/preview——由打印中心任务列表进入预览（口径变更已披露）。
+   */
+  const handleResultClose = () => {
+    setResultOpen(false)
+    const success = batchResult?.success_count ?? 0
+    createMutation.reset()
+    if (success > 0) {
+      messageApi.success(`打印任务已创建（成功 ${success} 张）`)
+      onClose()
+      if (canAccess(user, 'print:view')) navigate('/data/printing')
+    }
+  }
+
+  /** 仅重试失败项：以失败 data_ids 重新发起同一创建端点（成功项绝不重跑） */
+  const handleRetryFailed = (failedIds: string[]) => {
+    const targets = skus.filter((s) => failedIds.includes(String(s.id)))
+    if (targets.length === 0 || !templateId) return
+    createMutation.mutate(targets)
+  }
 
   const submit = (targets: SfQrPrintSku[]) => {
     if (!templateId) {
@@ -144,6 +182,7 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
   const selectedTemplate = templates.find((t) => String(t.id) === templateId)
 
   return (
+    <>
     <Modal
       title="打印二维码标签"
       open={open}
@@ -258,7 +297,7 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
           <Alert
             type="warning"
             showIcon
-            message={`不可打印清单（${disabledCodes.length} 个）：以下 SKU 已停用，创建任务将被拒绝`}
+            message={`不可打印清单（${disabledCodes.length} 个）：以下 SKU 已停用，创建时将被逐条标记失败`}
             description={
               <>
                 <div style={{ maxHeight: 120, overflowY: 'auto' }}>
@@ -280,8 +319,8 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
           />
         )}
 
-        {/* 非「停用 SKU」类错误如实展示（resolveErrorMessage 取后端 message） */}
-        {createMutation.isError && extractDisabledIds(createMutation.error).length === 0 && (
+        {/* 整请求错误如实展示（resolveErrorMessage 取后端 message）；逐条失败/跳过见结果抽屉 */}
+        {createMutation.isError && (
           <Alert type="error" showIcon message={resolveErrorMessage(createMutation.error)} />
         )}
 
@@ -300,5 +339,15 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
         )}
       </Space>
     </Modal>
+
+    {/* 批量结果统一承载面（§2.7）：计数条 + 逐条三态 + 仅重试失败——全站唯一，禁各页自写 */}
+    <BatchResultDrawer
+      open={resultOpen}
+      result={batchResult}
+      onRetry={handleRetryFailed}
+      retrying={createMutation.isPending}
+      onClose={handleResultClose}
+    />
+    </>
   )
 }

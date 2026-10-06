@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -19,6 +19,7 @@ import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
@@ -51,6 +52,9 @@ export default function SalesOrderListPage() {
     fetch: (q) => salesApi.orders.list(q),
     urlSync: true,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // 客户/仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
   const customersQuery = useQuery({
@@ -176,6 +180,21 @@ export default function SalesOrderListPage() {
           onSearch={list.applyFilters}
         />
         <SfTable<SalesOrder>
+          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
+          actions={
+            <SfViewBar
+              pageKey="sales.order"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="sales-orders"
           rowKey="id"
           columns={columns}

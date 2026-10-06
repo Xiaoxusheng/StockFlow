@@ -33,6 +33,7 @@ import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSecti
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfRelationNav } from '@/components/common/SfRelationNav'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { EMPTY_TEXT, formatDate, formatDateTime, formatMoney, formatNumber, formatQty } from '@/utils/format'
@@ -692,6 +693,19 @@ export default function StockDetailPage() {
                   children: summary.updated_at ? formatDateTime(summary.updated_at) : EMPTY_TEXT,
                 },
               ]}
+            />
+          </SfDetailSection>
+        </div>
+      )}
+
+      {/* §2.6 上下文导航（验收场景 7）：该 SKU 的关联业务一屏直达——
+          权限 fail-closed 过滤，缺必需参数的关联项不渲染；跳转带真实支持的白名单过滤参数 */}
+      {summary && (
+        <div style={{ marginBottom: 16 }}>
+          <SfDetailSection title="关联业务">
+            <SfRelationNav
+              entity="sku"
+              context={{ sku_id: summary.sku_id, warehouse_id: summary.warehouse_id }}
             />
           </SfDetailSection>
         </div>

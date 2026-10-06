@@ -40,10 +40,12 @@ import {
   PadActionBar,
   PadInfoCard,
   PadPageShell,
-  PadScanStub,
   usePadOrientation,
 } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useNextTask } from '@/hooks/useNextTask'
+import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
@@ -193,11 +195,13 @@ function GuardedAction({
  *   COMPLETED 落账，purchase.go:71-75 已交付），默认筛「待领取」；
  * - 中栏：选中任务 PadInfoCard（SKU 编码经基础资料 options 映射 / 应上架数量 / 目标库位
  *   编码经 binApi options 映射，映射失败降级为 ID，不造假数据）；
- * - 右栏：三步序列操作区（步骤指示 Steps + PadScanStub 手输兜底 + 本地比对校验），
+ * - 右栏：三步序列操作区（步骤指示 Steps + ScanInput 快速模式扫码（HID 承接 + 手输兜底，
+ *   frontend.md §22 一期示范；autoAdvance='safe'——三步比对为定位类低风险动作，连扫自动
+ *   步进）+ 本地比对校验），
  *   [领取任务] 接线 POST /api/putaway/{id}/claim，[完成上架] 接线
  *   POST /api/putaway/{id}/execute {bin_id?, remark}（IN_PROGRESS→COMPLETED 触发落账）；
  * - 竖屏：顶部当前上架任务卡 → 商品信息 / 步骤指示 → 任务列表滚动区 → 底部 PadActionBar。
- * 上架页面不做 CRUD 表格（frontend.md §30.1）；扫码链路属 Scan 端 / F16。
+ * 上架页面不做 CRUD 表格（frontend.md §30.1）；完整 ScannerManager→Event 总线归 F15/F16。
  */
 export default function PadPutawayPage() {
   const orientation = usePadOrientation()
@@ -375,9 +379,20 @@ export default function PadPutawayPage() {
     return undefined
   })()
 
-  const handleExecute = () => {
-    if (!task || executeDisabledReason) return
-    executeMutation.mutate({
+  /**
+   * 下一条上架任务（§2.4 / api.md §9，验收场景 3）：putaway 分支候选池 =
+   * (本人已领取且进行中) ∪ (PENDING 未领取)；排序 本人进行中 > priority > 超时 >
+   * created_at（全部由后端 SQL 承担，前端零推算）；current_task_id 恒排除当前任务。
+   */
+  const nextTask = useNextTask({
+    task_type: 'putaway',
+    current_task_id: task?.id,
+    enabled: !!task,
+  })
+
+  const handleExecute = async (): Promise<unknown> => {
+    if (!task || executeDisabledReason) return undefined
+    return executeMutation.mutateAsync({
       id: task.id,
       // bin_id 仅在扫码确认库位后携带（缺省=任务目标库位，service_putaway.go:26）
       payload: { bin_id: scannedBinId ?? undefined, remark: remark.trim() || undefined },
@@ -478,17 +493,19 @@ export default function PadPutawayPage() {
           {task.status === 'IN_PROGRESS' && (
             <>
               <Steps size="small" current={step} items={STEP_TITLES} />
-              <PadScanStub
-                placeholder={
+              <ScanInput
+                mode="fast"
+                autoAdvance="safe"
+                hint={
                   step === 0
-                    ? `第 1 步 · 手工输入 SKU（期望 ${expectedSkuCode}）兜底`
+                    ? `第 1 步 · 扫入 / 输入 SKU（期望 ${expectedSkuCode}）`
                     : step === 1
                       ? String(task.target_bin_id) === '0'
-                        ? '第 2 步 · 手工输入库位编码（任务无目标库位，扫码即改指定）兜底'
-                        : `第 2 步 · 手工输入库位（期望 ${targetBinCode}）兜底`
+                        ? '第 2 步 · 扫入库位编码（任务无目标库位，扫码即改指定）'
+                        : `第 2 步 · 扫入库位（期望 ${targetBinCode}）`
                       : '三步校验已完成'
                 }
-                onSubmit={handleScan}
+                onScan={(code) => handleScan(code)}
               />
               {step === 2 && (
                 <>
@@ -507,6 +524,23 @@ export default function PadPutawayPage() {
                     variant="primary"
                     loading={executeMutation.isPending}
                     onClick={handleExecute}
+                  />
+                  <SfCompleteNextButton
+                    onComplete={handleExecute}
+                    nextTask={nextTask.data?.task ?? null}
+                    onClaimNext={async (next) => {
+                      try {
+                        await claimMutation.mutateAsync(next.id)
+                      } catch {
+                        // 已被本人/他人领取等冲突：视为可进入（后端状态机为最终裁决）
+                      }
+                    }}
+                    onNavigateNext={(next) => {
+                      const hit = list.items.find((t) => String(t.id) === String(next.id))
+                      if (hit) handleSelect(hit)
+                    }}
+                    completing={executeMutation.isPending}
+                    disabled={!!executeDisabledReason}
                   />
                 </>
               )}
@@ -660,13 +694,16 @@ export default function PadPutawayPage() {
       )}
       <PadActionBar actions={actionBarActions} />
       <Modal title="扫码" open={scanOpen} footer={null} centered onCancel={() => setScanOpen(false)}>
-        <PadScanStub
-          onSubmit={handleScanSubmit}
-          placeholder={
+        <ScanInput
+          mode="fast"
+          autoAdvance="safe"
+          autoFocus={false}
+          hint={
             task
-              ? `手工输入 SKU / 库位（当前期望：${step === 0 ? expectedSkuCode : targetBinCode}）兜底`
-              : '手工输入 SKU / 库位兜底'
+              ? `扫入 / 输入 SKU 或库位（当前期望：${step === 0 ? expectedSkuCode : targetBinCode}）`
+              : '扫入 / 输入 SKU 或库位'
           }
+          onScan={handleScanSubmit}
         />
       </Modal>
     </>

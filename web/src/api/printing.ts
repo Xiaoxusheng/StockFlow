@@ -353,6 +353,35 @@ export interface PrintTaskCreatePayload {
   copies?: number
 }
 
+// ---------- 批量操作统一结果契约（作业效率提升层一期 §2.7，api.md §9 2026-10-06 节冻结） ----------
+// 新增批量端点（putaway/picks/checks batch-claim）与打印任务创建语义演进共用同一形状；
+// 前端统一由 components/batch/BatchResultDrawer 消费（禁各页面自写结果弹窗）。
+
+/** 逐条结果状态：skipped = 幂等命中 / 已处目标态（不视为失败，重试不重跑） */
+export type BatchResultItemStatus = 'success' | 'failed' | 'skipped'
+
+export interface BatchResultItem {
+  /** 打印场景为 data_id；批量领取场景为任务 id（均字符串形态，api.md §2 冻结口径） */
+  id: string
+  status: BatchResultItemStatus
+  /** 失败原因（既有错误码字符串，如 PRINT_SKU_DISABLED / DUPLICATE_DATA_ID；成功项缺省） */
+  reason?: string
+}
+
+/**
+ * 批量结果（200 响应体；批量**不整体回滚**——逐条成功/失败/跳过）。
+ * 打印语义演进：POST /api/prints/tasks 由「单个 PrintTaskItem」改为本形态，
+ * 2026-10-05 二维码闭环轮的「409 + details.disabled_ids 整体拒绝」语义**已废止**；
+ * 整请求参数错误仍为 400（不进本形态）。
+ */
+export interface BatchResult {
+  total: number
+  success_count: number
+  failed_count: number
+  skipped_count: number
+  results: BatchResultItem[]
+}
+
 // ---------- 打印历史（printing.md §1.2：打印人/打印时间/模板/数据量/打印结果；
 // = print_tasks 已确认子集，HistoryItem，service.go:238-250） ----------
 
@@ -418,7 +447,11 @@ export const printingApi = {
     list: (query: PrintTaskQuery) => http.get<PageResult<PrintTaskItem>>('/api/prints/tasks', { params: query }),
     /** 任务详情（GET /api/prints/tasks/{id}，携带模板快照与渲染数据包，预览页据此渲染） */
     detail: (id: string) => http.get<PrintTaskItem>(`/api/prints/tasks/${id}`),
-    create: (payload: PrintTaskCreatePayload) => http.post<PrintTaskItem>('/api/prints/tasks', payload),
+    /** 创建打印任务（POST /api/prints/tasks）。响应为**批量结果形态**（BatchResult，200）：
+     * 全部参数合法但部分对象不可打印时逐条 failed(reason=PRINT_SKU_DISABLED 等)、
+     * 请求内重复 data_id→skipped(DUPLICATE_DATA_ID)；整请求参数错误仍 400。
+     * 各消费点（打印中心/SfQrPrintModal）须经 BatchResultDrawer 呈现结果。 */
+    create: (payload: PrintTaskCreatePayload) => http.post<BatchResult>('/api/prints/tasks', payload),
     /** 执行确认（POST /api/prints/tasks/{id}/execute，{result, message?}，结果回填一次） */
     execute: (id: string, payload: PrintTaskExecutePayload) =>
       http.post<PrintTaskItem>(`/api/prints/tasks/${id}/execute`, payload),

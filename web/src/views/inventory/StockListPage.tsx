@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { Card } from 'antd'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -8,6 +9,7 @@ import { SfInventorySummary } from '@/components/common/SfInventorySummary'
 import { SfInventoryTable } from '@/components/common/SfInventoryTable'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 
 /** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格；点击行进入库存行详情（§10.3） */
 export default function StockListPage() {
@@ -26,6 +28,10 @@ export default function StockListPage() {
     queryKey: ['inventory', 'stock', 'summary'],
     queryFn: inventoryApi.stockSummary,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined = 非受控（沿用 localStorage 列偏好）；
+   * 应用视图后置为视图的 hidden 列键数组，用户手动改列经 onChange 回写（不禁用本地持久化） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // 键名取 snake_case 汇总字段（StockSummary；口径见 api/inventory.ts 注释：
   // abnormal = 冻结+残次、near_expiry 含已过期）。
@@ -86,6 +92,22 @@ export default function StockListPage() {
         <SfInventoryTable
           storageKey="inventory-stock"
           rowKey="id"
+          /* 保存视图（§2.2，验收场景 2）：urlSync 页经 usePagedList 公开 API 写 URL，
+             应用视图即还原筛选 + 分页；列经受控 props 生效（不覆盖本地列偏好） */
+          actions={
+            <SfViewBar
+              pageKey="inventory.stock"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}

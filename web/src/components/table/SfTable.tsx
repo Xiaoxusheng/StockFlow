@@ -118,6 +118,17 @@ export interface SfTableProps<T extends object> extends TableProps<T> {
   removingRowKeys?: Key[]
   /** 批量面板「清空」覆盖实现（默认调 rowSelection.onChange([], [], { type: 'none' })） */
   onClearSelection?: () => void
+  /**
+   * 受控隐藏列（计划 §2.2 B6，docs/plans/2026-10-06-efficiency-layer-phase1.md）：
+   * 传入即受控模式——列显示以本值生效（保存视图 columns_json 应用路径，不写 localStorage
+   * 以免覆盖用户列偏好）；不传则回退内部 state（既有非受控行为，既有消费页零变化）。
+   */
+  hiddenColumns?: string[]
+  /**
+   * 受控隐藏列变更回传：用户手动改列时回传新 hidden 集合，storageKey 照旧持久化；
+   * 受控模式下内部 state 不再接管（受控优先/非受控回退）。
+   */
+  onHiddenColumnsChange?: (hidden: string[]) => void
 }
 
 /**
@@ -148,6 +159,9 @@ export function SfTable<T extends object>({
   actions,
   emptyText,
   storageKey,
+  // 受控列 API（计划 §2.2 B6）：在 {...rest} 前解构——受控分支专用，不透传 antd
+  hiddenColumns,
+  onHiddenColumnsChange,
   scrollX,
   variant = 'page',
   showToolbar = true,
@@ -179,6 +193,16 @@ export function SfTable<T extends object>({
   const [hiddenKeys, setHiddenKeys] = useState<string[]>(
     () => readStored<string[]>(storageKey, 'hidden-columns') ?? [],
   )
+
+  /**
+   * 受控列 API（计划 §2.2 B6，frontend.md §6.1）：
+   * - 传入 `hiddenColumns` 即**受控优先**：列隐藏集由页面承载（保存视图应用时置入），
+   *   不写内部 state，也不因受控值写 localStorage（避免覆盖用户手动列偏好）；
+   * - 未传则**非受控回退**：沿用内部 state + storageKey 持久化，既有消费页零行为变化。
+   * 用户手动改列始终经 commitHiddenKeys：storageKey 照旧持久化 +（受控时）onChange 回传。
+   */
+  const isHiddenControlled = hiddenColumns !== undefined
+  const effectiveHiddenKeys = isHiddenControlled ? hiddenColumns : hiddenKeys
 
   // 动效 #1/#6：loading 归一化（类型上仅 boolean，运行时防御个别调用方传 SpinProps 对象形态）
   const isSpinning =
@@ -254,9 +278,9 @@ export function SfTable<T extends object>({
     () =>
       applyAlignDefaults(columns ?? []).filter((column) => {
         const key = columnKey(column as never)
-        return !key || !hiddenKeys.includes(key)
+        return !key || !effectiveHiddenKeys.includes(key)
       }),
-    [columns, hiddenKeys],
+    [columns, effectiveHiddenKeys],
   )
 
   // scroll.x 自适应（2026-10-06）：全部可见列均显式声明 width 时按「列宽总和+10」推导——
@@ -370,17 +394,25 @@ export function SfTable<T extends object>({
     writeStored(storageKey, 'density', value)
   }
 
+  // 列显示变更（计划 §2.2 B6）：受控优先——onChange 回传新集合并由页面（保存视图列应用）
+  // 承载状态；storageKey 照旧持久化（用户手动改列=本地列偏好保留）。受控模式下不写内部
+  // state（其已被受控值接管）；非受控模式走既有 setHiddenKeys 路径，行为零变化。
+  const commitHiddenKeys = (next: string[]) => {
+    writeStored(storageKey, 'hidden-columns', next)
+    if (isHiddenControlled) {
+      onHiddenColumnsChange?.(next)
+      return
+    }
+    setHiddenKeys(next)
+  }
+
   const toggleColumn = (key: string, checked: boolean) => {
-    setHiddenKeys((prev) => {
-      const next = checked ? prev.filter((k) => k !== key) : [...new Set([...prev, key])]
-      writeStored(storageKey, 'hidden-columns', next)
-      return next
-    })
+    const prev = effectiveHiddenKeys
+    commitHiddenKeys(checked ? prev.filter((k) => k !== key) : [...new Set([...prev, key])])
   }
 
   const resetColumns = () => {
-    setHiddenKeys([])
-    writeStored(storageKey, 'hidden-columns', [])
+    commitHiddenKeys([])
   }
 
   const iconStyle = { fontSize: 15, color: token.colorTextSecondary }
@@ -442,7 +474,7 @@ export function SfTable<T extends object>({
                 {identityColumns.map(({ key, column }) => (
                   <Checkbox
                     key={key}
-                    checked={!hiddenKeys.includes(key)}
+                    checked={!effectiveHiddenKeys.includes(key)}
                     onChange={(e) => toggleColumn(key, e.target.checked)}
                   >
                     {renderColumnTitle<T>(column)}
@@ -461,7 +493,7 @@ export function SfTable<T extends object>({
                 <Button
                   type="link"
                   size="small"
-                  disabled={hiddenKeys.length === 0}
+                  disabled={effectiveHiddenKeys.length === 0}
                   onClick={resetColumns}
                 >
                   恢复默认

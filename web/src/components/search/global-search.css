@@ -1,0 +1,115 @@
+/* ==========================================================================
+   全局搜索命令面板（计划 §2.1 / F1 全局层）
+   独立作用域段：仅 .sf-global-search-* 前缀，不动表格动效体系（§31）既有类名。
+   色值一律 --sf-* Token；动画只用于反馈（frontend.md §31），零 transition:all。
+   ========================================================================== */
+
+.sf-global-search__list {
+  max-height: 420px;
+  overflow-y: auto;
+  border-top: 1px solid var(--sf-border);
+  padding: var(--sf-space-2);
+  background: var(--sf-surface);
+}
+
+.sf-global-search__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-3);
+  width: 100%;
+  padding: var(--sf-space-2) var(--sf-space-3);
+  border: none;
+  border-radius: var(--sf-radius-md);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: var(--sf-text);
+}
+
+.sf-global-search__item--active {
+  background: var(--sf-surface-hover);
+}
+
+.sf-global-search__item:focus-visible {
+  outline: 2px solid var(--sf-primary);
+  outline-offset: -2px;
+}
+
+.sf-global-search__item--disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.sf-global-search__item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sf-global-search__item-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sf-global-search__item-code {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--sf-text-secondary);
+}
+
+.sf-global-search__item-summary {
+  font-size: 12px;
+  color: var(--sf-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sf-global-search__item-side {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-2);
+  flex: 0 0 auto;
+}
+
+.sf-global-search__item-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--sf-text-muted);
+  white-space: nowrap;
+}
+
+.sf-global-search__empty {
+  padding: var(--sf-space-5) var(--sf-space-3);
+  text-align: center;
+  color: var(--sf-text-muted);
+  font-size: 13px;
+}
+
+/* ---------- 最近访问下拉（计划 §2.5） ---------- */
+
+.sf-recent-visits__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 220px;
+}
+
+.sf-recent-visits__title {
+  color: var(--sf-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sf-recent-visits__time {
+  font-size: 12px;
+  color: var(--sf-text-muted);
+}

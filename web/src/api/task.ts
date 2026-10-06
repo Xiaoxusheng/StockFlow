@@ -65,6 +65,54 @@ export interface WorkbenchSummary {
   task_count: number
   /** 我的异常 */
   exception_count: number
+  /** 超时任务数（2026-10-06 效率层一期 additive 增量；键名对齐 workbench_summary.go） */
+  timeout_count?: number
+  /** 指派给我且进行中的任务数（同上前缀增量） */
+  mine_count?: number
+  /** 今日已完成任务数（同上） */
+  today_completed_count?: number
+}
+
+/**
+ * 最近操作行（GET /api/workbench/recent-operations，api.md §9 效率层节）：
+ * 读本人 operation_logs 尾 N 条——写入链路零新增（仍仅 middleware.Audit），
+ * 「最近访问」属导航态走 user_preferences.recent_visits，不入本表（避免污染 append-only 审计）。
+ */
+export interface RecentOperationItem {
+  /** YYYY-MM-DD HH:mm:ss */
+  time: string
+  action: string
+  module: string
+  object_type?: string
+  object_id?: string
+  success: boolean
+  error_code?: string
+  request_id?: string
+}
+
+/**
+ * 自动下一条任务类型（GET /api/tasks/next 白名单五值，api.md §9 效率层节）：
+ * 前三者复用 /api/tasks 三分支字段映射与五值映射；receipt→inbound_orders 状态
+ * RECEIVING 候选池、exception→exceptions 状态 OPEN/处理中候选池（二者无独立任务表、
+ * 无 priority 列，排序仅 created_at ASC——api.md §9 口径披露）。
+ */
+export type NextTaskType = TaskType | 'receipt' | 'exception'
+
+export interface NextTaskQuery {
+  task_type: NextTaskType
+  /** 与数据权限 scopeOf 求交收窄（exceptions 表无仓库列，对该分支不生效——api.md §9 明示） */
+  warehouse_id?: number | string
+  /** 当前任务 ID：结果恒排除（防「下一条 = 自己」） */
+  current_task_id?: number | string
+}
+
+/**
+ * 自动下一条响应（NextTaskResult，api.md §9）：
+ * has_next=false 时 task 为 null（无候选 → 页面给出「暂无待处理任务」真实反馈，不造假任务）。
+ */
+export interface NextTaskResult {
+  has_next: boolean
+  task: TaskItem | null
 }
 
 export const taskApi = {
@@ -72,4 +120,14 @@ export const taskApi = {
   summary: () => http.get<WorkbenchSummary>('/api/workbench/summary'),
   /** 我的任务列表（统一分页信封 page/pageSize/total/items，docs/api.md §2.1） */
   list: (query: TaskQuery) => http.get<PageResult<TaskItem>>('/api/tasks', { params: query }),
+  /**
+   * 下一条任务（GET /api/tasks/next，计划 §2.4；排序由后端真实 SQL ORDER BY 承担，
+   * 严禁前端推算；候选池=(本人已领取且进行中) OR (PENDING 未领取)——B7 裁决）
+   */
+  next: (query: NextTaskQuery) => http.get<NextTaskResult>('/api/tasks/next', { params: query }),
+  /** 我的最近操作（GET /api/workbench/recent-operations，本人 operation_logs 尾 N 条，只读） */
+  recentOperations: (limit?: number) =>
+    http.get<{ items: RecentOperationItem[] }>('/api/workbench/recent-operations', {
+      params: limit ? { limit } : undefined,
+    }),
 }

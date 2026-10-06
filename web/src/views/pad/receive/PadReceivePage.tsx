@@ -46,6 +46,8 @@ import {
   usePadOrientation,
 } from '@/layouts/pad'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useNextTask } from '@/hooks/useNextTask'
+import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
 
 /**
@@ -413,8 +415,21 @@ export default function PadReceivePage() {
    * 序列号管控开关、批次/效期必填口径与 service_receipt.go:141-247 一致；
    * SKU 管控开关未加载时跳过前端预检，由后端校验兜底（不造假放行）。
    */
-  const handleConfirm = () => {
-    if (!selected || !detailQuery.data || confirmMutation.isPending) return
+  /**
+   * 下一条待收货任务（§2.4 / api.md §9，验收场景 3）：receipt 分支候选池 =
+   * inbound_orders 状态 RECEIVING，排序仅 created_at ASC（先来先办，无 priority 层——
+   * 后端真实 SQL，前端零推算）；current_task_id 恒排除当前选中单；
+   * receipt 无领取语义（不 claim，直接站内切单）。
+   */
+  const nextTask = useNextTask({
+    task_type: 'receipt',
+    warehouse_id: selected?.warehouse_id,
+    current_task_id: selected?.id,
+    enabled: !!selected,
+  })
+
+  const handleConfirm = async (): Promise<unknown> => {
+    if (!selected || !detailQuery.data || confirmMutation.isPending) return undefined
     const problems: string[] = []
     const serialLineByNo = new Map<string, number>()
     const lines: ReceiptLineInput[] = []
@@ -495,7 +510,7 @@ export default function PadReceivePage() {
     const idempotencyKey =
       idemKeyRef.current?.inboundId === inboundId ? idemKeyRef.current.key : newIdempotencyKey()
     idemKeyRef.current = { inboundId, key: idempotencyKey }
-    confirmMutation.mutate({
+    return confirmMutation.mutateAsync({
       inbound_no: selected.inbound_no,
       lines,
       idempotency_key: idempotencyKey,
@@ -735,6 +750,17 @@ export default function PadReceivePage() {
             >
               确认收货
             </Button>
+            <SfCompleteNextButton
+              onComplete={handleConfirm}
+              nextTask={nextTask.data?.task ?? null}
+              onNavigateNext={(task) => {
+                // 站内切单（receipt 无领取语义，api.md §9）：命中当前页列表即直接选中
+                const hit = list.items.find((order) => String(order.id) === String(task.id))
+                if (hit) handleSelect(hit)
+              }}
+              completing={confirmMutation.isPending}
+              disabled={!hasInput}
+            />
             <p className="sf-pad-muted-note">
               确认后单事务生效：收货单落库 → 异常同事务登记异常中心（§3.4）→ 批次/序列号采集 →
               累计与状态推进 → 逐行生成上架任务；幂等键防重，重试不重复累计（plan §7）

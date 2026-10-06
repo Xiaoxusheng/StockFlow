@@ -1,6 +1,7 @@
-import { Alert, AutoComplete, Avatar, Badge, Breadcrumb, ConfigProvider, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
+import { Alert, Avatar, Badge, Breadcrumb, ConfigProvider, Dropdown, Flex, Form, Input, Layout, Menu, Modal, Tooltip, message } from 'antd'
 import {
   BellOutlined,
+  ControlOutlined,
   DownOutlined,
   LockOutlined,
   LogoutOutlined,
@@ -13,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
-import type { AutoCompleteProps, MenuProps, ThemeConfig } from 'antd'
+import type { MenuProps, ThemeConfig } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { MENU_TREE, resolveMenuTrail, resolveRoutePermission, type MenuItem } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
@@ -23,8 +24,13 @@ import { canAccess } from '@/types/permission'
 import { authApi, PASSWORD_RULE, type ChangePasswordPayload } from '@/api/auth'
 import { notificationApi } from '@/api/notifications'
 import { SfLogo } from '@/components/common/SfLogo'
+import { RecentVisitsDropdown } from '@/components/common/RecentVisitsDropdown'
+import { SfPreferenceDrawer } from '@/components/common/SfPreferenceDrawer'
 import { matchFieldErrors, resolveErrorMessage } from '@/api/client'
 import { NotificationDrawer } from './NotificationDrawer'
+import { useRecentVisits } from '@/hooks/usePreferences'
+import { ShortcutProvider, useSearchOpener } from '@/components/shortcut/ShortcutProvider'
+import { ShortcutBuiltinRegistrar } from '@/components/shortcut/shortcuts'
 
 const { Header, Sider, Content } = Layout
 
@@ -63,6 +69,8 @@ const PC_LAYOUT_CSS = `
 .sf-header-icon-btn:focus-visible{outline:2px solid var(--sf-primary);outline-offset:1px;}
 .sf-header-icon-btn:active{transform:scale(.97);}
 @media (prefers-reduced-motion:reduce){.sf-header-icon-btn{transition:none;}.sf-header-icon-btn:active{transform:none;}}
+/* 全局搜索触发器（计划 §2.1）：命令栏形态的快捷键提示徽标，样式反馈非动效 */
+.sf-search-trigger__kbd{font-family:monospace;font-size:11px;color:var(--sf-text-muted);background:var(--sf-surface-hover);border:1px solid var(--sf-border);border-radius:var(--sf-radius-sm);padding:1px 6px;line-height:1.4;}
 `
 
 function buildMenuItems(items: MenuItem[]): NonNullable<MenuProps['items']> {
@@ -74,13 +82,21 @@ function buildMenuItems(items: MenuItem[]): NonNullable<MenuProps['items']> {
   }))
 }
 
-/** MENU_TREE 取叶子：分组容器在侧边栏点击是展开而非跳转，不作为搜索直达目标 */
-function flattenMenuLeaves(items: MenuItem[]): MenuItem[] {
-  return items.flatMap((item) => (item.children && item.children.length > 0 ? item.children : [item]))
+/**
+ * PC Layout（frontend.md §4）：固定 Sidebar + 紧凑 Header + 面包屑 + 内容区。
+ * 快捷键中枢与全局搜索由 ShortcutProvider 承载（计划 §2.9/§2.1，仅 PC，Pad 布局不挂）：
+ * Header 搜索按钮与 Ctrl/Cmd+K 同源入口；内置快捷键经 ShortcutBuiltinRegistrar 注册。
+ */
+export function PcLayout() {
+  return (
+    <ShortcutProvider>
+      <ShortcutBuiltinRegistrar />
+      <PcLayoutShell />
+    </ShortcutProvider>
+  )
 }
 
-/** PC Layout（frontend.md §4）：固定 Sidebar + 紧凑 Header + 面包屑 + 内容区 */
-export function PcLayout() {
+function PcLayoutShell() {
   const location = useLocation()
   const navigate = useNavigate()
   const { siderCollapsed, toggleSider } = useUiStore()
@@ -123,8 +139,12 @@ export function PcLayout() {
   }, [sessionIncomplete, setSession])
   const [notificationOpen, setNotificationOpen] = useState(false)
   const [passwordOpen, setPasswordOpen] = useState(false)
-  const [keyword, setKeyword] = useState('')
-  const [messageApi, contextHolder] = message.useMessage()
+  /** 偏好设置抽屉（计划 §2.3：PC 用户菜单入口） */
+  const [preferenceOpen, setPreferenceOpen] = useState(false)
+  /** 全局搜索入口（Header 搜索按钮形态；Ctrl/Cmd+K 同源，计划 §2.1） */
+  const openGlobalSearch = useSearchOpener()
+  /** 最近访问写入器（计划 §2.3：路由变化防抖 3s 写 recent_visits） */
+  useRecentVisits()
   /** 窄屏（<992px）下自动折叠侧边栏（frontend.md §19.1 平板竖屏适配） */
   const [broken, setBroken] = useState(false)
   const collapsed = siderCollapsed || broken
@@ -154,8 +174,6 @@ export function PcLayout() {
     [user],
   )
   const menuItems = useMemo(() => buildMenuItems(visibleMenu), [visibleMenu])
-  /** 全局搜索候选源：菜单叶子（与侧边栏可点击行为一致，占位叶子跳占位页亦为真实反馈） */
-  const searchSource = useMemo(() => flattenMenuLeaves(visibleMenu), [visibleMenu])
 
   const trail = resolveMenuTrail(location.pathname)
   /** 当前路由对应的菜单权限点（最长前缀匹配，覆盖 /inbound/:id、/counts/new 等衍生路径） */
@@ -205,12 +223,16 @@ export function PcLayout() {
   }
 
   const userMenu: MenuProps['items'] = [
+    { key: 'preferences', icon: <ControlOutlined />, label: '偏好设置' },
     { key: 'change-password', icon: <LockOutlined />, label: '修改密码' },
     { type: 'divider' },
     { key: 'logout', icon: <LogoutOutlined />, label: '退出登录', danger: true },
   ]
 
   const handleUserMenu: MenuProps['onClick'] = ({ key }) => {
+    if (key === 'preferences') {
+      setPreferenceOpen(true)
+    }
     if (key === 'change-password') {
       setPasswordOpen(true)
     }
@@ -219,36 +241,8 @@ export function PcLayout() {
     }
   }
 
-  /** 搜索候选：菜单标签（含分组）包含关键字即命中 */
-  const searchOptions: AutoCompleteProps['options'] = useMemo(() => {
-    const kw = keyword.trim().toLowerCase()
-    if (!kw) return []
-    return searchSource
-      .filter((item) => item.label.toLowerCase().includes(kw))
-      .map((item) => ({ value: item.path, label: item.label }))
-  }, [keyword, searchSource])
-
-  /** 候选点选 / 下拉高亮回车：真实导航到对应菜单路由 */
-  const handleSearchSelect = (path: string) => {
-    navigate(path)
-    setKeyword('')
-  }
-
-  /** 直接回车（下拉无高亮项时兜底）：取第一个标签命中项直达，未命中给出真实反馈 */
-  const handleSearchEnter = () => {
-    const kw = keyword.trim()
-    if (!kw) return
-    const hit = searchSource.find((item) => item.label.toLowerCase().includes(kw.toLowerCase()))
-    if (hit) {
-      handleSearchSelect(hit.path)
-    } else {
-      messageApi.warning(`未找到与「${kw}」匹配的菜单`)
-    }
-  }
-
   return (
     <Layout style={{ minHeight: '100vh' }}>
-      {contextHolder}
       <style>{PC_LAYOUT_CSS}</style>
       <Sider
         className="sf-pc-sider"
@@ -317,23 +311,21 @@ export function PcLayout() {
           </Flex>
 
           <Flex align="center" gap="var(--sf-space-2)">
-            <AutoComplete
-              value={keyword}
-              options={searchOptions}
-              onChange={(value) => setKeyword(value)}
-              onSelect={handleSearchSelect}
-              popupMatchSelectWidth={280}
-              style={{ width: 220 }}
-            >
-              {/* 高度取全局 controlHeight 32（任务书 §24 控件 32~36），与页面表单控件一致 */}
-              <Input
-                allowClear
-                onPressEnter={handleSearchEnter}
-                prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
-                placeholder="搜索菜单名称，回车直达"
-                style={{ width: 220 }}
-              />
-            </AutoComplete>
+            {/* 全局搜索入口（计划 §2.1/§5.3）：原菜名 AutoComplete 升级为「搜索按钮+输入框」
+                形态——点击/键盘聚焦即打开 GlobalSearchModal 命令面板（菜单名搜索保留为
+                Modal 内『页面』分组）；真实输入在 Modal 内进行，此为命令栏形态的触发器 */}
+            <Input
+              readOnly
+              role="button"
+              tabIndex={0}
+              aria-label="打开全局搜索（Ctrl K）"
+              onClick={openGlobalSearch}
+              onFocus={openGlobalSearch}
+              prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
+              suffix={<span className="sf-search-trigger__kbd">Ctrl K</span>}
+              placeholder="搜索 SKU / 单据 / 页面"
+              style={{ width: 220, cursor: 'pointer' }}
+            />
             <Tooltip title={mode === 'light' ? '切换深色模式' : '切换浅色模式'}>
               <ButtonGhost
                 title="主题"
@@ -341,6 +333,8 @@ export function PcLayout() {
                 onClick={toggleMode}
               />
             </Tooltip>
+            {/* 最近访问（计划 §2.5）：通知按钮旁，读 recent_visits 偏好点击回详情 */}
+            <RecentVisitsDropdown />
             <Tooltip title="通知">
               <Badge count={unreadCount.data} size="small" offset={[3, -1]}>
                 <ButtonGhost
@@ -387,6 +381,9 @@ export function PcLayout() {
           void unreadCount.refetch()
         }}
       />
+
+      {/* 偏好设置抽屉（计划 §2.3：默认仓库 + 清除最近数据） */}
+      <SfPreferenceDrawer open={preferenceOpen} onClose={() => setPreferenceOpen(false)} />
 
       <ChangePasswordModal
         open={passwordOpen || mustChangePassword}

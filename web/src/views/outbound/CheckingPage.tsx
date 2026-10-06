@@ -16,9 +16,12 @@ import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
+import { SfAutoRefreshSelect } from '@/components/common/SfAutoRefreshSelect'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { resolveErrorMessage } from '@/api/client'
@@ -80,11 +83,18 @@ export default function CheckingPage() {
   const canExecute = canAccess(user, CHECK_EXECUTE_PERMISSION)
 
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
+  /** 任务页自动刷新（§2.11）：档位 关/10/30/60 秒；页签隐藏暂停；连续失败 ≥2 次退避停轮 */
+  const autoRefresh = useAutoRefresh()
+
   const list = usePagedList<CheckTask, CheckTaskQuery>({
     queryKey: ['outbound', 'checks'],
     fetch: (q) => outboundTaskApi.checks.list(q),
     urlSync: true,
+    refetchInterval: autoRefresh.refetchInterval,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   /** 任务落定后刷新列表（状态机由后端守卫，前端无条件 refetch 对齐） */
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['outbound', 'checks'] })
@@ -297,6 +307,25 @@ export default function CheckingPage() {
           onSearch={list.applyFilters}
         />
         <SfTable<CheckTask>
+          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
+          actions={
+            <>
+            <SfViewBar
+              pageKey="outbound.checking"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+            {/* 自动刷新档位（§2.11）：任务页轮询，页签隐藏自动暂停 */}
+            <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
+            </>
+          }
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="outbound-checks"
           rowKey="id"
           columns={columns}

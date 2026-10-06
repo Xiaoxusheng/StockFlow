@@ -324,6 +324,19 @@ export const dataApi = {
       http.post<ImportConfirmResult>(`/api/imports/${id}/confirm`, payload, {
         timeout: DATA_REQUEST_TIMEOUT_MS,
       }),
+    /**
+     * 失败行重试（POST /api/imports/{id}/retry-failed，2026-10-06 效率层一期，api.md §9）：
+     * 读源任务 status IN ('INVALID','FAILED') 的行 → 以同一 ImportWriter 管线创建**新导入任务**
+     * （PARSED 态，走正常校验 + 确认流程，复用六步向导语义）；仅重导上次失败行，上次成功行
+     * 不入集、不重复成功数据；源任务行状态零篡改。
+     * 后端前置核验结论（api.md §9 交付披露）：五域 Writer 落库均为逐行/逐单事务，FAILED 行
+     * 无部分落库——重导集含 INVALID + FAILED（回退方案未触发）。
+     * 响应复用 ImportUploadResult 形态（新任务 id/单号）。
+     */
+    retryFailed: (id: string) =>
+      http.post<ImportUploadResult>(`/api/imports/${id}/retry-failed`, undefined, {
+        timeout: DATA_REQUEST_TIMEOUT_MS,
+      }),
   },
   exports: {
     /** 导出任务列表（GET /api/exports） */

@@ -18,6 +18,7 @@ import {
 } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
+import { SfRelationNav } from '@/components/common/SfRelationNav'
 import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
@@ -281,6 +282,13 @@ export default function PurchaseOrderDetailPage() {
               { key: 'cancelledAt', label: '取消时间', children: formatDateTime(order.cancelled_at) },
               { key: 'remark', label: '备注', children: order.remark || '-', span: 2 },
             ]}
+          />
+        </SfDetailSection>
+                {/* §2.6 上下文导航：采购单 → 关联入库单 / 采购退货 / 实时库存 */}
+        <SfDetailSection title="关联业务">
+          <SfRelationNav
+            entity="purchase_order"
+            context={{ po_no: order.po_no, warehouse_id: order.warehouse_id }}
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">

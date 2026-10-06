@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfToolbar } from '@/components/table/SfToolbar'
@@ -123,6 +124,9 @@ export default function TransferListPage() {
     fetch: (q) => transferApi.list(q),
     urlSync: true,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // 行反馈动效（frontend.md §31 #7）：提交/审核/取消先 API 后反馈，对应行淡色底 480ms 自动回落
   const fb = useTableRowFeedback()
@@ -318,6 +322,21 @@ export default function TransferListPage() {
           onSearch={list.applyFilters}
         />
         <SfTable<TransferOrder>
+          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
+          actions={
+            <SfViewBar
+              pageKey="transfer.order"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="transfer-orders"
           rowKey="id"
           columns={columns}

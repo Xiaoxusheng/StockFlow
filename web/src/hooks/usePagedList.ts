@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, type UseQueryOptions } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router'
 import type { PageQuery, PageResult } from '@/types/api'
 
@@ -48,6 +48,12 @@ export interface PagedListOptions<T, Q extends PageQuery> {
    * 页面可复用已有的 onSearch 转换逻辑（如 DeviceListPage 的 toDeviceQuery）。
    */
   decodeParams?: (raw: Record<string, string>) => Q
+  /**
+   * 自动刷新轮询间隔（任务页自动刷新，计划 §2.11）：直传内部 useQuery 的 refetchInterval，
+   * 函数形态由 `hooks/useAutoRefresh` 产出（含 document.hidden 暂停与连续失败退避停轮）。
+   * 缺省不轮询——既有页面零行为变化（additive）。
+   */
+  refetchInterval?: UseQueryOptions<PageResult<T>>['refetchInterval']
 }
 
 /** sessionStorage 命名空间前缀，避免与其他页面状态混写 */
@@ -125,6 +131,7 @@ export function usePagedList<T, Q extends PageQuery>(options: PagedListOptions<T
     persistKey,
     urlSync = false,
     decodeParams,
+    refetchInterval,
   } = options
 
   const [searchParams, setSearchParams] = useSearchParams()
@@ -208,6 +215,8 @@ export function usePagedList<T, Q extends PageQuery>(options: PagedListOptions<T
     queryFn: () => fetch({ ...params, ...pagination }),
     enabled,
     placeholderData: keepPreviousData,
+    // 自动刷新（§2.11）：缺省 undefined = 不轮询（既有行为不变）
+    refetchInterval,
   })
 
   const tablePagination = useMemo(

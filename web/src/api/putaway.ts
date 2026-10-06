@@ -1,4 +1,5 @@
 import { http } from './client'
+import type { BatchResult } from './printing'
 import type { PageQuery, PageResult } from '@/types/api'
 
 // ---------- 上架任务（后端已交付：GET /api/putaway，internal/purchase/purchase.go:71-75；
@@ -84,4 +85,13 @@ export const putawayApi = {
   /** 上架确认（POST /api/putaway/{id}/execute，IN_PROGRESS→COMPLETED + 库存落账） */
   execute: (id: PutawayTaskId, payload: PutawayExecutePayload) =>
     http.post<PutawayTask>(`/api/putaway/${encodeURIComponent(String(id))}/execute`, payload),
+  /**
+   * 批量领取（POST /api/putaway/batch-claim，计划 §2.7；权限复用 purchase:putaway:claim）：
+   * 响应=批量结果契约 BatchResult（api.md §9）——PENDING→success、已被本人领取→skipped、
+   * 被他人领取/状态非法→failed(reason)；批量不整体回滚；结果统一经
+   * components/batch/BatchResultDrawer 呈现（禁各页自写），重试=仅对 failed ids 再调本端点。
+   * 头键说明：批量领取**不消费 Idempotency-Key**（防重=状态机原子抢占），前端附头仅防双击。
+   */
+  batchClaim: (ids: Array<number | string>) =>
+    http.post<BatchResult>('/api/putaway/batch-claim', { ids: ids.map((id) => Number(id)) }),
 }

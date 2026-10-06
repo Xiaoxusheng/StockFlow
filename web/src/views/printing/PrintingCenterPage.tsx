@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Alert,
   Button,
@@ -34,6 +34,7 @@ import {
   resolveObjectTypeLabel,
   resolvePaperLabel,
   type BarcodeSymbology,
+  type BatchResult,
   type PrintExecuteResult,
   type PrintHistoryItem,
   type PrintHistoryQuery,
@@ -52,6 +53,7 @@ import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
+import { BatchResultDrawer } from '@/components/batch/BatchResultDrawer'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -787,11 +789,10 @@ function HistoryTab() {
   /** 正在重打的历史行 ID（重打为 detail→create 两段请求，行级 loading 防重复触发） */
   const [reprintingId, setReprintingId] = useState<string | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   // 动效 #7（frontend.md §31）：重打为行级操作，失败行 error 淡色反馈（先 API 后反馈；
-  // 成功即跳转预览页，无需行反馈）
+  // 结果经 BatchResultDrawer 统一呈现，不再行内跳转预览）
   const fb = useTableRowFeedback()
   // 重打入口 fail-closed（约束 7）：无 printing:task:create 权限不显示按钮（frontend.md §13.2）
   const canCreatePrintTask = canAccess(user, 'printing:task:create')
@@ -817,9 +818,17 @@ function HistoryTab() {
   // 重打 = 以行快照 data_id 创建新任务，不修改历史（约束 11 / qr-code.md §7.4）。
   // fail-closed（frontend.md §13.2）：任务任一行缺 data_id（含 0 行）即中止，不发创建请求；
   // 全部行有 data_id 方可 tasks.create（all-or-nothing，禁止部分行静默重打）。
-  // data_ids 通道纪律（qr-code.md §8）：恒为行快照 data_id = SKU 数字 ID 十进制文本
+  // data_ids 通道纪律（qr-code.md §8）：恒为行快照 data_id = SKU 数字 ID 十进制文本。
+  // 2026-10-06 效率层一期：响应演进为批量结果形态（BatchResult，api.md §9）——逐条
+  // success/failed/skipped 经统一 BatchResultDrawer 呈现，「仅重试失败」以失败 data_ids 重建。
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
+  /** 最近一次重打的历史行：结果抽屉「仅重试失败」需同一模板上下文 */
+  const lastReprintRef = useRef<PrintHistoryItem | null>(null)
+
   const reprintMutation = useMutation({
-    mutationFn: async (history: PrintHistoryItem) => {
+    mutationFn: async (input: { history: PrintHistoryItem; dataIds?: string[] }) => {
+      const { history } = input
       const task = await printingApi.tasks.detail(String(history.id))
       const rows = task.rows ?? []
       if (rows.length === 0 || rows.some((row) => !row.data_id)) {
@@ -828,33 +837,48 @@ function HistoryTab() {
       if (!history.template_id) {
         return { outcome: 'no-template' as const }
       }
-      const created = await printingApi.tasks.create({
+      const allIds = rows.map((row) => row.data_id as string)
+      const dataIds = input.dataIds && input.dataIds.length > 0 ? input.dataIds : allIds
+      const result = await printingApi.tasks.create({
         template_id: Number(history.template_id),
-        data_ids: rows.map((row) => row.data_id as string),
+        data_ids: dataIds,
         copies: 1,
       })
-      return { outcome: 'created' as const, task: created }
+      return { outcome: 'created' as const, result }
     },
-    onSuccess: (result) => {
-      if (result.outcome === 'created') {
-        messageApi.success(`重打任务 ${result.task.print_no} 已创建，即将进入预览`)
+    onSuccess: (res, input) => {
+      if (res.outcome === 'created') {
+        lastReprintRef.current = input.history
+        setBatchResult(res.result)
+        setResultOpen(true)
         void queryClient.invalidateQueries({ queryKey: ['printing', 'tasks'] })
         void queryClient.invalidateQueries({ queryKey: ['printing', 'history'] })
-        navigate(`/data/printing/preview?taskId=${result.task.id}`)
         return
       }
       // 提示文案逐字对齐 frontend.md §13.2 冻结口径
       messageApi.warning(
-        result.outcome === 'no-data-id'
+        res.outcome === 'no-data-id'
           ? '该任务创建于身份快照能力之前，无法自动重打，请到商品二维码中心按 SKU 重选打印'
           : '该历史记录缺少模板信息，无法自动重打，请到商品二维码中心按 SKU 重选打印',
       )
     },
-    onError: (error, history) => {
-      fb.trigger(history.id, 'error')
+    onError: (error, input) => {
+      fb.trigger(input.history.id, 'error')
       messageApi.error(resolveErrorMessage(error))
     },
   })
+
+  /** 结果抽屉关闭：有成功项即刷新（已 invalidate），无成功项也可重开二维码中心 */
+  const handleResultClose = () => {
+    setResultOpen(false)
+  }
+
+  /** 仅重试失败：以失败 data_ids 重发同一创建请求（成功/跳过项绝不重跑） */
+  const handleRetryFailed = (failedIds: string[]) => {
+    const history = lastReprintRef.current
+    if (!history) return
+    reprintMutation.mutate({ history, dataIds: failedIds })
+  }
 
   const columns: ColumnsType<PrintHistoryItem> = [
     { title: '打印人', dataIndex: 'printed_by', width: 120, render: (value?: string) => value ?? '-' },
@@ -895,7 +919,7 @@ function HistoryTab() {
             confirming={reprintingId === String(record.id) && reprintMutation.isPending}
             onConfirm={() => {
               setReprintingId(String(record.id))
-              reprintMutation.mutate(record, { onSettled: () => setReprintingId(null) })
+              reprintMutation.mutate({ history: record }, { onSettled: () => setReprintingId(null) })
             }}
           >
             <Button type="link" size="small" loading={reprintingId === String(record.id) && reprintMutation.isPending}>
@@ -946,6 +970,15 @@ function HistoryTab() {
           scrollX={980}
         />
       </Card>
+
+      {/* 批量结果统一承载面（§2.7）：重打逐条结果 + 仅重试失败（成功项绝不重跑） */}
+      <BatchResultDrawer
+        open={resultOpen}
+        result={batchResult}
+        onRetry={canCreatePrintTask ? handleRetryFailed : undefined}
+        retrying={reprintMutation.isPending}
+        onClose={handleResultClose}
+      />
     </>
   )
 }

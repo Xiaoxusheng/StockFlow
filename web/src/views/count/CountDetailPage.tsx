@@ -45,6 +45,7 @@ import type { StatusSemantic } from '@/types/status'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
+import { SfRelationNav } from '@/components/common/SfRelationNav'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfLoading } from '@/components/common/SfLoading'
@@ -809,6 +810,10 @@ export default function CountDetailPage() {
           </SfDetailSection>
         </div>
         <div style={{ marginTop: 16 }}>
+                    {/* §2.6 上下文导航：盘点单 → 实时库存 / 库存流水 / 库存调整单（差异落账） */}
+          <SfDetailSection title="关联业务">
+            <SfRelationNav entity="count" context={{ warehouse_id: order.warehouse_id }} />
+          </SfDetailSection>
           <SfDetailSection title="盘点明细">
             <SfTable<CountItem>
               storageKey="count-detail-items"

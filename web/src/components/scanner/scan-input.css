@@ -1,0 +1,55 @@
+/* ScanInput 统一扫码输入原语（frontend.md §22）——形态对齐 PadScanStub（大输入区 + 兜底
+   手输），色彩只引 --sf-* Token，Pad / PC 同款复用。 */
+
+.sf-scan-input {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-scan-input__zone {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px dashed var(--sf-border, #d9d9d9);
+  border-radius: var(--sf-radius-md, 8px);
+  background: color-mix(in srgb, var(--sf-primary, #1677ff) 6%, transparent);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.sf-scan-input__icon {
+  font-size: 18px;
+  color: var(--sf-primary, #1677ff);
+}
+
+.sf-scan-input__repeat {
+  margin-left: auto;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--sf-primary, #1677ff);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-scan-input__hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--sf-text-secondary, #888);
+}
+
+.sf-scan-input__row {
+  display: flex;
+  gap: 10px;
+}
+
+.sf-scan-input__row > .ant-input-affix-wrapper,
+.sf-scan-input__row > .ant-input {
+  flex: 1;
+}
+
+.sf-scan-input__note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--sf-text-tertiary, #aaa);
+}

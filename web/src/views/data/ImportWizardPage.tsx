@@ -43,6 +43,8 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
@@ -139,6 +141,61 @@ export default function ImportWizardPage() {
   const [riskAck, setRiskAck] = useState(false)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
   const [downloadingErrorFile, setDownloadingErrorFile] = useState(false)
+
+  /**
+   * Excel 失败行修复（§2.8，验收场景 5）：POST /api/imports/{id}/retry-failed
+   * 读源任务 status IN ('INVALID','FAILED') 的行 → 后端以同一 ImportWriter 管线创建**新导入任务**
+   * （PARSED 态），响应复用 ImportUploadResult；前端把向导置为该新任务并进入「数据校验」步，
+   * 走正常校验 + 确认流程（仅重导失败行，上次成功行不入集）。
+   */
+  const [retryingId, setRetryingId] = useState<string | null>(null)
+  const user = useAuthStore((s) => s.user)
+  const canRetry = canAccess(user, 'datax:import:create')
+  const retryMutation = useMutation({
+    mutationFn: (id: string) => dataApi.imports.retryFailed(id),
+    onSuccess: (result) => {
+      messageApi.success(
+        `已按失败行创建新导入任务 ${result.import_no}（${result.total_rows} 行），请继续校验并确认导入`,
+      )
+      setImportType(result.import_type)
+      setFile(null)
+      setUploadResult(result)
+      setValidateResult(null)
+      setConfirmResult(null)
+      setCurrent(2)
+      void queryClient.invalidateQueries({ queryKey: ['data', 'imports'] })
+    },
+    onError: (error) => {
+      messageApi.error(resolveErrorMessage(error))
+    },
+  })
+
+  /** 任务记录列 + 操作列（失败行重试入口：仅 failed_rows>0 且持 datax:import:create 时渲染） */
+  const taskColumns = useMemo<ColumnsType<DataTask>>(
+    () => [
+      ...IMPORT_TASK_COLUMNS,
+      {
+        title: '操作',
+        key: 'operation',
+        width: 170,
+        render: (_: unknown, record: DataTask) =>
+          record.failed_rows && record.failed_rows > 0 && canRetry ? (
+            <Button
+              type="link"
+              size="small"
+              loading={retryingId === String(record.id) && retryMutation.isPending}
+              onClick={() => {
+                setRetryingId(String(record.id))
+                retryMutation.mutate(String(record.id))
+              }}
+            >
+              重新导入失败行（{record.failed_rows}）
+            </Button>
+          ) : null,
+      },
+    ],
+    [canRetry, retryingId, retryMutation],
+  )
 
   // 第 1 步：模板列表由后端统一下发（GET /api/imports/templates）
   const templatesQuery = useQuery({
@@ -714,7 +771,7 @@ export default function ImportWizardPage() {
         <SfTable<DataTask>
           storageKey="data-import-tasks"
           rowKey="id"
-          columns={IMPORT_TASK_COLUMNS}
+          columns={taskColumns}
           dataSource={tasks.items}
           loading={tasks.isFetching}
           error={tasks.error}
