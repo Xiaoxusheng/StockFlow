@@ -152,7 +152,7 @@ func parseDevSeedInserts(t *testing.T, sqlText string) []seedInsert {
 }
 
 // insertsOf 取某表的全部 INSERT（不做条数校验）。表内可能同时存在不同构的 INSERT
-//（如 inventory 的期初行只写 total/available、§12.1 状态行六列全写），故先取再分类。
+// （如 inventory 的期初行只写 total/available、§12.1 状态行六列全写），故先取再分类。
 func insertsOf(ins []seedInsert, table string) []seedInsert {
 	var out []seedInsert
 	for _, s := range ins {
@@ -396,8 +396,8 @@ func TestDevSeedReferencedCodesExist(t *testing.T) {
 		return out
 	}
 	valid := map[string]map[string]bool{
-		"仓库": collect("warehouses", "code", 2),
-		"库位": collect("bins", "code", 2),
+		"仓库":  collect("warehouses", "code", 2),
+		"库位":  collect("bins", "code", 2),
 		"SKU": collect("skus", "code", 2),
 	}
 	kindOf := func(alias string) string {
@@ -463,7 +463,7 @@ var devSeedExpectedCounts = map[string]int{
 	"receipts": 1, "receipt_items": 1,
 	"quality_orders": 2, "quality_items": 2,
 	"putaway_tasks": 2,
-	"sales_orders": 2, "sales_order_items": 2,
+	"sales_orders":  2, "sales_order_items": 2,
 	"outbound_orders": 2, "outbound_items": 2,
 	"allocation_records": 1, "pick_tasks": 2, "check_tasks": 2,
 	"packing_records": 1, "packing_items": 1, "shipments": 2,
@@ -474,8 +474,8 @@ var devSeedExpectedCounts = map[string]int{
 	// §12 演示数据补全轮新增表（各 1 条，除 return_orders 销售/采购两条）
 	"inventory_locks": 1, "inventory_adjustments": 1,
 	"return_orders": 2, "return_items": 1,
-	"exceptions":    1,
-	"devices":       1, "device_configs": 1, "device_logs": 1, "scan_logs": 1, "app_versions": 1,
+	"exceptions": 1,
+	"devices":    1, "device_configs": 1, "device_logs": 1, "scan_logs": 1, "app_versions": 1,
 	"files": 1, "import_tasks": 1, "import_task_rows": 1, "export_tasks": 1,
 	"scheduled_job_runs": 1, "notifications": 1, "backup_records": 1,
 }
@@ -500,13 +500,14 @@ var devSeedNaturalKeyTables = map[string]bool{
 }
 
 // devSeedBareConflictTables 除主键 id 外还带自然键唯一索引的表（迁移 DDL 事实）：
-//   exceptions(uk_exceptions_no) / return_orders(uk_return_orders_no) /
-//   return_items(uk_return_items_return_line) / inventory_adjustments(uk_inventory_adjustments_no) /
-//   devices(uk_devices_code) / device_configs(uk_device_configs_device) /
-//   app_versions(uk_app_versions_platform_code) / import_tasks(uk_import_tasks_no) /
-//   import_task_rows(uk_import_task_rows_task_row) / export_tasks(uk_export_tasks_no) /
-//   notifications(uk_notifications_dedup 部分索引) / backup_records(uk_backup_records_inflight 部分索引) /
-//   print_tasks(uk_print_tasks_no) / print_task_rows(uk_print_task_rows_task_seq)。
+//
+//	exceptions(uk_exceptions_no) / return_orders(uk_return_orders_no) /
+//	return_items(uk_return_items_return_line) / inventory_adjustments(uk_inventory_adjustments_no) /
+//	devices(uk_devices_code) / device_configs(uk_device_configs_device) /
+//	app_versions(uk_app_versions_platform_code) / import_tasks(uk_import_tasks_no) /
+//	import_task_rows(uk_import_task_rows_task_row) / export_tasks(uk_export_tasks_no) /
+//	notifications(uk_notifications_dedup 部分索引) / backup_records(uk_backup_records_inflight 部分索引) /
+//	print_tasks(uk_print_tasks_no) / print_task_rows(uk_print_task_rows_task_seq)。
 //
 // 这些表的幂等守卫必须是无目标的 ON CONFLICT DO NOTHING：写成 ON CONFLICT (id) 时，
 // 运行期（扫码/收货/打印/导出/异常登记）已按 docnum 同日期段生成同号单据，

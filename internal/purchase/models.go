@@ -250,28 +250,28 @@ func (ReceiptItem) TableName() string { return "receipt_items" }
 // serial_no 序列号 SKU 单件任务 qty=1 逐件上架，inventory-rules §8.2）。
 type PutawayTask struct {
 	database.BaseModel
-	PutawayNo         string            `gorm:"column:putaway_no;size:64" json:"putaway_no"`
-	InboundNo         string            `gorm:"column:inbound_no;size:64" json:"inbound_no"`
-	ReceiptNo         string            `gorm:"column:receipt_no;size:64" json:"receipt_no"`
-	SKUID             int64             `gorm:"column:sku_id" json:"sku_id"`
-	BatchID           int64             `gorm:"column:batch_id" json:"batch_id"`
-	SerialNo          string            `gorm:"column:serial_no;size:128" json:"serial_no"`
-	Qty               stock.Qty         `gorm:"column:qty" json:"qty"`
-	FromState         string            `gorm:"column:from_state;size:32" json:"from_state"`
-	TargetWarehouseID int64             `gorm:"column:target_warehouse_id" json:"target_warehouse_id"`
-	TargetZoneID      int64             `gorm:"column:target_zone_id" json:"target_zone_id"`
-	TargetShelfID     int64             `gorm:"column:target_shelf_id" json:"target_shelf_id"`
-	TargetBinID       int64             `gorm:"column:target_bin_id" json:"target_bin_id"`
-	Status            string            `gorm:"column:status;size:16" json:"status"`
+	PutawayNo         string    `gorm:"column:putaway_no;size:64" json:"putaway_no"`
+	InboundNo         string    `gorm:"column:inbound_no;size:64" json:"inbound_no"`
+	ReceiptNo         string    `gorm:"column:receipt_no;size:64" json:"receipt_no"`
+	SKUID             int64     `gorm:"column:sku_id" json:"sku_id"`
+	BatchID           int64     `gorm:"column:batch_id" json:"batch_id"`
+	SerialNo          string    `gorm:"column:serial_no;size:128" json:"serial_no"`
+	Qty               stock.Qty `gorm:"column:qty" json:"qty"`
+	FromState         string    `gorm:"column:from_state;size:32" json:"from_state"`
+	TargetWarehouseID int64     `gorm:"column:target_warehouse_id" json:"target_warehouse_id"`
+	TargetZoneID      int64     `gorm:"column:target_zone_id" json:"target_zone_id"`
+	TargetShelfID     int64     `gorm:"column:target_shelf_id" json:"target_shelf_id"`
+	TargetBinID       int64     `gorm:"column:target_bin_id" json:"target_bin_id"`
+	Status            string    `gorm:"column:status;size:16" json:"status"`
 	// Priority 任务优先级（效率层一期 B3，迁移 000023；0–9）——/api/tasks/next 排序层
 	// 数据来源；列表下发供前端「优先级」列与行内设置入口回显（PUT /api/putaway/{id}/priority）。
-	Priority          int16             `gorm:"column:priority" json:"priority"`
-	ClaimedBy         int64             `gorm:"column:claimed_by" json:"claimed_by"`
-	ClaimedAt         database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
-	CompletedAt       database.JSONTime `gorm:"column:completed_at" json:"completed_at"`
-	Remark            string            `gorm:"column:remark" json:"remark"`
-	CreatedBy         database.ID       `gorm:"column:created_by" json:"created_by"`
-	UpdatedBy         database.ID       `gorm:"column:updated_by" json:"updated_by"`
+	Priority    int16             `gorm:"column:priority" json:"priority"`
+	ClaimedBy   int64             `gorm:"column:claimed_by" json:"claimed_by"`
+	ClaimedAt   database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
+	CompletedAt database.JSONTime `gorm:"column:completed_at" json:"completed_at"`
+	Remark      string            `gorm:"column:remark" json:"remark"`
+	CreatedBy   database.ID       `gorm:"column:created_by" json:"created_by"`
+	UpdatedBy   database.ID       `gorm:"column:updated_by" json:"updated_by"`
 }
 
 // TableName 显式指定表名。

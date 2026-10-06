@@ -111,63 +111,63 @@ type (
 
 	// PickTask 拣货任务（business-flow §8.2：SKU→来源库位→数量→操作人→完成时间）。
 	PickTask struct {
-		ID                database.ID       `gorm:"primaryKey;autoIncrement" json:"id"`
-		PickNo            string            `gorm:"column:pick_no" json:"pick_no"`
-		OutboundNo        string            `gorm:"column:outbound_no" json:"outbound_no"`
-		OutboundLineNo    int64             `gorm:"column:outbound_line_no" json:"outbound_line_no"`
-		SKUID             int64             `gorm:"column:sku_id" json:"sku_id"`
-		BatchID           int64             `gorm:"column:batch_id" json:"batch_id"`
-		SourceWarehouseID int64             `gorm:"column:source_warehouse_id" json:"source_warehouse_id"`
-		SourceZoneID      int64             `gorm:"column:source_zone_id" json:"source_zone_id"`
-		SourceShelfID     int64             `gorm:"column:source_shelf_id" json:"source_shelf_id"`
-		SourceBinID       int64             `gorm:"column:source_bin_id" json:"source_bin_id"`
-		Qty               Qty               `gorm:"column:qty" json:"qty"`
-		PickedQty         Qty               `gorm:"column:picked_qty" json:"picked_qty"`
-		Status            string            `gorm:"column:status" json:"status"`
+		ID                database.ID `gorm:"primaryKey;autoIncrement" json:"id"`
+		PickNo            string      `gorm:"column:pick_no" json:"pick_no"`
+		OutboundNo        string      `gorm:"column:outbound_no" json:"outbound_no"`
+		OutboundLineNo    int64       `gorm:"column:outbound_line_no" json:"outbound_line_no"`
+		SKUID             int64       `gorm:"column:sku_id" json:"sku_id"`
+		BatchID           int64       `gorm:"column:batch_id" json:"batch_id"`
+		SourceWarehouseID int64       `gorm:"column:source_warehouse_id" json:"source_warehouse_id"`
+		SourceZoneID      int64       `gorm:"column:source_zone_id" json:"source_zone_id"`
+		SourceShelfID     int64       `gorm:"column:source_shelf_id" json:"source_shelf_id"`
+		SourceBinID       int64       `gorm:"column:source_bin_id" json:"source_bin_id"`
+		Qty               Qty         `gorm:"column:qty" json:"qty"`
+		PickedQty         Qty         `gorm:"column:picked_qty" json:"picked_qty"`
+		Status            string      `gorm:"column:status" json:"status"`
 		// Priority 任务优先级（效率层一期 B3，迁移 000023；0–9，默认 0）——
 		// /api/tasks/next 排序层（mine > priority > 超时 > created_at）的数据来源，
 		// 列表下发供前端「优先级」列与行内设置入口回显（PUT /api/picks/{id}/priority）。
-		Priority          int16             `gorm:"column:priority" json:"priority"`
-		AssigneeID        int64             `gorm:"column:assignee_id" json:"assignee_id"`
-		AssigneeName      string            `gorm:"column:assignee_name" json:"assignee_name"`
-		ClaimedAt         database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
-		PickedAt          database.JSONTime `gorm:"column:picked_at" json:"picked_at"`
-		ScannedCode       string            `gorm:"column:scanned_code" json:"scanned_code"`
-		ScanMatched       bool              `gorm:"column:scan_matched" json:"scan_matched"`
-		WarehouseID       int64             `gorm:"column:warehouse_id" json:"warehouse_id"`
-		Remark            string            `gorm:"column:remark" json:"remark"`
-		CreatedAt         database.JSONTime `gorm:"column:created_at" json:"created_at"`
-		UpdatedAt         database.JSONTime `gorm:"column:updated_at" json:"updated_at"`
-		CreatedBy         int64             `gorm:"column:created_by" json:"created_by"`
-		UpdatedBy         int64             `gorm:"column:updated_by" json:"updated_by"`
+		Priority     int16             `gorm:"column:priority" json:"priority"`
+		AssigneeID   int64             `gorm:"column:assignee_id" json:"assignee_id"`
+		AssigneeName string            `gorm:"column:assignee_name" json:"assignee_name"`
+		ClaimedAt    database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
+		PickedAt     database.JSONTime `gorm:"column:picked_at" json:"picked_at"`
+		ScannedCode  string            `gorm:"column:scanned_code" json:"scanned_code"`
+		ScanMatched  bool              `gorm:"column:scan_matched" json:"scan_matched"`
+		WarehouseID  int64             `gorm:"column:warehouse_id" json:"warehouse_id"`
+		Remark       string            `gorm:"column:remark" json:"remark"`
+		CreatedAt    database.JSONTime `gorm:"column:created_at" json:"created_at"`
+		UpdatedAt    database.JSONTime `gorm:"column:updated_at" json:"updated_at"`
+		CreatedBy    int64             `gorm:"column:created_by" json:"created_by"`
+		UpdatedBy    int64             `gorm:"column:updated_by" json:"updated_by"`
 	}
 
 	// CheckTask 复核任务（business-flow §8.3：重新确认 SKU/条码/数量/批次/序列号/订单；
 	// 五类复核异常落 result；序列号 SKU 逐件一行一件）。
 	CheckTask struct {
-		ID             database.ID       `gorm:"primaryKey;autoIncrement" json:"id"`
-		CheckNo        string            `gorm:"column:check_no" json:"check_no"`
-		OutboundNo     string            `gorm:"column:outbound_no" json:"outbound_no"`
-		OutboundLineNo int64             `gorm:"column:outbound_line_no" json:"outbound_line_no"`
-		SKUID          int64             `gorm:"column:sku_id" json:"sku_id"`
-		BatchID        int64             `gorm:"column:batch_id" json:"batch_id"`
-		SerialNo       string            `gorm:"column:serial_no" json:"serial_no"`
-		Qty            Qty               `gorm:"column:qty" json:"qty"`
-		Status         string            `gorm:"column:status" json:"status"`
+		ID             database.ID `gorm:"primaryKey;autoIncrement" json:"id"`
+		CheckNo        string      `gorm:"column:check_no" json:"check_no"`
+		OutboundNo     string      `gorm:"column:outbound_no" json:"outbound_no"`
+		OutboundLineNo int64       `gorm:"column:outbound_line_no" json:"outbound_line_no"`
+		SKUID          int64       `gorm:"column:sku_id" json:"sku_id"`
+		BatchID        int64       `gorm:"column:batch_id" json:"batch_id"`
+		SerialNo       string      `gorm:"column:serial_no" json:"serial_no"`
+		Qty            Qty         `gorm:"column:qty" json:"qty"`
+		Status         string      `gorm:"column:status" json:"status"`
 		// Priority 复核任务优先级（效率层一期 B3，迁移 000023；0–9）——/api/tasks/next
 		// checking 分支排序层（mine > priority > created_at）数据来源；列表下发供前端回显。
-		Priority       int16             `gorm:"column:priority" json:"priority"`
-		Result         string            `gorm:"column:result" json:"result"`
-		AssigneeID     int64             `gorm:"column:assignee_id" json:"assignee_id"`
-		AssigneeName   string            `gorm:"column:assignee_name" json:"assignee_name"`
-		ClaimedAt      database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
-		DoneAt         database.JSONTime `gorm:"column:done_at" json:"done_at"`
-		WarehouseID    int64             `gorm:"column:warehouse_id" json:"warehouse_id"`
-		Remark         string            `gorm:"column:remark" json:"remark"`
-		CreatedAt      database.JSONTime `gorm:"column:created_at" json:"created_at"`
-		UpdatedAt      database.JSONTime `gorm:"column:updated_at" json:"updated_at"`
-		CreatedBy      int64             `gorm:"column:created_by" json:"created_by"`
-		UpdatedBy      int64             `gorm:"column:updated_by" json:"updated_by"`
+		Priority     int16             `gorm:"column:priority" json:"priority"`
+		Result       string            `gorm:"column:result" json:"result"`
+		AssigneeID   int64             `gorm:"column:assignee_id" json:"assignee_id"`
+		AssigneeName string            `gorm:"column:assignee_name" json:"assignee_name"`
+		ClaimedAt    database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
+		DoneAt       database.JSONTime `gorm:"column:done_at" json:"done_at"`
+		WarehouseID  int64             `gorm:"column:warehouse_id" json:"warehouse_id"`
+		Remark       string            `gorm:"column:remark" json:"remark"`
+		CreatedAt    database.JSONTime `gorm:"column:created_at" json:"created_at"`
+		UpdatedAt    database.JSONTime `gorm:"column:updated_at" json:"updated_at"`
+		CreatedBy    int64             `gorm:"column:created_by" json:"created_by"`
+		UpdatedBy    int64             `gorm:"column:updated_by" json:"updated_by"`
 	}
 
 	// PackingRecord 打包记录（business-flow §8.4 全列；一个订单允许多个包裹）。
