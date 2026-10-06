@@ -30,7 +30,6 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { SfToolbar } from '@/components/table/SfToolbar'
 import TransferFormModal from './TransferFormModal'
 import TransferInTransitDrawer from './TransferInTransitDrawer'
 
@@ -322,13 +321,6 @@ export default function TransferListPage() {
         }
       />
       <Card size="small">
-        <SfToolbar
-          title={
-            <Button icon={<SwapOutlined />} onClick={() => setInTransitOpen(true)}>
-              在途汇总
-            </Button>
-          }
-        />
         <SfSearchForm
           fields={[
             { name: 'transfer_no', label: '调拨单号', control: 'input', placeholder: '调拨单号（精确匹配）' },
@@ -337,18 +329,24 @@ export default function TransferListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行）；
+             在途汇总开关同排（原孤立 SfToolbar 已删——迁移残留的空工具栏会孤占一行） */
           extraActions={
-            <SfViewBar
-              pageKey="transfer.order"
-              mode="url"
-              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
-              appliedFilters={list.params as unknown as Record<string, unknown>}
-              currentFilters={list.formValues}
-              currentPageSize={list.pagination.pageSize}
-              currentHiddenColumns={hiddenColumns}
-              onHiddenColumnsChange={setHiddenColumns}
-            />
+            <>
+              <Button icon={<SwapOutlined />} onClick={() => setInTransitOpen(true)}>
+                在途汇总
+              </Button>
+              <SfViewBar
+                pageKey="transfer.order"
+                mode="url"
+                paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+                appliedFilters={list.params as unknown as Record<string, unknown>}
+                currentFilters={list.formValues}
+                currentPageSize={list.pagination.pageSize}
+                currentHiddenColumns={hiddenColumns}
+                onHiddenColumnsChange={setHiddenColumns}
+              />
+            </>
           }
         />
         <SfTable<TransferOrder>
