@@ -5,8 +5,10 @@ import { Link, useNavigate } from 'react-router'
 import {
   PRINT_OPTIONS_PAGE_SIZE,
   printingApi,
+  resolveObjectTypeLabel,
   resolvePaperLabel,
   type BatchResult,
+  type PrintObjectType,
   type PrintTemplateItem,
 } from '@/api/printing'
 import { resolveErrorMessage } from '@/api/client'
@@ -39,6 +41,16 @@ export interface SfQrPrintModalProps {
   open: boolean
   /** 打印对象：单打传单元素、批量传全部已选 */
   skus: SfQrPrintSku[]
+  /**
+   * 标签业务类型（缺省 SKU_LABEL）。后端 9 类对象中**标签类四类**（SKU/库位/箱码/托盘）
+   * 的装配流程完全一致（自定义字段 + 二维码），故本弹窗按对象类型参数化复用，
+   * 不另建第二套打印弹窗。目前已接入：SKU_LABEL（二维码中心 / SKU 列表）、
+   * BIN_LABEL（库位列表）；后端 BIN_LABEL 的 ContentReader 已装配
+   * （internal/router/router.go:203 warehouse.NewBinContentReader）。
+   */
+  objectType?: PrintObjectType
+  /** 对象名词（用于文案「N 个 X」「以下 X 已停用」），缺省 'SKU' */
+  noun?: string
   onClose: () => void
 }
 
@@ -69,7 +81,13 @@ function failedIdsByReason(result: BatchResult | null, reason: string): string[]
  * - 创建按钮 loading 防重复提交；成功展示任务号并跳转打印预览页（/data/printing/preview?taskId=）；
  * - 历史重打与本弹窗无关（fail-closed 逻辑见 PrintingCenterPage，重打只认行快照 data_id）。
  */
-export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
+export function SfQrPrintModal({
+  open,
+  skus,
+  objectType = 'SKU_LABEL',
+  noun = 'SKU',
+  onClose,
+}: SfQrPrintModalProps) {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const [messageApi, contextHolder] = message.useMessage()
@@ -91,9 +109,9 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
   }, [open])
 
   const templatesQuery = useQuery({
-    queryKey: ['printing', 'templates', 'options', 'SKU_LABEL'],
+    queryKey: ['printing', 'templates', 'options', objectType],
     queryFn: () =>
-      printingApi.templates.list({ object_type: 'SKU_LABEL', status: 'ENABLED', page: 1, pageSize: PRINT_OPTIONS_PAGE_SIZE }),
+      printingApi.templates.list({ object_type: objectType, status: 'ENABLED', page: 1, pageSize: PRINT_OPTIONS_PAGE_SIZE }),
     enabled: open,
   })
   const templates = templatesQuery.data?.items ?? []
@@ -210,7 +228,7 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
 
         {/* 打印对象清单（ask 要点「打印对象/已选数量」；500 行封顶防御 DOM 爆炸） */}
         <div>
-          <Text strong>打印对象：{skus.length} 个 SKU</Text>
+          <Text strong>打印对象：{skus.length} 个 {noun}</Text>
           <div
             style={{
               marginTop: 4,
@@ -234,10 +252,10 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
 
         {/* 模板选择（printing:template:list 后端校验；空态如实引导，不造假选项） */}
         <div>
-          <Text strong>打印模板（SKU 标签）</Text>
+          <Text strong>打印模板（{resolveObjectTypeLabel(objectType)}）</Text>
           <Select
             style={{ width: '100%', marginTop: 4 }}
-            placeholder="请选择启用中的 SKU 标签模板"
+            placeholder={`请选择启用中的${resolveObjectTypeLabel(objectType)}模板`}
             value={templateId}
             onChange={setTemplateId}
             loading={templatesQuery.isPending}
@@ -254,7 +272,7 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
               type="info"
               showIcon
               style={{ marginTop: 8 }}
-              message="暂无启用中的 SKU 标签模板"
+              message={`暂无启用中的${resolveObjectTypeLabel(objectType)}模板`}
               description={
                 canOpenPrintingCenter ? (
                   <span>
@@ -262,10 +280,10 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
                     <Link to="/data/printing" onClick={() => onClose()}>
                       打印中心
                     </Link>{' '}
-                    新建业务类型为「SKU标签」的模板并启用。
+                    新建业务类型为「{resolveObjectTypeLabel(objectType)}」的模板并启用。
                   </span>
                 ) : (
-                  '请联系管理员到打印中心新建业务类型为「SKU标签」的模板并启用。'
+                  `请联系管理员到打印中心新建业务类型为「${resolveObjectTypeLabel(objectType)}」的模板并启用。`
                 )
               }
             />
@@ -297,7 +315,7 @@ export function SfQrPrintModal({ open, skus, onClose }: SfQrPrintModalProps) {
           <Alert
             type="warning"
             showIcon
-            message={`不可打印清单（${disabledCodes.length} 个）：以下 SKU 已停用，创建时将被逐条标记失败`}
+            message={`不可打印清单（${disabledCodes.length} 个）：以下 ${noun} 已停用，创建时将被逐条标记失败`}
             description={
               <>
                 <div style={{ maxHeight: 120, overflowY: 'auto' }}>

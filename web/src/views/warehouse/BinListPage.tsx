@@ -40,6 +40,9 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SfQrPrintModal, type SfQrPrintSku } from '@/components/print/SfQrPrintModal'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { formatNumber } from '@/utils/format'
 
 const BIN_TYPE_OPTIONS = Object.entries(BIN_TYPE_LABEL).map(([value, label]) => ({ label, value }))
@@ -170,6 +173,12 @@ export default function BinListPage() {
   const [actionError, setActionError] = useState<unknown>(null)
   const [togglingId, setTogglingId] = useState<number | string | null>(null)
   const [removingId, setRemovingId] = useState<number | string | null>(null)
+  /** 库位标签打印（BIN_LABEL）：打印对象=当前行库位，所属仓库名作副标题便于多仓区分 */
+  const [printTargets, setPrintTargets] = useState<SfQrPrintSku[]>([])
+  const [printOpen, setPrintOpen] = useState(false)
+  const user = useAuthStore((s) => s.user)
+  /** 打印入口门禁（后端 printing:task:create 同码校验，前端仅隐藏入口） */
+  const canPrintLabel = canAccess(user, 'printing:task:create')
 
   // 表单内级联：仓库 → 库区 → 货架
   const formWarehouseId = Form.useWatch('warehouse_id', form)
@@ -327,11 +336,28 @@ export default function BinListPage() {
         const enabled = record.status?.toUpperCase() === 'ENABLED'
         const rowMenu: MenuProps = {
           items: [
+            /* 库位标签打印（BIN_LABEL）：后端 ContentReader 已装配（router.go:203），
+               复用通用标签打印弹窗，不另建第二套 */
+            ...(canPrintLabel ? [{ key: 'print', label: '打印标签' }] : []),
             { key: 'toggle', label: enabled ? '停用' : '启用', danger: enabled },
             { type: 'divider' },
             { key: 'remove', label: '删除', danger: true },
           ],
           onClick: ({ key }) => {
+            if (key === 'print') {
+              setPrintTargets([
+                {
+                  id: record.id,
+                  code: record.code,
+                  productName: warehouseOptions.find(
+                    (o) => String(o.value) === String(record.warehouse_id),
+                  )?.label,
+                  enabled,
+                },
+              ])
+              setPrintOpen(true)
+              return
+            }
             if (key === 'toggle' || key === 'remove') setRowConfirm({ kind: key, record })
           },
         }
@@ -510,6 +536,16 @@ export default function BinListPage() {
           {rowConfirm?.kind === 'remove' ? '已有库存数据时后端将拒绝删除（级联校验）' : undefined}
         </Typography.Text>
       </Modal>
+
+      {/* 库位标签打印（BIN_LABEL）：与 SKU 标签打印共用同一弹窗实现（按 objectType 参数化），
+          流程为「选 BIN_LABEL 启用模板 → 创建打印任务 → 结果经 BatchResultDrawer 呈现」 */}
+      <SfQrPrintModal
+        open={printOpen}
+        skus={printTargets}
+        objectType="BIN_LABEL"
+        noun="库位"
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   )
 }
