@@ -1,14 +1,23 @@
 import { Button, Drawer, Flex, List, Typography } from 'antd'
-import { CheckOutlined } from '@ant-design/icons'
+import {
+  AuditOutlined,
+  CheckOutlined,
+  ClockCircleOutlined,
+  CloseCircleOutlined,
+  InfoCircleOutlined,
+  SyncOutlined,
+  WarningOutlined,
+} from '@ant-design/icons'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
+import type { ReactNode } from 'react'
 import { notificationApi, type NotificationItem } from '@/api/notifications'
 import { resolveErrorMessage } from '@/api/client'
 import { formatDateTime } from '@/utils/format'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
-import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { STATUS_SEMANTIC_COLOR } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
 
 const { Text } = Typography
@@ -28,6 +37,20 @@ const NOTIFICATION_TYPE_SEMANTIC: Record<string, StatusSemantic> = {
   EXCEPTION: 'danger',
   TASK: 'processing',
   SYSTEM: 'neutral',
+}
+
+/**
+ * 通知类型 → 图标（frontend.md §15.3：审批 / 库存预警 / 效期预警 / 异常 / 任务 / 系统）。
+ * 图标承担「类型识别」职责，颜色取自 STATUS_SEMANTIC_COLOR——与 SfStatusTag 共用同一
+ * Token 色源（§24），不另造第二套语义色；未知类型中性兜底。
+ */
+const NOTIFICATION_TYPE_ICON: Record<string, ReactNode> = {
+  APPROVAL: <AuditOutlined />,
+  STOCK_ALERT: <WarningOutlined />,
+  EXPIRY_ALERT: <ClockCircleOutlined />,
+  EXCEPTION: <CloseCircleOutlined />,
+  TASK: <SyncOutlined />,
+  SYSTEM: <InfoCircleOutlined />,
 }
 
 export interface NotificationDrawerProps {
@@ -107,35 +130,100 @@ export function NotificationDrawer({ open, onClose }: NotificationDrawerProps) {
         <>
           <List
             dataSource={items}
-            renderItem={(item) => (
-              <List.Item
-                style={{ padding: '10px 0', cursor: item.read ? 'default' : 'pointer' }}
-                onClick={
-                  item.read || markRead.isPending ? undefined : () => markRead.mutate(item.id)
-                }
-              >
-                <Flex vertical gap={4} style={{ width: '100%' }}>
-                  <Flex align="center" gap={8}>
-                    <SfStatusTag
-                      label={item.title}
-                      semantic={NOTIFICATION_TYPE_SEMANTIC[item.type] ?? 'neutral'}
-                    />
-                    {!item.read && <Text type="danger" style={{ fontSize: 12 }}>未读</Text>}
-                  </Flex>
-                  {/* 未读内容加粗、已读弱化，视觉一眼可分 */}
-                  <Text
-                    strong={!item.read}
-                    type={item.read ? 'secondary' : undefined}
-                    style={{ fontSize: 13 }}
+            renderItem={(item) => {
+              const semantic = NOTIFICATION_TYPE_SEMANTIC[item.type] ?? 'neutral'
+              const accent = STATUS_SEMANTIC_COLOR[semantic]
+              const unread = !item.read
+              return (
+                <List.Item
+                  style={{ padding: 0, border: 'none', cursor: unread ? 'pointer' : 'default' }}
+                  onClick={unread && !markRead.isPending ? () => markRead.mutate(item.id) : undefined}
+                >
+                  {/* 通知卡片（frontend.md §15.3）三级层次：
+                      ① 标题行 = 类型图标 + 标题 + 时间（右对齐弱化）
+                      ② 正文（次级色、行高 1.65，与标题拉开权重）
+                      未读 = 左侧语义色条 + 微染底色 + 标题加粗；已读整卡降级为 muted，
+                      一眼可分且无需额外「未读」文字标签。 */}
+                  <div
+                    style={{
+                      position: 'relative',
+                      width: '100%',
+                      marginBottom: 'var(--sf-space-2)',
+                      padding: 'var(--sf-space-3) var(--sf-space-3) var(--sf-space-3) 16px',
+                      border: '1px solid var(--sf-border-subtle)',
+                      borderRadius: 'var(--sf-radius-md)',
+                      background: unread
+                        ? `color-mix(in srgb, ${accent} 6%, var(--sf-surface))`
+                        : 'var(--sf-surface)',
+                      overflow: 'hidden',
+                    }}
                   >
-                    {item.content}
-                  </Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    {formatDateTime(item.created_at)}
-                  </Text>
-                </Flex>
-              </List.Item>
-            )}
+                    {unread && (
+                      <span
+                        aria-hidden
+                        style={{
+                          position: 'absolute',
+                          insetBlock: 0,
+                          insetInlineStart: 0,
+                          width: 3,
+                          background: accent,
+                        }}
+                      />
+                    )}
+                    <Flex align="flex-start" gap="var(--sf-space-2)">
+                      <span
+                        aria-hidden
+                        style={{
+                          flex: '0 0 auto',
+                          marginTop: 1,
+                          fontSize: 15,
+                          lineHeight: '20px',
+                          color: accent,
+                        }}
+                      >
+                        {NOTIFICATION_TYPE_ICON[item.type] ?? <InfoCircleOutlined />}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {/* ① 标题：完整展示不截断（单号是定位通知的关键信息），未读加粗 */}
+                        <Text
+                          strong={unread}
+                          type={unread ? undefined : 'secondary'}
+                          style={{ display: 'block', fontSize: 14, lineHeight: '20px' }}
+                        >
+                          {item.title}
+                        </Text>
+                        {/* ② 正文：次级色 + 舒展行高，与标题拉开权重差 */}
+                        <Text
+                          type={unread ? undefined : 'secondary'}
+                          style={{
+                            display: 'block',
+                            marginTop: 4,
+                            fontSize: 13,
+                            lineHeight: 1.65,
+                            color: unread ? 'var(--sf-text-secondary)' : 'var(--sf-text-muted)',
+                          }}
+                        >
+                          {item.content}
+                        </Text>
+                        {/* ③ 时间：右对齐作元信息锚点（字号最小、色最弱），不占标题宽度 */}
+                        <Text
+                          type="secondary"
+                          style={{
+                            display: 'block',
+                            marginTop: 6,
+                            textAlign: 'right',
+                            fontSize: 12,
+                            color: 'var(--sf-text-muted)',
+                          }}
+                        >
+                          {formatDateTime(item.created_at)}
+                        </Text>
+                      </div>
+                    </Flex>
+                  </div>
+                </List.Item>
+              )
+            }}
           />
           {/* 分页加载进度：已显示 / 共 N 条（total 消费自分页信封） */}
           <Flex vertical align="center" gap={8} style={{ marginTop: 12 }}>

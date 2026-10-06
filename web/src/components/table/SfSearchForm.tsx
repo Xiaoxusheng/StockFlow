@@ -116,9 +116,11 @@ export function SfSearchForm({
             label={field.label}
             style={{
               marginBottom: 0,
-              flex: '1 1 200px',
+              /* basis 220px：3 字段 + 查询/重置 在 1161px 视口（内容区 871px）恰好不折行；
+                 宽屏时自由增长到 --sf-search-field-width 上限，窄屏收缩而不折行。 */
+              flex: '1 1 220px',
               maxWidth: 'var(--sf-search-field-width)',
-              minWidth: 184,
+              minWidth: 200,
             }}
           >
             {field.control === 'select' ? (
@@ -143,13 +145,20 @@ export function SfSearchForm({
           <Button icon={<ReloadOutlined />} onClick={handleReset}>
             重置
           </Button>
-          {extraActions}
           {collapsible && (
             <Button type="link" onClick={() => form.setFieldValue('collapsed', !collapsed)}>
               {collapsed ? '展开' : '收起'}
             </Button>
           )}
         </Flex>
+        {/* extraActions 独立成 flex item（不再与「查询/重置」同组）：空间不足时只让这一组
+            折到下一行，而不是把查询/重置一起拖下去。修前整组折行——复核页 536px 的
+            视图+自动刷新组把查询/重置带到第二行，首行只剩筛选字段（2026-10-06 实测）。 */}
+        {extraActions && (
+          <Flex gap="var(--sf-space-2)" wrap="wrap" style={{ flex: '0 0 auto' }}>
+            {extraActions}
+          </Flex>
+        )}
       </Flex>
       {appliedCount > 0 && (
         <Flex

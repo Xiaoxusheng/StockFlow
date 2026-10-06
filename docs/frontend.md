@@ -529,6 +529,16 @@ PC Header 提供 `搜索 SKU / 单据 / 库位 / SN / 箱码`：输入 SKU001 �
 
 Header 通知入口（未读数量实时更新），内容：审批、库存预警、任务、异常、系统通知。
 
+**通知卡片视觉规范（2026-10-06 层次化改造）**：通知抽屉（`NotificationDrawer`）内每条通知渲染为
+独立卡片（`--sf-border-subtle` 边框 + `--sf-radius-md` 圆角 + `--sf-space-2` 间距），卡片内建立
+**三级信息层次**：① 标题行 = 类型图标（语义色，取自 `STATUS_SEMANTIC_COLOR`——与 SfStatusTag 同一
+Token 色源，不造第二套语义色）+ 标题（14px，未读 600 / 已读 400 secondary，**完整展示不截断**：
+单号是定位通知的关键信息）；② 正文（13px、行高 1.65、`--sf-text-secondary`）；③ 时间（12px、
+`--sf-text-muted`、右下角右对齐作元信息锚点）。**未读态** = 左侧 3px 语义色条 + `color-mix` 6%
+语义色微染底 + 标题加粗（不再使用「未读」文字标签）；**已读态**整卡降级为 muted 且无色条，
+未读/已读一眼可分。类型→图标：APPROVAL/STOCK_ALERT/EXPIRY_ALERT/EXCEPTION/TASK/SYSTEM，未知类型
+中性兜底。
+
 ### 15.4 文件附件
 
 支持上传、预览、下载、删除；图片支持缩略图、预览、全屏。

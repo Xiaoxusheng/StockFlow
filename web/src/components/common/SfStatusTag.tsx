@@ -7,7 +7,7 @@ import { resolveStatus, type StatusSemantic } from '@/types/status'
  * 处理中按语义归 info，待处理/警告归 warning。
  * 底色/描边由 color-mix 从同一 Token 派生（12% / 24%），Light/Dark 随 Token 自动切换。
  */
-const SEMANTIC_COLOR: Record<StatusSemantic, string> = {
+export const STATUS_SEMANTIC_COLOR: Record<StatusSemantic, string> = {
   success: 'var(--sf-success)',
   processing: 'var(--sf-info)',
   pending: 'var(--sf-warning)',
@@ -34,7 +34,7 @@ export interface SfStatusTagProps {
 export function SfStatusTag({ status, label, semantic, bordered }: SfStatusTagProps) {
   const meta = resolveStatus(status)
   const text = meta?.label ?? label ?? status ?? '-'
-  const color = SEMANTIC_COLOR[meta?.semantic ?? semantic ?? 'neutral']
+  const color = STATUS_SEMANTIC_COLOR[meta?.semantic ?? semantic ?? 'neutral']
   return (
     <Tag
       bordered={bordered}
