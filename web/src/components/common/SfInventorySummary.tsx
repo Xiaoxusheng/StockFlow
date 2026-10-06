@@ -60,23 +60,32 @@ export function SfInventorySummary({ items, loading = false, error, onRetry, sty
       ) : error ? (
         <SfError error={error} onRetry={onRetry} />
       ) : (
-        <Flex gap={0} wrap="wrap">
+        <Flex wrap="wrap" style={{ width: '100%' }}>
           {items.map((item, index) => {
             const tone = item.tone ?? 'default'
             const muted = item.mutedWhenZero && item.value === 0
+            const isFirst = index === 0
+            const isLast = index === items.length - 1
             return (
               <Statistic
                 key={item.label}
                 title={item.label}
                 value={formatNumber(item.value ?? 0)}
                 valueStyle={{
-                  fontSize: 18,
+                  // 数字 tabular-nums：多指标并排时位数/小数点成列对齐，扫读更快
+                  fontSize: 20,
+                  fontWeight: 600,
+                  lineHeight: '28px',
+                  fontVariantNumeric: 'tabular-nums',
                   color: muted ? 'var(--sf-text-muted)' : TONE_COLOR[tone],
                 }}
                 style={{
-                  padding: '0 24px',
-                  borderRight:
-                    index < items.length - 1 ? '1px solid var(--sf-border-subtle)' : undefined,
+                  // 等分铺满整行（消除右半边空白）；首尾项贴边，与卡片内容区左/右缘对齐
+                  flex: '1 1 0',
+                  minWidth: 104,
+                  paddingLeft: isFirst ? 0 : 16,
+                  paddingRight: isLast ? 0 : 16,
+                  borderRight: isLast ? undefined : '1px solid var(--sf-border-subtle)',
                 }}
               />
             )
