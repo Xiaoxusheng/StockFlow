@@ -462,7 +462,8 @@ export default function PickingPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-          /* 保存视图 + 自动刷新档位：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          /* 保存视图 + 自动刷新 + 批量领取：与查询/重置同行渲染
+             （用户口径：批量按钮与其他按钮同一行，不占独立面板） */
           extraActions={
             <>
               <SfViewBar
@@ -476,6 +477,15 @@ export default function PickingPage() {
                 onHiddenColumnsChange={setHiddenColumns}
               />
               <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
+              {canClaim && selectedRowKeys.length > 0 && (
+                <Button
+                  type="primary"
+                  loading={batchClaimMutation.isPending}
+                  onClick={() => batchClaimMutation.mutate(selectedRowKeys)}
+                >
+                  批量领取（{selectedRowKeys.length}）
+                </Button>
+              )}
             </>
           }
         />
@@ -484,23 +494,12 @@ export default function PickingPage() {
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="outbound-picks"
           rowKey="id"
-          /* 批量领取（§2.7）：选中 PENDING 行后经统一批量端点领取，逐条结果落抽屉 */
+          /* 批量领取（§2.7）：选中 PENDING 行后经统一批量端点领取，逐条结果落抽屉；
+             批量按钮已上移至搜索行 extraActions */
           rowSelection={{
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>),
           }}
-          bulkActions={
-            canClaim ? (
-              <Button
-                type="primary"
-                size="small"
-                loading={batchClaimMutation.isPending}
-                onClick={() => batchClaimMutation.mutate(selectedRowKeys)}
-              >
-                批量领取（{selectedRowKeys.length}）
-              </Button>
-            ) : undefined
-          }
           columns={columns}
           dataSource={list.items}
           loading={list.isFetching}

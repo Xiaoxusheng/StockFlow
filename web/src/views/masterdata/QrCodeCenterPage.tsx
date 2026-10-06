@@ -277,6 +277,13 @@ export default function QrCodeCenterPage() {
           ]}
           initialValues={list.formValues}
           onSearch={list.applyFilters}
+          /* 批量打印二维码按钮与「查询/重置」同行（用户口径：批量按钮上移到搜索行）；
+             「不可打印 N 个」为操作警示，随按钮同排 */
+          extraActions={
+            canPrint && selectedSkus.length > 0 ? (
+              bulkActions
+            ) : undefined
+          }
         />
         <SfTable<SkuItem>
           storageKey="qr-codes"
@@ -297,7 +304,6 @@ export default function QrCodeCenterPage() {
               前往 SKU 管理
             </Button>
           }
-          bulkActions={bulkActions}
           scrollX={840}
         />
       </Card>
