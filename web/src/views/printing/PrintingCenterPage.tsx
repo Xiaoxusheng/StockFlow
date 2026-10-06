@@ -784,7 +784,7 @@ function TaskTab() {
 
 // ================= 打印历史（printing.md §1.2：打印人/打印时间/模板/数据量/打印结果） =================
 
-function HistoryTab() {
+function HistoryTab({ onOpenTasks }: { onOpenTasks: () => void }) {
   const [params, setParams] = useState<PrintHistoryQuery>({})
   /** 正在重打的历史行 ID（重打为 detail→create 两段请求，行级 loading 防重复触发） */
   const [reprintingId, setReprintingId] = useState<string | null>(null)
@@ -869,8 +869,15 @@ function HistoryTab() {
   })
 
   /** 结果抽屉关闭：有成功项即刷新（已 invalidate），无成功项也可重开二维码中心 */
+  /**
+   * 结果抽屉关闭：**自动切到「打印任务」页签**（用户口径：重打/创建后应直接看到新任务，
+   * 不用自己在页签间找）。新任务恒为列表第一条（后端 id DESC），点其「预览」→
+   * 浏览器打印对话框出纸——这是本系统「唤起打印机」的唯一一步（printing.md §5：
+   * 禁止页面散落 window.print，出纸统一走打印预览页）。
+   */
   const handleResultClose = () => {
     setResultOpen(false)
+    onOpenTasks()
   }
 
   /** 仅重试失败：以失败 data_ids 重发同一创建请求（成功/跳过项绝不重跑） */
@@ -1006,7 +1013,7 @@ export default function PrintingCenterPage() {
         items={[
           { key: 'templates', label: '打印模板', children: <TemplateTab /> },
           { key: 'tasks', label: '打印任务', children: <TaskTab /> },
-          { key: 'history', label: '打印历史', children: <HistoryTab /> },
+          { key: 'history', label: '打印历史', children: <HistoryTab onOpenTasks={() => setActiveKey('tasks')} /> },
         ]}
       />
     </div>
