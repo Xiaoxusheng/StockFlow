@@ -278,12 +278,13 @@ func TestHTTPGetTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed 箱码模板失败: %v", err)
 	}
-	task, err := env.svc.CreateTask(ctx, actor(), TaskCreateInput{
+	if _, err := env.svc.CreateTask(ctx, actor(), TaskCreateInput{
 		TemplateID: mustParse(t, tpl.ID), DataIDs: []string{"CTN-0001", "CTN-0002"},
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("seed 打印任务失败: %v", err)
 	}
+	// 批量结果演进后 CreateTask 返回批量结果——任务视图经 repo 回取（全成功恰一任务）。
+	task := env.lastTaskView(t)
 
 	rAuthed := httpReadEngine(t, env, ucPtr(superUser()))
 	rNoAuth := httpReadEngine(t, env, nil)

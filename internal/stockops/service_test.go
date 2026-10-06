@@ -93,13 +93,13 @@ func (f *fixture) runTransferLifecycle(t *testing.T, in TransferInput) *Transfer
 	require.NoError(t, err)
 	_, _, err = f.svc.SubmitTransfer(ctxBG(), actor, d.Order.ID.Int64())
 	require.NoError(t, err)
-	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, d.Order.ID.Int64(), ApproveTransferInput{Action: "approve"})
+	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, d.Order.ID.Int64(), ApproveTransferInput{Action: "approve"}, "")
 	require.NoError(t, err)
-	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, d.Order.ID.Int64())
+	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, d.Order.ID.Int64(), "")
 	require.NoError(t, err)
 	_, _, err = f.svc.ArriveTransfer(ctxBG(), actor, d.Order.ID.Int64())
 	require.NoError(t, err)
-	_, _, err = f.svc.ReceiveTransfer(ctxBG(), actor, d.Order.ID.Int64())
+	_, _, err = f.svc.ReceiveTransfer(ctxBG(), actor, d.Order.ID.Int64(), "")
 	require.NoError(t, err)
 	fresh, err := f.svc.GetTransferDetail(ctxBG(), d.Order.ID.Int64(), Scope{AllWarehouses: true})
 	require.NoError(t, err)
@@ -176,7 +176,7 @@ func TestTransferInTransitAggregation(t *testing.T) {
 	id := d.Order.ID.Int64()
 	_, _, err = f.svc.SubmitTransfer(ctxBG(), actor, id)
 	require.NoError(t, err)
-	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"})
+	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"}, "")
 	require.NoError(t, err)
 
 	// 待出库：无在途（尚未离仓）。
@@ -184,7 +184,7 @@ func TestTransferInTransitAggregation(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, total)
 
-	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id)
+	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id, "")
 	require.NoError(t, err)
 
 	// 调拨中：在途 = qty_out - qty_in = 6（inventory-rules §2 在途口径）。
@@ -210,7 +210,7 @@ func TestTransferApproveInsufficientRollsBack(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = f.svc.SubmitTransfer(ctxBG(), actor, d.Order.ID.Int64())
 	require.NoError(t, err)
-	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, d.Order.ID.Int64(), ApproveTransferInput{Action: "approve"})
+	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, d.Order.ID.Int64(), ApproveTransferInput{Action: "approve"}, "")
 	require.Error(t, err) // 源仓不足
 
 	// 整体回滚：单据停留待审核、无锁、无 LOCK 流水、库存未动（plan §6.6）。
@@ -233,7 +233,7 @@ func TestTransferStateGuardAndIdempotentReplay(t *testing.T) {
 	id := d.Order.ID.Int64()
 
 	// 未提交直接出库 → 状态冲突。
-	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id)
+	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id, "")
 	require.Error(t, err)
 	require.Equal(t, "STOCKOPS_STATUS_CONFLICT", codeOf(t, err))
 
@@ -246,9 +246,9 @@ func TestTransferStateGuardAndIdempotentReplay(t *testing.T) {
 	require.True(t, replay)
 
 	// 审核两次：第二次重放且不重复预占（单条 ACTIVE 锁）。
-	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"})
+	_, _, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"}, "")
 	require.NoError(t, err)
-	_, replay, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"})
+	_, replay, err = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"}, "")
 	require.NoError(t, err)
 	require.True(t, replay)
 	activeLocks := 0
@@ -261,10 +261,10 @@ func TestTransferStateGuardAndIdempotentReplay(t *testing.T) {
 	require.Equal(t, q(4), srcRow(f).avail)
 
 	// 出库两次：第二次重放，qty_out 不变（重复请求不重复扣减）。
-	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id)
+	_, _, err = f.svc.OutboundTransfer(ctxBG(), actor, id, "")
 	require.NoError(t, err)
 	totalBefore := srcRow(f).total
-	_, replay, err = f.svc.OutboundTransfer(ctxBG(), actor, id)
+	_, replay, err = f.svc.OutboundTransfer(ctxBG(), actor, id, "")
 	require.NoError(t, err)
 	require.True(t, replay)
 	require.Equal(t, totalBefore, srcRow(f).total)
@@ -279,7 +279,7 @@ func TestTransferCancelReleasesLock(t *testing.T) {
 	d, _ := f.svc.CreateTransfer(ctxBG(), actor, transferInput(skuPlain, q(6), 0))
 	id := d.Order.ID.Int64()
 	_, _, _ = f.svc.SubmitTransfer(ctxBG(), actor, id)
-	_, _, _ = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"})
+	_, _, _ = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"}, "")
 	require.Equal(t, q(4), srcRow(f).avail)
 	require.Equal(t, q(6), srcRow(f).locked)
 
@@ -309,8 +309,8 @@ func TestTransferCancelForbiddenAfterOutbound(t *testing.T) {
 	d, _ := f.svc.CreateTransfer(ctxBG(), actor, transferInput(skuPlain, q(6), 0))
 	id := d.Order.ID.Int64()
 	_, _, _ = f.svc.SubmitTransfer(ctxBG(), actor, id)
-	_, _, _ = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"})
-	_, _, _ = f.svc.OutboundTransfer(ctxBG(), actor, id)
+	_, _, _ = f.svc.ApproveTransfer(ctxBG(), actor, id, ApproveTransferInput{Action: "approve"}, "")
+	_, _, _ = f.svc.OutboundTransfer(ctxBG(), actor, id, "")
 
 	_, _, err := f.svc.CancelTransfer(ctxBG(), actor, id, "")
 	require.Error(t, err)
@@ -574,7 +574,7 @@ func TestCountCompleteAdjustsReleasesAndSerials(t *testing.T) {
 	_, _, err = f.svc.FinishCount(ctxBG(), actor, cid)
 	require.NoError(t, err)
 
-	done, replay, err := f.svc.CompleteCount(ctxBG(), testActor("manager"), cid, "差异属实")
+	done, replay, err := f.svc.CompleteCount(ctxBG(), testActor("manager"), cid, "差异属实", "")
 	require.NoError(t, err)
 	require.False(t, replay)
 
@@ -615,7 +615,7 @@ func TestCountCompleteAdjustsReleasesAndSerials(t *testing.T) {
 	for _, r := range f.w.rows {
 		totals[r.id] = r.total
 	}
-	_, replay, err = f.svc.CompleteCount(ctxBG(), testActor("manager"), cid, "")
+	_, replay, err = f.svc.CompleteCount(ctxBG(), testActor("manager"), cid, "", "")
 	require.NoError(t, err)
 	require.True(t, replay)
 	for _, r := range f.w.rows {
@@ -696,7 +696,7 @@ func TestCountDifferenceAdjustUsesInventoryPrimitive(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = f.svc.FinishCount(ctxBG(), actor, d.Order.ID.Int64())
 	require.NoError(t, err)
-	_, _, err = f.svc.CompleteCount(ctxBG(), testActor("manager"), d.Order.ID.Int64(), "")
+	_, _, err = f.svc.CompleteCount(ctxBG(), testActor("manager"), d.Order.ID.Int64(), "", "")
 	require.NoError(t, err)
 
 	var adjustLedgers int

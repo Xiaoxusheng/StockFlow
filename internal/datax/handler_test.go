@@ -194,8 +194,8 @@ func hItems(t *testing.T, env hEnvelope, out any) hPage {
 	return p
 }
 
-// handlerRoutes 18 条端点：path 为请求形态、route 为 gin 注册形态
-// （handler.go RegisterRoutes:106-132 冻结端点集）。
+// handlerRoutes 19 条端点：path 为请求形态、route 为 gin 注册形态
+// （handler.go RegisterRoutes:106-133 冻结端点集；retry-failed 为效率层一期 §2.8 增量）。
 var handlerRoutes = []struct{ method, path, route string }{
 	{http.MethodGet, "/api/imports", "GET /api/imports"},
 	{http.MethodGet, "/api/imports/templates", "GET /api/imports/templates"},
@@ -204,6 +204,7 @@ var handlerRoutes = []struct{ method, path, route string }{
 	{http.MethodPost, "/api/imports/1/validate", "POST /api/imports/:id/validate"},
 	{http.MethodGet, "/api/imports/1/preview", "GET /api/imports/:id/preview"},
 	{http.MethodPost, "/api/imports/1/confirm", "POST /api/imports/:id/confirm"},
+	{http.MethodPost, "/api/imports/1/retry-failed", "POST /api/imports/:id/retry-failed"},
 	{http.MethodGet, "/api/imports/1/error-file", "GET /api/imports/:id/error-file"},
 	{http.MethodGet, "/api/exports", "GET /api/exports"},
 	{http.MethodPost, "/api/exports", "POST /api/exports"},

@@ -396,7 +396,7 @@ func (s *Service) FinishCount(ctx context.Context, actor stock.Actor, id int64) 
 // 调整单直接 EXECUTED，adjust_no 回写差异行）→ 序列号联动（缺失核销 OUTBOUND /
 // 多出建档 IN_STOCK，source=调整单）；差异为 0 的行只解冻不调整；序列号台账
 // 无差异自愈行 source=盘点单。任一失败整体回滚——解冻与调整原子，中间态不可见。
-func (s *Service) CompleteCount(ctx context.Context, actor stock.Actor, id int64, opinion string) (*CountDetail, bool, error) {
+func (s *Service) CompleteCount(ctx context.Context, actor stock.Actor, id int64, opinion string, idemKey string) (*CountDetail, bool, error) {
 	replay := false
 	detail := &CountDetail{}
 	err := s.store.WithinTx(ctx, func(t Tx) error {
@@ -482,7 +482,7 @@ func (s *Service) CompleteCount(ctx context.Context, actor stock.Actor, id int64
 					Reason:         "盘点差异调整：盘点单 " + o.CountNo + " 差异行 " + itoa(int64(diff.LineNo)),
 					Source:         stock.Source{Type: sourceCount, No: o.CountNo},
 					Actor:          actor,
-					IdempotencyKey: "adjust:" + o.CountNo + ":" + itoa(int64(diff.LineNo)),
+					IdempotencyKey: composeIdemKey(idemKey, "adjust:"+o.CountNo+":"+itoa(int64(diff.LineNo))),
 					Remark:         "盘点差异执行",
 				}
 				if diff.DiffQty.IsPositive() {

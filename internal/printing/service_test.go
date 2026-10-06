@@ -205,12 +205,11 @@ func TestCreateTask_BatchLimit500(t *testing.T) {
 
 	// 恰好 500 成功（裁决④上限值本身放行）。
 	ids = ids[:MaxDataIDs]
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: ids})
-	if err != nil {
+	if _, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: ids}); err != nil {
 		t.Fatalf("500 行应放行: %v", err)
 	}
-	if view.TotalCount != MaxDataIDs {
-		t.Fatalf("total_count 应为 500，得到 %d", view.TotalCount)
+	if tk := env.lastTaskView(t); tk.TotalCount != MaxDataIDs {
+		t.Fatalf("total_count 应为 500，得到 %d", tk.TotalCount)
 	}
 }
 
@@ -247,21 +246,34 @@ func TestCreateTask_TemplateGuards(t *testing.T) {
 	asPrintErr(t, err, "PRINT_TEMPLATE_DISABLED")
 }
 
-func TestCreateTask_DataMissingAllOrNothing(t *testing.T) {
+// TestCreateTask_MissingObjectPartialBatch 装配缺失对象 → 逐条 failed(reason=
+// PRINT_DATA_NOT_FOUND)，其余对象正常建任务入队（§2.7 批量演进：整体拒绝语义废止）。
+func TestCreateTask_MissingObjectPartialBatch(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectSKULabel, true)
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC1"}
-	// 2 存在、3 缺失 → 整体拒绝（reader 契约：禁止部分行静默缺失）。
-	env.reader.rowsByID["2"] = ContentRow{ID: "2", Code: "BC2"}
-	_, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
-		TemplateID: tpl.ID.Int64(), DataIDs: []string{"2", "3"},
+	// 2 缺失 → failed；1 正常建任务。
+	res, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+		TemplateID: tpl.ID.Int64(), DataIDs: []string{"1", "2"},
 	})
-	de := asPrintErr(t, err, "PRINT_DATA_NOT_FOUND")
-	if de.Details == nil {
-		t.Fatalf("缺失错误必须带 details.missing_ids")
+	if err != nil {
+		t.Fatalf("部分缺失应 200 批量结果: %v", err)
 	}
-	if len(env.queue.all()) != 0 {
-		t.Fatalf("装配失败不得入队")
+	if res.Total != 2 || res.SuccessCount != 1 || res.FailedCount != 1 || res.SkippedCount != 0 {
+		t.Fatalf("计数不符: %+v", res)
+	}
+	if res.Results[0].Status != BatchStatusSuccess {
+		t.Fatalf("结果 1 应 success: %+v", res.Results[0])
+	}
+	if res.Results[1].Status != BatchStatusFailed || res.Results[1].Reason != "PRINT_DATA_NOT_FOUND" {
+		t.Fatalf("结果 2 应 failed(PRINT_DATA_NOT_FOUND): %+v", res.Results[1])
+	}
+	// 任务仅含可打印对象。
+	if tk := env.lastTaskView(t); tk.TotalCount != 1 {
+		t.Fatalf("任务 total_count 应为 1: %+v", tk)
+	}
+	if len(env.queue.all()) != 1 {
+		t.Fatalf("可打印对象应正常入队")
 	}
 }
 
@@ -271,12 +283,9 @@ func TestCreateTask_OK_QueueSnapshotRows(t *testing.T) {
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "6901234567892", Values: map[string]string{"sku_code": "SKU-1"}}
 	env.reader.rowsByID["2"] = ContentRow{ID: "2", Code: "6901234567893", Values: map[string]string{"sku_code": "SKU-2"}}
 
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+	view := env.createTaskOK(t, TaskCreateInput{
 		TemplateID: tpl.ID.Int64(), DataIDs: []string{"1", "2"},
 	})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
 	if !strings.HasPrefix(view.PrintNo, "PT-") {
 		t.Fatalf("单号应为 PT 前缀（plan §12.3）: %s", view.PrintNo)
 	}
@@ -318,10 +327,7 @@ func TestExecuteTask_OnceGuardAndAudit(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectInboundOrder, true)
 	env.reader.rowsByID["9"] = ContentRow{ID: "9", Code: "IN-20261003-000001", Lines: []map[string]string{{"sku_code": "SKU-1", "qty": "10"}}}
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"9"}})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
+	view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"9"}})
 	ctx := context.Background()
 
 	// 非法结果值。
@@ -351,10 +357,7 @@ func TestHistory_OnlyConfirmed(t *testing.T) {
 	ctx := context.Background()
 	for _, id := range []string{"1", "2", "3"} {
 		env.reader.rowsByID[id] = ContentRow{ID: id, Code: "IN-" + id}
-		view, err := env.svc.CreateTask(ctx, actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{id}})
-		if err != nil {
-			t.Fatalf("创建失败: %v", err)
-		}
+		view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{id}})
 		if id != "2" { // 2 留在未确认态
 			if _, err := env.svc.ExecuteTask(ctx, actor(), mustParse(t, view.ID), ExecuteInput{Result: ResultSuccess}); err != nil {
 				t.Fatalf("确认失败: %v", err)
@@ -388,10 +391,7 @@ func TestListTasks_IDExactFilter(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectSKULabel, true)
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC1"}
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
+	view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
 	items, total, err := env.svc.ListTasks(context.Background(), TaskFilter{Page: 1, PageSize: 20, ID: mustParse(t, view.ID)})
 	if err != nil || total != 1 || len(items) != 1 {
 		t.Fatalf("id 精确过滤不符: %v %d", err, total)
@@ -401,28 +401,88 @@ func TestListTasks_IDExactFilter(t *testing.T) {
 	}
 }
 
-// TestCreateTask_DisabledSKURejected 装配层返回停用拒绝 → 整体拒绝原样透传
-// PRINT_SKU_DISABLED + details.disabled_ids（qr-code.md §9 不可打印校验——约束 10
-// 「商品已停用」；409 语义），不落任务不入队。
-func TestCreateTask_DisabledSKURejected(t *testing.T) {
+// TestCreateTask_DisabledSKUPartialBatch 停用 SKU → 逐条 failed(reason=
+// PRINT_SKU_DISABLED)，其余对象正常建任务（§2.7 批量演进：409+disabled_ids
+// 整体拒绝语义废止；qr-code.md §9 不可打印校验——约束 10「商品已停用」）。
+func TestCreateTask_DisabledSKUPartialBatch(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectSKULabel, true)
-	env.reader.err = NewDataDisabledError([]string{"SKU-OFF"})
+	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC-ON"}
+	env.reader.disabled["SKU-OFF"] = true
 
-	_, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
-		TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"},
+	res, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+		TemplateID: tpl.ID.Int64(), DataIDs: []string{"1", "SKU-OFF"},
 	})
-	de := asPrintErr(t, err, "PRINT_SKU_DISABLED")
-	details, ok := de.Details.(map[string]any)
-	if !ok {
-		t.Fatalf("停用错误必须带 details.disabled_ids: %+v", de.Details)
+	if err != nil {
+		t.Fatalf("部分停用应 200 批量结果（不再 409 整体拒绝）: %v", err)
 	}
-	disabled, ok := details["disabled_ids"].([]string)
-	if !ok || len(disabled) != 1 || disabled[0] != "SKU-OFF" {
-		t.Fatalf("disabled_ids 不符: %+v", details["disabled_ids"])
+	if res.SuccessCount != 1 || res.FailedCount != 1 || res.SkippedCount != 0 {
+		t.Fatalf("计数不符: %+v", res)
 	}
-	if len(env.queue.all()) != 0 {
-		t.Fatalf("装配拒绝不得入队")
+	if res.Results[0].Status != BatchStatusSuccess {
+		t.Fatalf("可打印对象应 success: %+v", res.Results[0])
+	}
+	if res.Results[1].Status != BatchStatusFailed || res.Results[1].Reason != "PRINT_SKU_DISABLED" {
+		t.Fatalf("停用对象应 failed(PRINT_SKU_DISABLED): %+v", res.Results[1])
+	}
+	if len(env.queue.all()) != 1 {
+		t.Fatalf("可打印对象应正常入队")
+	}
+}
+
+// TestCreateTask_BatchResultShape_96_3_1 验收场景 4 形状断言（计划 §7.1 T11）：
+// 100 个 data_id（96 可打印 + 3 停用 + 1 请求内重复）→ 200 批量结果 96/3/1，
+// 失败项 reason=PRINT_SKU_DISABLED、skipped=重复已处目标态；任务仅含 96 行。
+func TestCreateTask_BatchResultShape_96_3_1(t *testing.T) {
+	env := newTestEnv(t)
+	tpl := env.seedTemplate(t, ObjectSKULabel, true)
+	ids := make([]string, 0, 100)
+	for i := 1; i <= 97; i++ {
+		id := strconv.Itoa(i)
+		env.reader.rowsByID[id] = ContentRow{ID: id, Code: "BC-" + id}
+		if i <= 96 {
+			ids = append(ids, id)
+		}
+	}
+	for i := 97; i <= 99; i++ {
+		id := "SKU-OFF-" + strconv.Itoa(i)
+		env.reader.disabled[id] = true
+		ids = append(ids, id)
+	}
+	ids = append(ids, "96") // 重复 data_id → skipped
+
+	res, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+		TemplateID: tpl.ID.Int64(), DataIDs: ids,
+	})
+	if err != nil {
+		t.Fatalf("批量打印应 200 批量结果: %v", err)
+	}
+	if res.Total != 100 || res.SuccessCount != 96 || res.FailedCount != 3 || res.SkippedCount != 1 {
+		t.Fatalf("96/3/1 形状不符: %+v", res)
+	}
+	failed := 0
+	for _, it := range res.Results {
+		switch it.Status {
+		case BatchStatusSuccess:
+		case BatchStatusFailed:
+			failed++
+			if it.Reason != "PRINT_SKU_DISABLED" {
+				t.Fatalf("失败原因应为 PRINT_SKU_DISABLED: %+v", it)
+			}
+		case BatchStatusSkipped:
+			if it.Reason != ReasonDuplicateDataID {
+				t.Fatalf("skipped 原因不符: %+v", it)
+			}
+		default:
+			t.Fatalf("非法状态: %+v", it)
+		}
+	}
+	if failed != 3 {
+		t.Fatalf("failed 逐条应 3 条: %d", failed)
+	}
+	// 任务仅含 96 个可打印对象（重复/停用不入任务）。
+	if tk := env.lastTaskView(t); tk.TotalCount != 96 {
+		t.Fatalf("任务 total_count 应为 96: %d", tk.TotalCount)
 	}
 }
 
@@ -435,12 +495,9 @@ func TestTaskRowDataID_PersistedAndReadBack(t *testing.T) {
 	env.reader.rowsByID["42"] = ContentRow{ID: "42", Code: "BC-42"}
 	env.reader.rowsByID["43"] = ContentRow{ID: "43", Code: "BC-43"}
 
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{
+	view := env.createTaskOK(t, TaskCreateInput{
 		TemplateID: tpl.ID.Int64(), DataIDs: []string{"42", "43"},
 	})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
 	taskID := mustParse(t, view.ID)
 	detail, err := env.svc.GetTask(context.Background(), taskID)
 	if err != nil {
@@ -469,10 +526,7 @@ func TestListHistory_TemplateIDFilter(t *testing.T) {
 	ctx := context.Background()
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC1"}
 	for _, tpl := range []*PrintTemplate{tplA, tplB} {
-		view, err := env.svc.CreateTask(ctx, actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
-		if err != nil {
-			t.Fatalf("创建失败: %v", err)
-		}
+		view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
 		if _, err := env.svc.ExecuteTask(ctx, actor(), mustParse(t, view.ID), ExecuteInput{Result: ResultSuccess}); err != nil {
 			t.Fatalf("确认失败: %v", err)
 		}
@@ -497,12 +551,9 @@ func TestHandleRenderTask_StateMachine(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectSKULabel, true)
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "6901234567892"}
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
+	view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
 
-	err = env.svc.HandleRenderTask(context.Background(), asynqx.Task{
+	err := env.svc.HandleRenderTask(context.Background(), asynqx.Task{
 		Type: asynqx.TaskTypePrintRender, Payload: renderPayloadBytes(view.PrintNo), TaskID: view.PrintNo,
 	})
 	if err != nil {
@@ -525,10 +576,7 @@ func TestHandleRenderTask_FailFastTerminal(t *testing.T) {
 	env := newTestEnv(t)
 	tpl := env.seedTemplate(t, ObjectSKULabel, true)
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "BC1"}
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
+	view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
 	env.repo.mu.Lock()
 	env.repo.failFindTaskByNo = true
 	env.repo.mu.Unlock()
@@ -566,10 +614,7 @@ func TestHandleRenderTask_PregeneratesIntoCache(t *testing.T) {
 		t.Fatalf("seed 失败: %v", err)
 	}
 	env.reader.rowsByID["1"] = ContentRow{ID: "1", Code: "SF-CACHE-1"}
-	view, err := env.svc.CreateTask(context.Background(), actor(), TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
-	if err != nil {
-		t.Fatalf("创建失败: %v", err)
-	}
+	view := env.createTaskOK(t, TaskCreateInput{TemplateID: tpl.ID.Int64(), DataIDs: []string{"1"}})
 	if err := env.svc.HandleRenderTask(context.Background(), asynqx.Task{
 		Type: asynqx.TaskTypePrintRender, Payload: renderPayloadBytes(view.PrintNo), TaskID: view.PrintNo,
 	}); err != nil {

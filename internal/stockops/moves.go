@@ -42,7 +42,11 @@ type MoveInput struct {
 
 // MoveBin 仓内移库（可用库存，inventory.MoveBin 原语语义：源行 available/total 同减、
 // 目标行同增、两行各一条 MOVE 流水）。
-func (s *Service) MoveBin(ctx context.Context, actor stock.Actor, in MoveInput) (stock.MutationResult, error) {
+//
+// 幂等键（效率层一期计划 §2.10）：移库无单据承载，存量（头键缺省）不携带幂等键
+// （零行为变化）；Idempotency-Key 头存在且非空 → 行级键 = "{头键}:move:{source_no}:
+// {bin}:{sku}:{batch}"（api.md §7 通式；同头键重试命中 ledger 唯一索引即原语重放）。
+func (s *Service) MoveBin(ctx context.Context, actor stock.Actor, in MoveInput, idemKey string) (stock.MutationResult, error) {
 	if s.gateway == nil {
 		return stock.MutationResult{}, responseError(ErrReaderMissing, map[string]any{
 			"reason": "库存原语网关未注入（router 装配 WithGateway，plan §4.3 规则①）",
@@ -65,7 +69,8 @@ func (s *Service) MoveBin(ctx context.Context, actor stock.Actor, in MoveInput) 
 			"field": "source_no", "reason": "移库必须携带作业依据号（inventory-rules §5 来源追溯）",
 		})
 	}
-	return s.gateway.MoveBin(ctx, nil, stock.MoveBinOp{
+	srcNo := strings.TrimSpace(in.SourceNo)
+	op := stock.MoveBinOp{
 		From: stock.RowKey{
 			WarehouseID: in.From.WarehouseID, ZoneID: in.From.ZoneID, ShelfID: in.From.ShelfID,
 			BinID: in.From.BinID, SKUID: in.From.SKUID, BatchID: in.From.BatchID,
@@ -75,8 +80,14 @@ func (s *Service) MoveBin(ctx context.Context, actor stock.Actor, in MoveInput) 
 			BinID: in.To.BinID, SKUID: in.To.SKUID, BatchID: in.To.BatchID,
 		},
 		Qty:    qty,
-		Source: stock.Source{Type: "stockops_move", No: strings.TrimSpace(in.SourceNo)},
+		Source: stock.Source{Type: "stockops_move", No: srcNo},
 		Actor:  actor,
 		Remark: strings.TrimSpace(in.Remark),
-	})
+	}
+	// 头键缺省 → 不携带幂等键（键形态与存量完全一致，零行为变化）。
+	if idemKey != "" {
+		op.IdempotencyKey = composeIdemKey(idemKey,
+			"move:"+srcNo+":"+itoa(in.From.BinID)+":"+itoa(in.From.SKUID)+":"+itoa(in.From.BatchID))
+	}
+	return s.gateway.MoveBin(ctx, nil, op)
 }

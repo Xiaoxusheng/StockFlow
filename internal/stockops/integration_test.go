@@ -157,7 +157,7 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 
 	_, _, err = svc.SubmitTransfer(ctx, actor, id)
 	require.NoError(t, err)
-	_, _, err = svc.ApproveTransfer(ctx, actor, id, ApproveTransferInput{Action: "approve"})
+	_, _, err = svc.ApproveTransfer(ctx, actor, id, ApproveTransferInput{Action: "approve"}, "")
 	require.NoError(t, err)
 
 	// 预占后：available 4 / locked 6 / total 10。
@@ -166,7 +166,7 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 	require.Equal(t, q(6), srcRow.LockedQty)
 	require.NoError(t, srcRow.State().ValidateIdentity())
 
-	_, _, err = svc.OutboundTransfer(ctx, actor, id)
+	_, _, err = svc.OutboundTransfer(ctx, actor, id, "")
 	require.NoError(t, err)
 	srcRow = itLoadRow(t, db, src)
 	require.Equal(t, q(4), srcRow.TotalQty)
@@ -181,7 +181,7 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 
 	_, _, err = svc.ArriveTransfer(ctx, actor, id)
 	require.NoError(t, err)
-	_, _, err = svc.ReceiveTransfer(ctx, actor, id)
+	_, _, err = svc.ReceiveTransfer(ctx, actor, id, "")
 	require.NoError(t, err)
 
 	dst := inventory.RowKey{WarehouseID: itWhDst, ZoneID: 2, ShelfID: 21, BinID: 211, SKUID: 7001}
@@ -202,7 +202,7 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 	require.Equal(t, 1, inN)
 
 	// 幂等重放：重复出库调用（状态守卫拦截）不产生第二条 TRANSFER_OUT。
-	_, _, err = svc.OutboundTransfer(ctx, actor, id)
+	_, _, err = svc.OutboundTransfer(ctx, actor, id, "")
 	require.Error(t, err) // 状态已 COMPLETED → 冲突
 	err = db.Raw(`SELECT COUNT(*) FROM inventory_ledgers WHERE change_type = 'TRANSFER_OUT'
 		AND business_no = ?`, d.Order.TransferNo).Scan(&outN).Error
@@ -264,7 +264,7 @@ func TestIntegrationCountFlow(t *testing.T) {
 	require.Equal(t, q(-2), detail.Differences[0].DiffQty)
 
 	// 完成：解冻 + 调整原子（plan §6.7）。
-	_, _, err = svc.CompleteCount(ctx, actor, cid, "差异属实")
+	_, _, err = svc.CompleteCount(ctx, actor, cid, "差异属实", "")
 	require.NoError(t, err)
 
 	srcRow = itLoadRow(t, db, src)

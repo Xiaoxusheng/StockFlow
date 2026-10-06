@@ -3,6 +3,7 @@ package printing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"unicode/utf8"
 
@@ -44,10 +45,15 @@ type renderPayload struct {
 	PrintNo string `json:"print_no"`
 }
 
-// CreateTask 创建打印任务（单据打印 = 单 ID，批量打印 = 多 ID——printing.md §3；
-// 按筛选打印不交付：BY_FILTER 属 datax 导出范围值，plan §7.2 冻结创建入参仅
-// data_ids，波次级全量单据打印由前端按上限分片，plan §18.4）。
-func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInput) (*TaskView, error) {
+// CreateTask 创建打印任务（批量结果演进——效率层一期计划 §2.7：响应为批量结果形态
+// 200 + TaskBatchResult，整请求参数错误仍 400；部分对象不可打印（停用 SKU/数据缺失）
+// 逐条 failed(reason=既有错误码)，其余对象正常建任务——409+details.disabled_ids
+// 整体拒绝语义废止，验收场景 4（100→96/3/1）硬前提）。
+//
+// 单据打印 = 单 ID，批量打印 = 多 ID（printing.md §3）；按筛选打印不交付：BY_FILTER
+// 属 datax 导出范围值，plan §7.2 冻结创建入参仅 data_ids，波次级全量单据打印由前端
+// 按上限分片，plan §18.4。
+func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInput) (*TaskBatchResult, error) {
 	if in.TemplateID <= 0 {
 		return nil, paramError("template_id", "必须为正整数")
 	}
@@ -101,19 +107,50 @@ func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInpu
 	for _, f := range fields {
 		keys = append(keys, f.Key)
 	}
-	rows, err := reader.Assemble(ctx, in.DataIDs, keys)
+
+	// 请求内去重：重复 data_id → skipped（同批重复对象已在任务中=已处目标态）。
+	// firstIdx 记录首次出现下标——结果循环按「是否首次出现」区分 success/skipped。
+	firstIdx := make(map[string]int, len(in.DataIDs))
+	unique := make([]string, 0, len(in.DataIDs))
+	for i, id := range in.DataIDs {
+		if _, dup := firstIdx[id]; dup {
+			continue
+		}
+		firstIdx[id] = i
+		unique = append(unique, id)
+	}
+
+	// 逐对象装配：不可打印对象逐条 failed，其余对象继续建任务（§2.7）。
+	rowsByID, failReason, err := s.assembleBatch(ctx, reader, unique, keys)
 	if err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		return nil, response.NewError(ErrDataNotFound, map[string]any{"missing_ids": in.DataIDs})
+
+	res := &TaskBatchResult{Total: len(in.DataIDs)}
+	res.Results = make([]TaskBatchItem, 0, len(in.DataIDs))
+	rows := make([]ContentRow, 0, len(rowsByID)) // 可打印行（请求序）
+	for i, id := range in.DataIDs {
+		item := TaskBatchItem{ID: id}
+		switch {
+		case firstIdx[id] != i:
+			// 非首次出现 → skipped。
+			item.Status, item.Reason = BatchStatusSkipped, ReasonDuplicateDataID
+			res.SkippedCount++
+		default:
+			if row, ok := rowsByID[id]; ok {
+				item.Status = BatchStatusSuccess
+				res.SuccessCount++
+				rows = append(rows, row)
+			} else {
+				item.Status, item.Reason = BatchStatusFailed, failReason[id]
+				res.FailedCount++
+			}
+		}
+		res.Results = append(res.Results, item)
 	}
-	if len(rows) != len(in.DataIDs) {
-		// reader 契约：整体成功或整体报错（plan §7.2）；行数不一致=契约违约（编程错误）。
-		return nil, response.NewError(response.CodeInternalError, map[string]any{
-			"reason":   "装配行数与 data_ids 不一致（reader 契约违约）",
-			"expected": len(in.DataIDs), "actual": len(rows),
-		})
+	if len(rows) == 0 {
+		// 无可打印对象：不建任务不入队，逐条结果如实返回（全 failed，仍 200）。
+		return res, nil
 	}
 
 	rule, err := docRule()
@@ -172,8 +209,77 @@ func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInpu
 		_ = s.HandleRenderTask(ctx, asynqx.Task{Type: asynqx.TaskTypePrintRender, Payload: payload, TaskID: task.PrintNo})
 	}
 
-	v := s.taskView(task, false)
-	return &v, nil
+	return res, nil
+}
+
+// assembleBatch 逐对象装配（§2.7 批量演进）。reader 契约为整体成功或整体报错——
+// 报错时提取 details 中不可打印对象明细（PRINT_SKU_DISABLED.disabled_ids /
+// PRINT_DATA_NOT_FOUND.missing_ids）标记逐条失败，剔除后对剩余对象重试装配，
+// 直至成功或无进展；非对象级错误（reader 契约违约/基础设施）整体透传。
+func (s *Service) assembleBatch(ctx context.Context, reader ContentReader, ids, keys []string) (map[string]ContentRow, map[string]string, error) {
+	rowsByID := make(map[string]ContentRow, len(ids))
+	failed := make(map[string]string)
+	pending := append([]string(nil), ids...)
+	for len(pending) > 0 {
+		rows, err := reader.Assemble(ctx, pending, keys)
+		if err == nil {
+			for i, id := range pending {
+				rowsByID[id] = rows[i] // reader 契约：行序与入参一致
+			}
+			return rowsByID, failed, nil
+		}
+		reason, bad, ok := batchFailureDetail(err)
+		if !ok {
+			return nil, nil, err
+		}
+		next := make([]string, 0, len(pending))
+		progressed := false
+		for _, id := range pending {
+			if _, isBad := bad[id]; isBad {
+				if _, marked := failed[id]; !marked {
+					failed[id] = reason
+					progressed = true
+				}
+				continue
+			}
+			next = append(next, id)
+		}
+		if !progressed {
+			// reader 未点名任何对象（防御死循环），整体透传原始错误。
+			return nil, nil, err
+		}
+		pending = next
+	}
+	return rowsByID, failed, nil
+}
+
+// batchFailureDetail 装配错误 → 逐条失败明细（reason 错误码 + 不可打印对象集）；
+// 非对象级错误返回 ok=false（整体透传）。
+func batchFailureDetail(err error) (string, map[string]bool, bool) {
+	var re *response.Error
+	if !errors.As(err, &re) {
+		return "", nil, false
+	}
+	details, ok := re.Details.(map[string]any)
+	if !ok {
+		return "", nil, false
+	}
+	for _, kv := range []struct {
+		key    string
+		reason string
+	}{
+		{"disabled_ids", "PRINT_SKU_DISABLED"},
+		{"missing_ids", "PRINT_DATA_NOT_FOUND"},
+	} {
+		if raw, ok := details[kv.key].([]string); ok && len(raw) > 0 {
+			set := make(map[string]bool, len(raw))
+			for _, id := range raw {
+				set[id] = true
+			}
+			return kv.reason, set, true
+		}
+	}
+	return "", nil, false
 }
 
 // taskRows 装配结果 → 渲染数据包行（seq 1 起与入参序一致；values/lines 快照冻结；

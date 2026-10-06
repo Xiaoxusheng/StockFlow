@@ -206,6 +206,87 @@ func (s *Service) Upload(ctx context.Context, actor Actor, importType string, fh
 	}, nil
 }
 
+// RetryFailed 重新导入失败行（效率层一期计划 §2.8）：读源任务 status IN
+// ('INVALID','FAILED') 的行 → 以同一 ImportWriter 管线创建新导入任务（PARSED 态，
+// 走正常校验+确认流程；复用 ImportWizard 前端既有六步向导语义）。
+//
+// 幂等依据：仅重导上次失败行（上次成功行不入集，不重复成功数据）；PO/SO 写入器经
+// 既有单号引擎与状态守卫；新任务单号经 docnum IMP 引擎发放（建任务同事务）。
+// 事务边界（计划 8.9 前置核验结论）：各域 Writer.Commit 逐行/逐单经既有域内 Service
+// 通路落库（每行/每单独立事务，行级失败整体回滚该行/该单，行状态回写另在批次事务）——
+// FAILED 行无部分落库，可安全进入重导集。
+// 源任务只读：行状态不被篡改，可重复发起（每次产生独立新任务）。
+func (s *Service) RetryFailed(ctx context.Context, actor Actor, id int64) (*ImportUploadResult, error) {
+	src, err := s.repo.FindImportTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// 写入器装配核验 fail-closed（与 Confirm 同口径：缺位不产任务）。
+	if _, err := s.writerFor(src.ImportType); err != nil {
+		return nil, err
+	}
+	rows, err := s.repo.ListImportRows(ctx, id, []string{RowStatusInvalid, RowStatusFailed}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, response.NewError(response.CodeInvalidParam, map[string]any{
+			"reason": "任务没有可重导的失败行（仅 INVALID/FAILED 行进入新任务）",
+		})
+	}
+	if len(rows) > s.cfg.ImportMaxRows {
+		return nil, response.NewError(ErrTooManyRows, map[string]any{"limit": s.cfg.ImportMaxRows})
+	}
+
+	task := &ImportTask{
+		ImportType: src.ImportType,
+		Status:     TaskStatusParsed,
+		TotalRows:  len(rows),
+		CreatedBy:  actor.UserID,
+		UpdatedBy:  actor.UserID,
+	}
+	newRows := make([]*ImportTaskRow, 0, len(rows))
+	for _, r := range rows {
+		newRows = append(newRows, &ImportTaskRow{
+			TaskID:    0, // 建任务后回填
+			RowNo:     r.RowNo,
+			Raw:       r.Raw,
+			Status:    RowStatusRaw,
+			CreatedBy: actor.UserID,
+		})
+	}
+	err = s.inTx(ctx, func(tx *gorm.DB) error {
+		if err := s.repo.InsertImportTask(ctx, tx, task); err != nil {
+			return err
+		}
+		for i := range newRows {
+			newRows[i].TaskID = task.ID.Int64()
+		}
+		if err := s.repo.InsertImportRows(tx, newRows); err != nil {
+			return err
+		}
+		e := actor.auditEntry("import_task", task.ID.Int64(), "retry_failed")
+		e.Success = true
+		e.Request = map[string]any{"source_task_id": id}
+		e.After = map[string]any{
+			"import_no": task.ImportNo, "source_import_no": src.ImportNo, "total_rows": task.TotalRows,
+		}
+		return s.audit(tx, e)
+	})
+	if err != nil {
+		return nil, err
+	}
+	// 响应对齐既有导入任务创建端点（POST /api/imports Upload）形态；无源文件落
+	// files 表——file_name 空串即「行数据自源任务复制」。
+	return &ImportUploadResult{
+		ID:         task.ID,
+		ImportNo:   task.ImportNo,
+		ImportType: task.ImportType,
+		TotalRows:  task.TotalRows,
+		Status:     task.Status,
+	}, nil
+}
+
 // parseWorkbookStream 流式解析工作簿：表头与模板逐列比对（结构层第一道闸），数据行
 // raw 提取 + 行数上限守卫。excelize f.Rows 迭代器逐行读，不整表驻留内存。
 func parseWorkbookStream(r io.ReadSeeker, spec TemplateSpec, maxRows int) ([]ImportRow, error) {

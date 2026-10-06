@@ -519,6 +519,7 @@ type fakeReader struct {
 	lastField []string
 	rowsByID  map[string]ContentRow // 命中表
 	missing   map[string]bool       // 注入缺失
+	disabled  map[string]bool       // 注入停用（PRINT_SKU_DISABLED——qr-code.md §9）
 	err       error                 // 注入基础设施错误
 }
 
@@ -531,9 +532,13 @@ func (r *fakeReader) Assemble(ctx context.Context, ids []string, fields []string
 	if r.err != nil {
 		return nil, r.err
 	}
-	var missing []string
+	var missing, disabled []string
 	out := make([]ContentRow, 0, len(ids))
 	for _, id := range ids {
+		if r.disabled[id] {
+			disabled = append(disabled, id)
+			continue
+		}
 		if r.missing[id] {
 			missing = append(missing, id)
 			continue
@@ -544,6 +549,9 @@ func (r *fakeReader) Assemble(ctx context.Context, ids []string, fields []string
 			continue
 		}
 		out = append(out, row)
+	}
+	if len(disabled) > 0 {
+		return nil, NewDataDisabledError(disabled)
 	}
 	if err := FailMissing(missing); err != nil {
 		return nil, err
@@ -567,7 +575,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	spy := &auditSpy{}
 	db := openTestGorm(t, hooks, spy)
 	repo := newFakeRepo(db, hooks)
-	reader := &fakeReader{rowsByID: map[string]ContentRow{}}
+	reader := &fakeReader{rowsByID: map[string]ContentRow{}, disabled: map[string]bool{}}
 	queue := &fakeQueue{}
 	svc := NewService(repo, WithQueue(queue))
 	// 7 类外部对象全部注入同一替身（内置 CARTON/PALLET 无需注入）。
@@ -605,6 +613,39 @@ func (e *testEnv) seedTemplate(t *testing.T, objectType string, enabled bool) *P
 }
 
 // ---- 小工具 ----
+
+// lastTaskView repo 中最新建任务的任务视图（CreateTask 批量演进后不再直接返回
+// TaskView——存量断言经本封装取任务；批量场景取最后一条即本次请求所建）。
+func (e *testEnv) lastTaskView(t *testing.T) *TaskView {
+	t.Helper()
+	var best *PrintTask
+	for _, tk := range e.repo.tasks {
+		if best == nil || tk.ID.Int64() > best.ID.Int64() {
+			best = tk
+		}
+	}
+	if best == nil {
+		t.Fatalf("repo 中无打印任务")
+	}
+	v := e.svc.taskView(best, false)
+	return &v
+}
+
+// createTaskOK CreateTask 便利封装（存量断言复用）：断言全成功并返回任务视图。
+func (e *testEnv) createTaskOK(t *testing.T, in TaskCreateInput) *TaskView {
+	t.Helper()
+	res, err := e.svc.CreateTask(context.Background(), actor(), in)
+	if err != nil {
+		t.Fatalf("创建失败: %v", err)
+	}
+	if res.SuccessCount != len(in.DataIDs) || res.FailedCount != 0 || res.SkippedCount != 0 {
+		t.Fatalf("应全成功: %+v", res)
+	}
+	if res.Total != len(in.DataIDs) || len(res.Results) != len(in.DataIDs) {
+		t.Fatalf("批量结果形状不符: %+v", res)
+	}
+	return e.lastTaskView(t)
+}
 
 func containsFold(s, sub string) bool {
 	return strings.Contains(strings.ToLower(s), strings.ToLower(sub))

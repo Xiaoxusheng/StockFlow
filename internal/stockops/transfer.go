@@ -382,7 +382,7 @@ type ApproveTransferInput struct {
 // ApproveTransfer 审核：通过 = PENDING_APPROVAL→APPROVED + 源仓逐行 Lock(ORDER_HOLD)
 // 预占（任一行可用不足整体回滚，单据留待审核，plan §6.6）；驳回 = →CANCELLED
 // （迁移 CHECK 无 REJECTED 值，驳回终态与 §12.2 审批记录并存）。
-func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int64, in ApproveTransferInput) (*TransferDetail, bool, error) {
+func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int64, in ApproveTransferInput, idemKey string) (*TransferDetail, bool, error) {
 	replay := false
 	detail := &TransferDetail{}
 	err := s.store.WithinTx(ctx, func(t Tx) error {
@@ -444,7 +444,7 @@ func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int
 					Key: key, Qty: it.Qty, LockType: "ORDER_HOLD",
 					Source:         stock.Source{Type: sourceTransfer, No: o.TransferNo},
 					Actor:          actor,
-					IdempotencyKey: transferIdem("lock", o.TransferNo, it.LineNo, it.FromBinID, it.SKUID, it.BatchID),
+					IdempotencyKey: composeIdemKey(idemKey, transferIdem("lock", o.TransferNo, it.LineNo, it.FromBinID, it.SKUID, it.BatchID)),
 					Remark:         "调拨审核预占",
 				}); err != nil {
 					return err
@@ -478,7 +478,7 @@ func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int
 // OutboundTransfer 调拨出库确认（APPROVED→TRANSFERRING）：逐行 TransferOut（源仓
 // total/locked 同减 + TRANSFER_OUT 流水 + 核销预占锁）+ 序列号逐件转在途（wh=0）+
 // qty_out 落行；任一失败整体回滚，单据留 APPROVED（plan §6.6）。在途 = qty_out - qty_in。
-func (s *Service) OutboundTransfer(ctx context.Context, actor stock.Actor, id int64) (*TransferDetail, bool, error) {
+func (s *Service) OutboundTransfer(ctx context.Context, actor stock.Actor, id int64, idemKey string) (*TransferDetail, bool, error) {
 	replay := false
 	detail := &TransferDetail{}
 	err := s.store.WithinTx(ctx, func(t Tx) error {
@@ -563,8 +563,8 @@ func (s *Service) OutboundTransfer(ctx context.Context, actor stock.Actor, id in
 				Qty: remaining, LockID: lock.ID,
 				Source: stock.Source{Type: sourceTransfer, No: o.TransferNo},
 				Actor:  actor,
-				IdempotencyKey: "trout:" + o.TransferNo + ":" + itoa(int64(it.LineNo)) +
-					":" + itoa(it.FromBinID) + ":" + itoa(it.SKUID) + ":" + itoa(it.BatchID),
+				IdempotencyKey: composeIdemKey(idemKey, "trout:"+o.TransferNo+":"+itoa(int64(it.LineNo))+
+					":"+itoa(it.FromBinID)+":"+itoa(it.SKUID)+":"+itoa(it.BatchID)),
 				Remark: "调拨出库（转在途）",
 			}); err != nil {
 				return err
@@ -639,7 +639,7 @@ func (s *Service) ArriveTransfer(ctx context.Context, actor stock.Actor, id int6
 // ReceiveTransfer 收货完成（AWAITING_RECEIPT→COMPLETED）：逐行 TransferIn（目标仓
 // total/available 同增 + TRANSFER_IN 流水）+ 序列号逐件回位于目标库位 + qty_in 落行；
 // 任一失败整体回滚（货仍计在途，plan §6.6）。
-func (s *Service) ReceiveTransfer(ctx context.Context, actor stock.Actor, id int64) (*TransferDetail, bool, error) {
+func (s *Service) ReceiveTransfer(ctx context.Context, actor stock.Actor, id int64, idemKey string) (*TransferDetail, bool, error) {
 	replay := false
 	detail := &TransferDetail{}
 	err := s.store.WithinTx(ctx, func(t Tx) error {
@@ -674,8 +674,8 @@ func (s *Service) ReceiveTransfer(ctx context.Context, actor stock.Actor, id int
 				Qty:    remaining,
 				Source: stock.Source{Type: sourceTransfer, No: o.TransferNo},
 				Actor:  actor,
-				IdempotencyKey: "trin:" + o.TransferNo + ":" + itoa(int64(it.LineNo)) +
-					":" + itoa(it.ToBinID) + ":" + itoa(it.SKUID) + ":" + itoa(it.BatchID),
+				IdempotencyKey: composeIdemKey(idemKey, "trin:"+o.TransferNo+":"+itoa(int64(it.LineNo))+
+					":"+itoa(it.ToBinID)+":"+itoa(it.SKUID)+":"+itoa(it.BatchID)),
 				Remark: "调拨到货入库",
 			}); err != nil {
 				return err

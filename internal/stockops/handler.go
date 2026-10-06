@@ -221,6 +221,39 @@ func actorOf(c *gin.Context) stock.Actor {
 	}
 }
 
+// ---- 幂等键（效率层一期计划 §2.10；api.md §7「行级幂等键 × 头键合成规则」）----
+
+// maxIdemHeaderLen Idempotency-Key 头长度上限（api.md §7 冻结 ≤32；列宽核验：最长
+// 行级通式 trout:{TR-单号}:{行号}:{bin}:{sku}:{batch} 与 32 字符头键拼接在现实
+// 主键量级下 ≤128——inventory_ledgers.idempotency_key varchar(128)，inventory 侧
+// validateIdempotencyKey(128) 兜底 fail-closed）。
+const maxIdemHeaderLen = 32
+
+// idempotencyKeyOf 读取 Idempotency-Key 请求头（purchase handler.go handleReceiptConfirm
+// 同款 c.GetHeader 读法）：存在且非空 → 参与行级键合成；缺省 → 空串（行级键与存量
+// 通式形态完全一致，零行为变化）；超长 → 400 invalidParam。
+func idempotencyKeyOf(c *gin.Context) (string, error) {
+	key := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if len(key) > maxIdemHeaderLen {
+		return "", response.NewError(response.CodeInvalidParam, map[string]any{
+			"field":  "Idempotency-Key",
+			"reason": "长度不能超过 " + strconv.Itoa(maxIdemHeaderLen),
+		})
+	}
+	return key, nil
+}
+
+// composeIdemKey 行级幂等键合成（键合成唯一实现点，调用点禁止复制粘贴）：
+// 头键存在且非空 → "{头键}:{原行级通式}"——新命名空间，同头键重试=同行键，命中
+// uk_inventory_ledgers_idempotency_key 部分唯一索引即原语重放既有结果，不重复扣加
+// 库存/流水；头键缺省 → 原行级通式原样返回（零行为变化）。
+func composeIdemKey(headerKey, rowKey string) string {
+	if headerKey == "" {
+		return rowKey
+	}
+	return headerKey + ":" + rowKey
+}
+
 func bindJSON(c *gin.Context, dst any) bool {
 	if err := c.ShouldBindJSON(dst); err != nil {
 		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
@@ -246,7 +279,13 @@ func (h *handler) moveBin(c *gin.Context) {
 		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
-	res, err := h.svc.MoveBin(c.Request.Context(), actorOf(c), in)
+	// 幂等键头透传（§2.10：仅产生 ledger 流水的写路径消费；缺省零行为变化）。
+	idemKey, err := idempotencyKeyOf(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	res, err := h.svc.MoveBin(c.Request.Context(), actorOf(c), in, idemKey)
 	if err != nil {
 		response.Err(c, err)
 		return
@@ -417,8 +456,13 @@ func (h *handler) approveTransfer(c *gin.Context) {
 	if !bindJSON(c, &in) {
 		return
 	}
+	idemKey, err := idempotencyKeyOf(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
 	h.transferAction(c, func(svc *Service, ctx *gin.Context, id int64) (*TransferDetail, bool, error) {
-		return svc.ApproveTransfer(ctx.Request.Context(), actorOf(ctx), id, in)
+		return svc.ApproveTransfer(ctx.Request.Context(), actorOf(ctx), id, in, idemKey)
 	}, "approve")
 }
 
@@ -431,8 +475,13 @@ func (h *handler) approveTransfer(c *gin.Context) {
 // @Failure 400 {object} response.Envelope "请求参数错误"
 // @Router /api/transfers/{id}/outbound [post]
 func (h *handler) outboundTransfer(c *gin.Context) {
+	idemKey, err := idempotencyKeyOf(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
 	h.transferAction(c, func(svc *Service, ctx *gin.Context, id int64) (*TransferDetail, bool, error) {
-		return svc.OutboundTransfer(ctx.Request.Context(), actorOf(ctx), id)
+		return svc.OutboundTransfer(ctx.Request.Context(), actorOf(ctx), id, idemKey)
 	}, "outbound")
 }
 
@@ -459,8 +508,13 @@ func (h *handler) arriveTransfer(c *gin.Context) {
 // @Failure 400 {object} response.Envelope "请求参数错误"
 // @Router /api/transfers/{id}/receive [post]
 func (h *handler) receiveTransfer(c *gin.Context) {
+	idemKey, err := idempotencyKeyOf(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
 	h.transferAction(c, func(svc *Service, ctx *gin.Context, id int64) (*TransferDetail, bool, error) {
-		return svc.ReceiveTransfer(ctx.Request.Context(), actorOf(ctx), id)
+		return svc.ReceiveTransfer(ctx.Request.Context(), actorOf(ctx), id, idemKey)
 	}, "receive")
 }
 
@@ -653,8 +707,13 @@ func (h *handler) completeCount(c *gin.Context) {
 			return
 		}
 	}
+	idemKey, err := idempotencyKeyOf(c)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
 	h.countAction(c, func(svc *Service, ctx *gin.Context, id int64) (*CountDetail, bool, error) {
-		return svc.CompleteCount(ctx.Request.Context(), actorOf(ctx), id, in.Opinion)
+		return svc.CompleteCount(ctx.Request.Context(), actorOf(ctx), id, in.Opinion, idemKey)
 	})
 }
 

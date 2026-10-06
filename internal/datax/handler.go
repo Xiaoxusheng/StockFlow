@@ -24,6 +24,7 @@ import (
 //	/api/imports/:id/validate           POST 校验（create=上传+校验，plan §11.1）
 //	/api/imports/:id/preview            GET 预览
 //	/api/imports/:id/confirm            POST 确认导入（execute=高危二次确认与审计）
+//	/api/imports/:id/retry-failed       POST 重新导入失败行（效率层一期 §2.8）
 //	/api/imports/:id/error-file         GET 错误 Excel 下载
 //	/api/exports                        GET 列表 / POST 创建（敏感操作，审计）
 //	/api/exports/:id/file               GET 产物下载
@@ -111,6 +112,7 @@ func RegisterRoutes(rg *gin.RouterGroup, svc *Service) {
 	imp.POST("/:id/validate", auth.RequirePermission(PermImportCreate), h.validateImport)
 	imp.GET("/:id/preview", auth.RequirePermission(PermImportRead), h.previewImport)
 	imp.POST("/:id/confirm", auth.RequirePermission(PermImportExecute), h.confirmImport)
+	imp.POST("/:id/retry-failed", auth.RequirePermission(PermImportCreate), h.retryFailedImport)
 	imp.GET("/:id/error-file", auth.RequirePermission(PermImportRead), h.downloadErrorFile)
 
 	// —— 导出中心 /api/exports ——
@@ -262,6 +264,28 @@ func (h *handler) confirmImport(c *gin.Context) {
 		}
 	}
 	res, err := h.svc.Confirm(c.Request.Context(), actorOf(c), id, in)
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, res)
+}
+
+// retryFailedImport POST /api/imports/:id/retry-failed（效率层一期计划 §2.8：
+// 仅 INVALID/FAILED 行以同一 ImportWriter 管线建新导入任务，走正常校验+确认流程）。
+// @Summary POST /api/imports/:id/retry-failed（仅 INVALID/FAILED 行建新任务）
+// @Tags 数据中心
+// @Produce json
+// @Param id path int true "路径参数 id"
+// @Success 200 {object} response.Envelope "统一响应信封"
+// @Failure 400 {object} response.Envelope "请求参数错误"
+// @Router /api/imports/{id}/retry-failed [post]
+func (h *handler) retryFailedImport(c *gin.Context) {
+	id, ok := pathID(c)
+	if !ok {
+		return
+	}
+	res, err := h.svc.RetryFailed(c.Request.Context(), actorOf(c), id)
 	if err != nil {
 		response.Err(c, err)
 		return
