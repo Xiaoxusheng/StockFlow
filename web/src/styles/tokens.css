@@ -86,6 +86,13 @@
   --sf-sider-width: 216px;
   --sf-sider-collapsed-width: 48px;
 
+  /* ===== 查询表单（frontend.md §6.3） =====
+     label 定宽 + 字段定宽上限 → 同一行所有字段严格等宽。
+     修前：label 自然宽度参与 flex 分配，label 越长控件越窄（实测同一行内
+     输入框 95px / 下拉框 219px 并存），且字段被撑到 260px 挤压操作按钮换行。 */
+  --sf-search-label-width: 96px;
+  --sf-search-field-width: 240px;
+
   /* ===== 图表（任务书 §31/§46/§50；SfChart 主题唯一取值来源，改此处即改图表） ===== */
   --sf-chart-primary: #2563eb;
   --sf-chart-secondary: #0891b2;

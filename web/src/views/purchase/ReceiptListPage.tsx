@@ -87,10 +87,12 @@ export default function ReceiptListPage() {
         subtitle="到货 → 收货 → 质检 → 上架 → 入库完成"
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} initialValues={list.params} onSearch={list.applyFilters} />
-        <SfTable<Receipt>
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
+        <SfSearchForm
+          fields={searchFields}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
+          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <SfViewBar
               pageKey="purchase.receipt"
               mode="url"
@@ -102,6 +104,8 @@ export default function ReceiptListPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfTable<Receipt>
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="purchase-receipts"

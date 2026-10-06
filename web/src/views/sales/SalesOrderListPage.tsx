@@ -178,10 +178,9 @@ export default function SalesOrderListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-        />
-        <SfTable<SalesOrder>
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
+          /* 保存视图（§2.2）：经 extraActions 与查询/重置**同行**渲染——
+             不再挂 SfTable 工具栏（那会独占一行，与搜索框分离） */
+          extraActions={
             <SfViewBar
               pageKey="sales.order"
               mode="url"
@@ -193,6 +192,8 @@ export default function SalesOrderListPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfTable<SalesOrder>
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="sales-orders"

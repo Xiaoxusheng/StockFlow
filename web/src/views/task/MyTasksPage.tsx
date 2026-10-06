@@ -169,12 +169,8 @@ export default function MyTasksPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-        />
-        <SfTable<TaskItem>
-          storageKey="my-tasks"
-          rowKey="id"
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL + 自动刷新档位（§2.11） */
-          actions={
+          /* 保存视图 + 自动刷新档位：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <>
               <SfViewBar
                 pageKey="task.my"
@@ -189,6 +185,10 @@ export default function MyTasksPage() {
               <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
             </>
           }
+        />
+        <SfTable<TaskItem>
+          storageKey="my-tasks"
+          rowKey="id"
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           /* 批量领取（§2.7）：选中行按类型分组调用三个批量端点，结果统一落 BatchResultDrawer */

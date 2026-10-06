@@ -173,25 +173,25 @@ export default function ExceptionCenterPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
+          /* 保存视图 + 自动刷新档位：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
+            <>
+              <SfViewBar
+                pageKey="exception.center"
+                mode="url"
+                paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+                appliedFilters={list.params as unknown as Record<string, unknown>}
+                currentFilters={list.formValues}
+                currentPageSize={list.pagination.pageSize}
+                currentHiddenColumns={hiddenColumns}
+                onHiddenColumnsChange={setHiddenColumns}
+              />
+              <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
+            </>
+          }
         />
         <SfTable<ExceptionItem>
           /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
-            <>
-            <SfViewBar
-              pageKey="exception.center"
-              mode="url"
-              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
-              appliedFilters={list.params as unknown as Record<string, unknown>}
-              currentFilters={list.formValues}
-              currentPageSize={list.pagination.pageSize}
-              currentHiddenColumns={hiddenColumns}
-              onHiddenColumnsChange={setHiddenColumns}
-            />
-            {/* 自动刷新档位（§2.11）：任务页轮询，页签隐藏自动暂停 */}
-            <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
-            </>
-          }
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="exception-center"

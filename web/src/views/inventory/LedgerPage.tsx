@@ -165,10 +165,8 @@ export default function LedgerPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-        />
-        <SfTable<LedgerItem>
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
+          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <SfViewBar
               pageKey="inventory.ledger"
               mode="url"
@@ -180,6 +178,8 @@ export default function LedgerPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfTable<LedgerItem>
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="inventory-ledger"

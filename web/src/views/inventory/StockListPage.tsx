@@ -88,13 +88,8 @@ export default function StockListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-        />
-        <SfInventoryTable
-          storageKey="inventory-stock"
-          rowKey="id"
-          /* 保存视图（§2.2，验收场景 2）：urlSync 页经 usePagedList 公开 API 写 URL，
-             应用视图即还原筛选 + 分页；列经受控 props 生效（不覆盖本地列偏好） */
-          actions={
+          /* 保存视图（§2.2，验收场景 2）：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <SfViewBar
               pageKey="inventory.stock"
               mode="url"
@@ -106,6 +101,10 @@ export default function StockListPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfInventoryTable
+          storageKey="inventory-stock"
+          rowKey="id"
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           dataSource={list.items}

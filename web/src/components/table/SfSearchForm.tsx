@@ -101,16 +101,25 @@ export function SfSearchForm({
       form={form}
       onFinish={handleFinish}
       initialValues={{ collapsed }}
+      className="sf-search-form"
       style={{ marginBottom: 'var(--sf-space-3)' }}
     >
-      {/* 弹性行：字段 flex 挤占 + 操作按钮同排尾部（f854d23 行为），仅去除外层重复下边距 */}
+      {/* 弹性行：字段 flex 挤占 + 操作按钮同排尾部（f854d23 行为），仅去除外层重复下边距。
+          字段宽度上限走 --sf-search-field-width（240px，原硬编码 260px 过宽，会把右侧
+          操作按钮挤到第二行）；label 定宽右对齐（样式见 global.css .sf-search-form），
+          两者共同保证「同一行内所有控件严格等宽」。 */}
       <Flex gap="var(--sf-space-3)" wrap="wrap" align="middle">
         {visibleFields.map((field) => (
           <Form.Item
             key={field.name}
             name={field.name}
             label={field.label}
-            style={{ marginBottom: 0, flex: '1 1 190px', maxWidth: 260, minWidth: 160 }}
+            style={{
+              marginBottom: 0,
+              flex: '1 1 200px',
+              maxWidth: 'var(--sf-search-field-width)',
+              minWidth: 184,
+            }}
           >
             {field.control === 'select' ? (
               <Select

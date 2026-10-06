@@ -196,10 +196,12 @@ export default function PurchaseListPage() {
         }
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} initialValues={list.params} onSearch={list.applyFilters} />
-        <SfTable<PurchaseOrder>
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
+        <SfSearchForm
+          fields={searchFields}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
+          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <SfViewBar
               pageKey="purchase.order"
               mode="url"
@@ -211,6 +213,8 @@ export default function PurchaseListPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfTable<PurchaseOrder>
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="purchase-orders"

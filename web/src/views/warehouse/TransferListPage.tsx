@@ -320,10 +320,8 @@ export default function TransferListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
-        />
-        <SfTable<TransferOrder>
-          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL，应用即还原筛选+分页 */
-          actions={
+          /* 保存视图：与查询/重置同行渲染（不再占表格工具栏独立一行） */
+          extraActions={
             <SfViewBar
               pageKey="transfer.order"
               mode="url"
@@ -335,6 +333,8 @@ export default function TransferListPage() {
               onHiddenColumnsChange={setHiddenColumns}
             />
           }
+        />
+        <SfTable<TransferOrder>
           hiddenColumns={hiddenColumns}
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="transfer-orders"

@@ -124,6 +124,38 @@ body {
   cursor: default;
 }
 
+/* ===== 表格单元格不换行（全站列表页统一，frontend.md §6.2） ===== */
+/* 单号/编码/时间等短标识禁止折行——修前「OUT-20261006-000006」在窄列里被断成两行，
+   行高被撑高、纵向扫读断裂。表头与数据格统一 nowrap，溢出以省略号收尾；
+   确需多行展示的长文本列（备注/描述）由该页自行放开（页面级样式优先级更高）。 */
+.sf-table .ant-table-thead > tr > th,
+.sf-table .ant-table-tbody > tr > td {
+  white-space: nowrap;
+}
+
+.sf-table .ant-table-tbody > tr > td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== 统一查询表单（components/table/SfSearchForm.tsx，frontend.md §6.3） ===== */
+/* label 定宽右对齐：修掉「label 自然宽度参与 flex 分配」——修前同一行内 label 越长
+   控件越窄（实测出库单号 123px / 来源销售单号 95px / 状态下拉 191px 三种宽度并存，
+   见 2026-10-06 量测）。label 定宽后控制区宽度只由 Form.Item 宽度决定，
+   同一行所有控件严格等宽、左边界对齐；字段宽度上限见 --sf-search-field-width。 */
+.sf-search-form .ant-form-item-label {
+  flex: 0 0 auto;
+}
+
+.sf-search-form .ant-form-item-label > label {
+  width: var(--sf-search-label-width);
+  text-align: right;
+  justify-content: flex-end;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ===== 表格动效体系（frontend.md §31；任务书 8 类核心动画） =====
    作用域锚点：.sf-table（SfTable 根）/ .sf-table-toolbar / .sf-search-form__applied——
    Pad 卡片流不经这些选择器，零影响。时长/缓动一律 var(--sf-motion-*)；
