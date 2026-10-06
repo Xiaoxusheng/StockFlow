@@ -300,7 +300,10 @@ func (s *Service) GetImportErrorFile(ctx context.Context, id int64, scope *FileS
 		return nil, err
 	}
 	if task.ErrorFileID <= 0 {
-		return nil, response.NewError(ErrFileNotFound, map[string]any{"reason": "该任务无错误明细文件"})
+		// 执行期失败行（PARTIAL_SUCCESS/FAILED，Validate 阶段零错误行故无登记
+		// 文件）：按 import_task_rows 现场合成错误 Excel（service_errorfile.go）；
+		// 无可合成错误行时仍按 404 拒绝（口径不变）。
+		return s.synthesizeImportErrorFile(ctx, task, scope)
 	}
 	f, err := s.loadFileRow(ctx, task.ErrorFileID)
 	if err != nil {
