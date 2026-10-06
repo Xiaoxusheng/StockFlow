@@ -237,7 +237,6 @@ export function SfViewBar({
     <Space size={4}>
       {contextHolder}
       <Select<string>
-        size="small"
         style={{ minWidth: 132 }}
         loading={isLoading}
         value={currentView?.id}
@@ -254,7 +253,7 @@ export function SfViewBar({
         }))}
         aria-label="保存视图"
       />
-      <Button size="small" icon={<SaveOutlined />} onClick={openSave}>
+      <Button icon={<SaveOutlined />} onClick={openSave}>
         保存当前
       </Button>
       <Dropdown
@@ -268,7 +267,7 @@ export function SfViewBar({
           },
         }}
       >
-        <Button size="small" icon={<EllipsisOutlined />} aria-label="视图操作" />
+        <Button icon={<EllipsisOutlined />} aria-label="视图操作" />
       </Dropdown>
 
       <Modal

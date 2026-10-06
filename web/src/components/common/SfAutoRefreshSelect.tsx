@@ -18,7 +18,6 @@ export function SfAutoRefreshSelect({ value, onChange, disabled }: SfAutoRefresh
   return (
     <Tooltip title="自动刷新：页签切走时暂停，连续失败自动停轮">
       <Select<AutoRefreshSeconds>
-        size="small"
         disabled={disabled}
         value={value}
         onChange={onChange}
