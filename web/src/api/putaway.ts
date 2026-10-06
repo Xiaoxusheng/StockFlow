@@ -40,6 +40,9 @@ export interface PutawayTask {
   target_shelf_id: number
   target_bin_id: number
   status: PutawayTaskStatus
+  /** 任务优先级 0–9（效率层一期 B3，迁移 000023；0=默认）——/api/tasks/next 排序层依据，
+   * 经 PUT /api/putaway/{id}/priority 设置（权限 purchase:putaway:assign） */
+  priority: number
   claimed_by: number
   /** JSONTime：零值为 null */
   claimed_at: string | null
@@ -94,4 +97,14 @@ export const putawayApi = {
    */
   batchClaim: (ids: Array<number | string>) =>
     http.post<BatchResult>('/api/putaway/batch-claim', { ids: ids.map((id) => Number(id)) }),
+  /**
+   * 设置任务优先级（PUT /api/putaway/{id}/priority，效率层一期 B3）：值域 0–9
+   * （迁移 000023 CHECK 兜底），完成/取消态后端 409；本端点是 /api/tasks/next 排序层的
+   * 数据来源（不设置即高优先级层无数据）。权限 purchase:putaway:assign。
+   */
+  setPriority: (id: PutawayTaskId, priority: number) =>
+    http.put<{ id: number; priority: number }>(
+      `/api/putaway/${encodeURIComponent(String(id))}/priority`,
+      { priority },
+    ),
 }

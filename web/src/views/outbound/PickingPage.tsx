@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Form, Input, InputNumber, Modal, Typography, message } from 'antd'
+import { Button, Card, Form, Input, InputNumber, Modal, Select, Typography, message } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
@@ -29,9 +29,12 @@ import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfAutoRefreshSelect } from '@/components/common/SfAutoRefreshSelect'
+import { BatchResultDrawer } from '@/components/batch/BatchResultDrawer'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { resolveErrorMessage } from '@/api/client'
+import type { BatchResult } from '@/api/printing'
+import { TASK_PRIORITY_OPTIONS } from '@/api/task'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
@@ -92,6 +95,8 @@ export default function PickingPage() {
   // 按钮级权限（后端 RequirePerm 独立校验，前端只隐藏入口）
   const canClaim = canAccess(user, PICK_CLAIM_PERMISSION)
   const canExecute = canAccess(user, PICK_EXECUTE_PERMISSION)
+  /** 优先级设置权限（效率层一期 B3：sales:pick:assign——后端同码校验） */
+  const canAssign = canAccess(user, 'sales:pick:assign')
 
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   /** 任务页自动刷新（§2.11）：档位 关/10/30/60 秒；页签隐藏暂停；连续失败 ≥2 次退避停轮 */
@@ -107,6 +112,11 @@ export default function PickingPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
+  /** 批量领取（§2.7）：多选行 → POST /api/picks/batch-claim，逐条结果经 BatchResultDrawer 呈现 */
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([])
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
+
   /** 任务落定后刷新列表（状态机由后端守卫，前端无条件 refetch 对齐） */
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['outbound', 'picks'] })
 
@@ -114,6 +124,29 @@ export default function PickingPage() {
     mutationFn: (id: PickTask['id']) => outboundTaskApi.picks.claim(id),
     onSuccess: (t) => {
       message.success(`已领取任务 ${t.pick_no}`)
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  /** 批量领取（逐条审计、不整体回滚；成功/跳过/失败三态在抽屉内对账，仅重试失败） */
+  const batchClaimMutation = useMutation({
+    mutationFn: (ids: Array<number | string>) => outboundTaskApi.picks.batchClaim(ids),
+    onSuccess: (res) => {
+      setBatchResult(res)
+      setResultOpen(true)
+      setSelectedRowKeys([])
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  /** 行内设置任务优先级（§2.4：/api/tasks/next 排序层的数据来源，不设置即排序层无意义） */
+  const priorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: PickTask['id']; priority: number }) =>
+      outboundTaskApi.picks.setPriority(id, priority),
+    onSuccess: (res) => {
+      message.success(`优先级已更新为 ${res.priority}`)
       invalidate()
     },
     onError: (e) => message.error(resolveErrorMessage(e)),
@@ -259,6 +292,27 @@ export default function PickingPage() {
       width: 170,
       render: (v: string) => <DateCell value={v} />,
     },
+    // 优先级列（§2.4 行内设置入口）：持 sales:pick:assign 时可编辑（0–9，终态后端 409 拒绝）；
+    // 该值是 /api/tasks/next「mine > priority > 超时 > created_at」排序层的数据来源
+    {
+      title: '优先级',
+      dataIndex: 'priority',
+      width: 92,
+      align: 'center' as const,
+      render: (v: number, record: PickTask) =>
+        canAssign ? (
+          <Select
+            size="small"
+            value={v ?? 0}
+            style={{ width: 66 }}
+            options={TASK_PRIORITY_OPTIONS}
+            disabled={record.status === 'PICKED' || record.status === 'CANCELLED'}
+            onChange={(next) => priorityMutation.mutate({ id: record.id, priority: next })}
+          />
+        ) : (
+          <span className="sf-num">{v ?? 0}</span>
+        ),
+    },
     // 操作列按状态机装配（仅持有对应权限时渲染）：
     // PENDING → 领取（原子抢占）；CLAIMED → 拣货确认 + 异常上报
     ...(canClaim || canExecute
@@ -353,6 +407,23 @@ export default function PickingPage() {
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="outbound-picks"
           rowKey="id"
+          /* 批量领取（§2.7）：选中 PENDING 行后经统一批量端点领取，逐条结果落抽屉 */
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>),
+          }}
+          bulkActions={
+            canClaim ? (
+              <Button
+                type="primary"
+                size="small"
+                loading={batchClaimMutation.isPending}
+                onClick={() => batchClaimMutation.mutate(selectedRowKeys)}
+              >
+                批量领取（{selectedRowKeys.length}）
+              </Button>
+            ) : undefined
+          }
           columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
@@ -366,6 +437,15 @@ export default function PickingPage() {
           scrollX={1900}
         />
       </Card>
+
+      {/* 批量结果统一承载面（§2.7）：计数条 + 逐条三态 + 仅重试失败（以失败 ids 重发同一端点） */}
+      <BatchResultDrawer
+        open={resultOpen}
+        result={batchResult}
+        onRetry={(failedIds) => batchClaimMutation.mutate(failedIds)}
+        retrying={batchClaimMutation.isPending}
+        onClose={() => setResultOpen(false)}
+      />
 
       {/* 拣货确认弹窗（CLAIMED→PICKED）：实拣数量 ≤ 任务量（后端 ErrPickExceed 守卫）；
           序列号 SKU 逐件采集，行数须与实拣数量一致（service_outbound.go validateSerialsForPick） */}

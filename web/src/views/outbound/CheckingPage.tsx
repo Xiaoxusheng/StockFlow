@@ -22,9 +22,12 @@ import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfAutoRefreshSelect } from '@/components/common/SfAutoRefreshSelect'
+import { BatchResultDrawer } from '@/components/batch/BatchResultDrawer'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { resolveErrorMessage } from '@/api/client'
+import type { BatchResult } from '@/api/printing'
+import { TASK_PRIORITY_OPTIONS } from '@/api/task'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
@@ -81,6 +84,8 @@ export default function CheckingPage() {
   // 按钮级权限（后端 RequirePerm 独立校验，前端只隐藏入口）
   const canClaim = canAccess(user, CHECK_CLAIM_PERMISSION)
   const canExecute = canAccess(user, CHECK_EXECUTE_PERMISSION)
+  /** 优先级设置权限（效率层一期 B3：sales:check:assign——后端同码校验） */
+  const canAssign = canAccess(user, 'sales:check:assign')
 
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   /** 任务页自动刷新（§2.11）：档位 关/10/30/60 秒；页签隐藏暂停；连续失败 ≥2 次退避停轮 */
@@ -96,6 +101,11 @@ export default function CheckingPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
+  /** 批量领取（§2.7）：多选行 → POST /api/checks/batch-claim，逐条结果经 BatchResultDrawer 呈现 */
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([])
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
+
   /** 任务落定后刷新列表（状态机由后端守卫，前端无条件 refetch 对齐） */
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['outbound', 'checks'] })
 
@@ -103,6 +113,29 @@ export default function CheckingPage() {
     mutationFn: (id: CheckTask['id']) => outboundTaskApi.checks.claim(id),
     onSuccess: (t) => {
       message.success(`已领取任务 ${t.check_no}`)
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  /** 批量领取（逐条审计、不整体回滚；成功/跳过/失败三态在抽屉内对账，仅重试失败） */
+  const batchClaimMutation = useMutation({
+    mutationFn: (ids: Array<number | string>) => outboundTaskApi.checks.batchClaim(ids),
+    onSuccess: (res) => {
+      setBatchResult(res)
+      setResultOpen(true)
+      setSelectedRowKeys([])
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  /** 行内设置任务优先级（§2.4：/api/tasks/next checking 分支排序层的数据来源） */
+  const priorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: CheckTask['id']; priority: number }) =>
+      outboundTaskApi.checks.setPriority(id, priority),
+    onSuccess: (res) => {
+      message.success(`优先级已更新为 ${res.priority}`)
       invalidate()
     },
     onError: (e) => message.error(resolveErrorMessage(e)),
@@ -235,6 +268,26 @@ export default function CheckingPage() {
       width: 170,
       render: (v: string) => <DateCell value={v} />,
     },
+    // 优先级列（§2.4 行内设置入口）：持 sales:check:assign 时可编辑（0–9，终态后端 409 拒绝）
+    {
+      title: '优先级',
+      dataIndex: 'priority',
+      width: 92,
+      align: 'center' as const,
+      render: (v: number, record: CheckTask) =>
+        canAssign ? (
+          <Select
+            size="small"
+            value={v ?? 0}
+            style={{ width: 66 }}
+            options={TASK_PRIORITY_OPTIONS}
+            disabled={record.status === 'DONE' || record.status === 'EXCEPTION'}
+            onChange={(next) => priorityMutation.mutate({ id: record.id, priority: next })}
+          />
+        ) : (
+          <span className="sf-num">{v ?? 0}</span>
+        ),
+    },
     // 操作列按状态机装配（仅持有对应权限时渲染）：
     // PENDING → 领取（原子指派）+ 复核确认（可直接做）；EXCEPTION → 重开
     ...(canClaim || canExecute
@@ -328,6 +381,23 @@ export default function CheckingPage() {
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="outbound-checks"
           rowKey="id"
+          /* 批量领取（§2.7）：选中 PENDING 行后经统一批量端点领取，逐条结果落抽屉 */
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>),
+          }}
+          bulkActions={
+            canClaim ? (
+              <Button
+                type="primary"
+                size="small"
+                loading={batchClaimMutation.isPending}
+                onClick={() => batchClaimMutation.mutate(selectedRowKeys)}
+              >
+                批量领取（{selectedRowKeys.length}）
+              </Button>
+            ) : undefined
+          }
           columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
@@ -341,6 +411,15 @@ export default function CheckingPage() {
           scrollX={1850}
         />
       </Card>
+
+      {/* 批量结果统一承载面（§2.7）：计数条 + 逐条三态 + 仅重试失败（以失败 ids 重发同一端点） */}
+      <BatchResultDrawer
+        open={resultOpen}
+        result={batchResult}
+        onRetry={(failedIds) => batchClaimMutation.mutate(failedIds)}
+        retrying={batchClaimMutation.isPending}
+        onClose={() => setResultOpen(false)}
+      />
 
       {/* 复核确认弹窗（PENDING→DONE/EXCEPTION，不要求先领取）：
           通过时序列号任务的扫描值必须与任务序列号一致（service_outbound.go:630-631）；

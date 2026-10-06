@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Input, Modal, Steps, message } from 'antd'
+import { Button, Input, Modal, Select, Steps, message } from 'antd'
 import {
   ArrowLeftOutlined,
   CheckOutlined,
@@ -46,6 +46,7 @@ import { ScanInput } from '@/components/scanner/ScanInput'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useNextTask } from '@/hooks/useNextTask'
 import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
+import { TASK_PRIORITY_OPTIONS } from '@/api/task'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
@@ -390,6 +391,20 @@ export default function PadPutawayPage() {
     enabled: !!task,
   })
 
+  /** 优先级设置权限（效率层一期 B3：purchase:putaway:assign——后端同码校验） */
+  const canAssign = canAccess(user, 'purchase:putaway:assign')
+  /** 行内设置任务优先级（§2.4：/api/tasks/next putaway 分支排序层的数据来源） */
+  const priorityMutation = useMutation({
+    mutationFn: ({ id, priority }: { id: PutawayTaskId; priority: number }) =>
+      putawayApi.setPriority(id, priority),
+    onSuccess: (res) => {
+      messageApi.success(`优先级已更新为 ${res.priority}`)
+      void detailQuery.refetch()
+      void list.refetch()
+    },
+    onError: (e) => messageApi.error(resolveErrorMessage(e)),
+  })
+
   const handleExecute = async (): Promise<unknown> => {
     if (!task || executeDisabledReason) return undefined
     return executeMutation.mutateAsync({
@@ -425,6 +440,21 @@ export default function PadPutawayPage() {
         items={[
           { label: '上架单号', value: task.putaway_no },
           { label: '状态', value: <PutawayStatusTag status={task.status} /> },
+          {
+            label: '优先级',
+            value: canAssign ? (
+              <Select
+                size="small"
+                value={task.priority ?? 0}
+                style={{ width: 72 }}
+                options={TASK_PRIORITY_OPTIONS}
+                disabled={task.status === 'COMPLETED' || task.status === 'CANCELLED'}
+                onChange={(next) => priorityMutation.mutate({ id: task.id, priority: next })}
+              />
+            ) : (
+              String(task.priority ?? 0)
+            ),
+          },
           { label: '来源入库单', value: task.inbound_no || EMPTY_TEXT },
           { label: '来源收货单', value: task.receipt_no || EMPTY_TEXT },
           { label: 'SKU 编码', value: String(task.sku_id) === '0' ? EMPTY_TEXT : skuMaps.code.get(String(task.sku_id)) ?? `#${String(task.sku_id)}` },

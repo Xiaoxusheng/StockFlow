@@ -1,7 +1,19 @@
-import { Card } from 'antd'
+import { useState } from 'react'
+import { Button, Card, message } from 'antd'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
 import { taskApi, type TaskItem, type TaskQuery, type TaskStatus, type TaskType } from '@/api/task'
+import type { BatchResult } from '@/api/printing'
+import { putawayApi } from '@/api/putaway'
+import { outboundTaskApi } from '@/api/outbound'
+import { resolveErrorMessage } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
+import { useAutoRefresh } from '@/hooks/useAutoRefresh'
+import { SfViewBar } from '@/components/table/SfViewBar'
+import { SfAutoRefreshSelect } from '@/components/common/SfAutoRefreshSelect'
+import { BatchResultDrawer } from '@/components/batch/BatchResultDrawer'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -83,10 +95,66 @@ const COLUMNS: ColumnsType<TaskItem> = [
  * （workbench.go:865-891 仅读三键）——keyword 后端不消费，假筛选项已摘除（api.md §9 平台批）。 */
 export default function MyTasksPage() {
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  /** 任务页自动刷新（§2.11）：档位 关/10/30/60 秒；页签隐藏暂停；连续失败 ≥2 次退避停轮 */
+  const autoRefresh = useAutoRefresh()
+
   const list = usePagedList<TaskItem, TaskQuery>({
     queryKey: ['task', 'my'],
     fetch: (q) => taskApi.list(q),
     urlSync: true,
+    refetchInterval: autoRefresh.refetchInterval,
+  })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+
+  /** 批量领取（§2.7）：行 id 即各任务表主键（putaway_tasks/pick_tasks/check_tasks），
+   * 按行 task_type 分组调用三个批量端点后合并为一份批量结果（逐条三态在抽屉内对账） */
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Array<string | number>>([])
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null)
+  const [resultOpen, setResultOpen] = useState(false)
+  /** 任一类任务的领取权限（无权限不渲染批量入口；具体行权限仍由后端逐条裁决） */
+  const canClaimAny =
+    canAccess(user, 'purchase:putaway:claim') ||
+    canAccess(user, 'sales:pick:claim') ||
+    canAccess(user, 'sales:check:claim')
+
+  const batchClaimMutation = useMutation({
+    mutationFn: async (keys: Array<string | number>) => {
+      const putawayIds: Array<string | number> = []
+      const pickIds: Array<string | number> = []
+      const checkIds: Array<string | number> = []
+      for (const key of keys) {
+        const row = list.items.find((item) => String(item.id) === String(key))
+        if (!row) continue
+        if (row.task_type === 'putaway') putawayIds.push(row.id)
+        else if (row.task_type === 'picking') pickIds.push(row.id)
+        else if (row.task_type === 'checking') checkIds.push(row.id)
+      }
+      const parts: BatchResult[] = []
+      if (putawayIds.length > 0) parts.push(await putawayApi.batchClaim(putawayIds))
+      if (pickIds.length > 0) parts.push(await outboundTaskApi.picks.batchClaim(pickIds))
+      if (checkIds.length > 0) parts.push(await outboundTaskApi.checks.batchClaim(checkIds))
+      return parts.reduce<BatchResult>(
+        (acc, part) => ({
+          total: acc.total + part.total,
+          success_count: acc.success_count + part.success_count,
+          failed_count: acc.failed_count + part.failed_count,
+          skipped_count: acc.skipped_count + part.skipped_count,
+          results: [...acc.results, ...part.results],
+        }),
+        { total: 0, success_count: 0, failed_count: 0, skipped_count: 0, results: [] },
+      )
+    },
+    onSuccess: (res) => {
+      setBatchResult(res)
+      setResultOpen(true)
+      setSelectedRowKeys([])
+      void queryClient.invalidateQueries({ queryKey: ['task', 'my'] })
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
   })
 
   return (
@@ -105,6 +173,41 @@ export default function MyTasksPage() {
         <SfTable<TaskItem>
           storageKey="my-tasks"
           rowKey="id"
+          /* 保存视图（§2.2）：urlSync 页经 usePagedList 公开 API 写 URL + 自动刷新档位（§2.11） */
+          actions={
+            <>
+              <SfViewBar
+                pageKey="task.my"
+                mode="url"
+                paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+                appliedFilters={list.params as unknown as Record<string, unknown>}
+                currentFilters={list.formValues}
+                currentPageSize={list.pagination.pageSize}
+                currentHiddenColumns={hiddenColumns}
+                onHiddenColumnsChange={setHiddenColumns}
+              />
+              <SfAutoRefreshSelect value={autoRefresh.seconds} onChange={autoRefresh.setSeconds} />
+            </>
+          }
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
+          /* 批量领取（§2.7）：选中行按类型分组调用三个批量端点，结果统一落 BatchResultDrawer */
+          rowSelection={{
+            selectedRowKeys,
+            onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>),
+          }}
+          bulkActions={
+            canClaimAny ? (
+              <Button
+                type="primary"
+                size="small"
+                loading={batchClaimMutation.isPending}
+                onClick={() => batchClaimMutation.mutate(selectedRowKeys)}
+              >
+                批量领取（{selectedRowKeys.length}）
+              </Button>
+            ) : undefined
+          }
           columns={COLUMNS}
           dataSource={list.items}
           loading={list.isFetching}
@@ -118,6 +221,15 @@ export default function MyTasksPage() {
           scrollX={1360}
         />
       </Card>
+
+      {/* 批量结果统一承载面（§2.7）：计数条 + 逐条三态 + 仅重试失败（按类型分组重发同一端点） */}
+      <BatchResultDrawer
+        open={resultOpen}
+        result={batchResult}
+        onRetry={(failedIds) => batchClaimMutation.mutate(failedIds)}
+        retrying={batchClaimMutation.isPending}
+        onClose={() => setResultOpen(false)}
+      />
     </div>
   )
 }

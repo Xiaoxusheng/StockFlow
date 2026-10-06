@@ -1,6 +1,7 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
 import type { SalesId } from './sales'
+import type { BatchResult } from './printing'
 
 // ---------- 出库单（后端 M2 已交付：internal/sales/routes.go:82-87，出参为
 // OutboundOrder GORM 模型 snake_case，internal/sales/models.go:54-90） ----------
@@ -128,6 +129,9 @@ export interface PickTask {
   /** 已拣数量 */
   picked_qty: number
   status: PickTaskStatus
+  /** 任务优先级 0–9（效率层一期 B3，迁移 000023；0=默认）——/api/tasks/next 排序层依据，
+   * 经 PUT /api/picks/{id}/priority 设置（权限 sales:pick:assign） */
+  priority: number
   assignee_id: number
   assignee_name: string
   claimed_at: string | null
@@ -179,6 +183,9 @@ export interface CheckTask {
   serial_no: string
   qty: number
   status: CheckTaskStatus
+  /** 任务优先级 0–9（效率层一期 B3，迁移 000023；0=默认）——/api/tasks/next 排序层依据，
+   * 经 PUT /api/checks/{id}/priority 设置（权限 sales:check:assign） */
+  priority: number
   /** 空 = 复核通过；异常为五类中文值域之一 */
   result: string
   assignee_id: number
@@ -400,6 +407,23 @@ export const outboundTaskApi = {
       http.get<PageResult<PickTask>>('/api/picks', { params: query }),
     /** 领取（PUT /api/picks/{id}/claim，原子抢占） */
     claim: (id: SalesId) => http.put<PickTask>(`/api/picks/${id}/claim`),
+    /**
+     * 批量领取（POST /api/picks/batch-claim，计划 §2.7；权限复用 sales:pick:claim）：
+     * 响应=批量结果契约 BatchResult（api.md §9）——PENDING→success、已被本人领取→skipped、
+     * 被他人领取/状态非法→failed(reason)；批量不整体回滚；结果统一经
+     * components/batch/BatchResultDrawer 呈现（禁各页自写），重试=仅对 failed ids 再调本端点。
+     * 头键说明：批量领取**不消费 Idempotency-Key**（防重=状态机原子抢占），前端附头仅防双击。
+     */
+    batchClaim: (ids: Array<number | string>) =>
+      http.post<BatchResult>('/api/picks/batch-claim', { ids: ids.map((id) => Number(id)) }),
+    /**
+     * 设置任务优先级（PUT /api/picks/{id}/priority，效率层一期 B3）：值域 0–9
+     * （迁移 000023 CHECK 兜底），终态任务后端 409 拒绝；本端点是 /api/tasks/next
+     * 「mine > priority > 超时 > created_at」排序层的数据来源（不设置即排序层无意义）。
+     * 权限 sales:pick:assign。响应 {id, priority} 供前端就地回显。
+     */
+    setPriority: (id: SalesId, priority: number) =>
+      http.put<{ id: number; priority: number }>(`/api/picks/${id}/priority`, { priority }),
     /** 拣货确认（PUT /api/picks/{id}/confirm，CLAIMED→PICKED，联动创建复核任务） */
     confirm: (id: SalesId, payload: PickConfirmPayload) =>
       http.put<PickTask>(`/api/picks/${id}/confirm`, payload),
@@ -412,6 +436,13 @@ export const outboundTaskApi = {
       http.get<PageResult<CheckTask>>('/api/checks', { params: query }),
     /** 领取（PUT /api/checks/{id}/claim，原子指派不迁移状态） */
     claim: (id: SalesId) => http.put<CheckTask>(`/api/checks/${id}/claim`),
+    /** 批量领取（POST /api/checks/batch-claim，权限复用 sales:check:claim）——
+     * 契约与 picks.batchClaim 同形（BatchResult，api.md §9），结果经 BatchResultDrawer 呈现 */
+    batchClaim: (ids: Array<number | string>) =>
+      http.post<BatchResult>('/api/checks/batch-claim', { ids: ids.map((id) => Number(id)) }),
+    /** 设置任务优先级（PUT /api/checks/{id}/priority，值域 0–9，终态 409；权限 sales:check:assign） */
+    setPriority: (id: SalesId, priority: number) =>
+      http.put<{ id: number; priority: number }>(`/api/checks/${id}/priority`, { priority }),
     /** 复核确认（PUT /api/checks/{id}/confirm，通过/五类异常） */
     confirm: (id: SalesId, payload: CheckConfirmPayload) =>
       http.put<CheckTask>(`/api/checks/${id}/confirm`, payload),

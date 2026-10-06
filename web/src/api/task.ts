@@ -115,6 +115,15 @@ export interface NextTaskResult {
   task: TaskItem | null
 }
 
+/**
+ * 任务优先级选项（0–9，效率层一期 B3 迁移 000023 CHECK 值域；0=默认/不优先）。
+ * 消费方：拣货/复核/上架列表的「优先级」列行内设置（PUT …/priority）。
+ */
+export const TASK_PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
+  label: String(i),
+  value: i,
+}))
+
 export const taskApi = {
   /** 工作台四块入口计数（预置端点，后端未就绪时页面呈现统一错误态） */
   summary: () => http.get<WorkbenchSummary>('/api/workbench/summary'),
