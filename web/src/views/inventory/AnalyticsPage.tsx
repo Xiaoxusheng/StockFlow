@@ -148,33 +148,58 @@ export default function AnalyticsPage() {
         {/* 指标条：库存金额 / 库存总量 / SKU 数 / 周转率 / 周转天数（保留） */}
         <Card size="small" styles={{ body: { padding: '12px 16px' } }}>
           {analytics.isPending ? (
-            <Flex gap={32}>
-              {['库存金额', '库存总量', 'SKU 数', '周转率', '周转天数'].map((label) => (
-                <Skeleton.Node active key={label} style={{ width: 72, height: 40 }} />
+            <Flex gap={0} wrap="wrap" style={{ width: '100%' }}>
+              {['库存金额', '库存总量', 'SKU 数', '周转率', '周转天数'].map((label, index, arr) => (
+                <div
+                  key={label}
+                  style={{
+                    flex: '1 1 0',
+                    minWidth: 132,
+                    paddingLeft: index === 0 ? 0 : 16,
+                    paddingRight: index === arr.length - 1 ? 0 : 16,
+                  }}
+                >
+                  <Skeleton.Node active style={{ width: '100%', height: 40 }} />
+                </div>
               ))}
             </Flex>
           ) : analytics.error ? (
             <SfError error={analytics.error} onRetry={analytics.refetch} description="库存分析数据加载失败，请稍后重试" />
           ) : (
-            <Flex gap={0} wrap="wrap">
+            <Flex wrap="wrap" style={{ width: '100%' }}>
               {[
                 { label: '库存金额', value: formatMoney(data?.total_stock_value) },
                 { label: '库存总量', value: formatQty(data?.total_qty) },
                 { label: 'SKU 数', value: formatNumber(data?.total_sku_count) },
                 { label: '周转率', value: `${formatNumber(data?.turnover_rate, 2)} 次` },
                 { label: '周转天数', value: `${formatNumber(data?.turnover_days, 1)} 天` },
-              ].map((item, index, arr) => (
-                <Statistic
-                  key={item.label}
-                  title={item.label}
-                  value={item.value}
-                  valueStyle={{ fontSize: 18 }}
-                  style={{
-                    padding: '0 24px',
-                    borderRight: index < arr.length - 1 ? '1px solid var(--sf-border-subtle)' : undefined,
-                  }}
-                />
-              ))}
+              ].map((item, index, arr) => {
+                const isFirst = index === 0
+                const isLast = index === arr.length - 1
+                return (
+                  <Statistic
+                    key={item.label}
+                    title={item.label}
+                    value={item.value}
+                    valueStyle={{
+                      // 与库存列表页汇总条（SfInventorySummary）同口径：
+                      // 20px / 600 / tabular-nums，两处指标条视觉一致
+                      fontSize: 20,
+                      fontWeight: 600,
+                      lineHeight: '28px',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                    style={{
+                      // 等分铺满整行（消除右侧空白）；首尾项贴边对齐卡片内容区
+                      flex: '1 1 0',
+                      minWidth: 132,
+                      paddingLeft: isFirst ? 0 : 16,
+                      paddingRight: isLast ? 0 : 16,
+                      borderRight: isLast ? undefined : '1px solid var(--sf-border-subtle)',
+                    }}
+                  />
+                )
+              })}
             </Flex>
           )}
         </Card>
