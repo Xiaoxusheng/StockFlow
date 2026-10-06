@@ -14,6 +14,18 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：作业效率提升层一期后端交付（B1–B4 四波次 + 集成收口）
+
+- **依据**：docs/plans/2026-10-06-efficiency-layer-phase1.md（契约先行契约见 api.md §9 同日两节）。前端波次（urlSync/路由守卫/拆包 + 契约测试）已随同日 feat(web) 提交；本轮交付后端能力与集成。
+- **B1 用户态**（internal/userpref 新包 + 迁移 000020/000021）：保存视图 CRUD（GET/POST /api/user/views、PUT/DELETE /api/user/views/{id}，严格 user_id 隔离、非本人 404、is_default 部分唯一索引+单事务清旧默认）+ 用户偏好（GET /api/user/preferences、PUT /api/user/preferences/{key}，key 白名单 7 键、值 ≤16KB、recent_visits 裁 20 条）。权限=认证即可（notifications 先例口径）。
+- **B2 搜索**（internal/search 新包 + 迁移 000022 + internal/auth/has_permission.go）：GET /api/search 只读跨域直查、零写语句；HasPermission 与 RequirePermission 语义同构（超管直通）；q<2 零 SQL、limit 缺省 5 上限 20、warehouse_id 与 scopeOf 求交（越界不 403 防探测）。pg_trgm GIN 索引 17 个（skus 无 name 列，sku 匹配 skus.code+products.name——DDL 复核修正）。
+- **B3 任务流**（迁移 000023 + reports/sales/purchase）：GET /api/tasks/next 五值 task_type（候选池=(本人进行中)∪(PENDING 未领取)，真实 SQL ORDER BY：mine > priority > 超时 > created_at；checking 无超时层、receipt/exception 仅 created_at、exception 不受 warehouse_id 过滤——口径披露见 api.md）+ GET /api/workbench/recent-operations + summary 增量三字段 + batch-claim×3（统一批量结果契约，逐条审计、不整体回滚）+ priority×3（PUT …/priority，状态守卫 409、值域 0–9、审计）。
+- **B4 批量与导入**（printing/datax/stockops）：POST /api/prints/tasks 响应演进为批量结果形态（409+disabled_ids 整体拒绝语义废止；DUPLICATE_DATA_ID/PRINT_DATA_NOT_FOUND 逐条 reason）+ POST /api/imports/{id}/retry-failed（事务边界核验通过，重导 INVALID+FAILED 行建新任务）+ stockops 行级幂等头键合成（{头键}:{原通式}，头键 ≤32 核验 106≤128，缺省零行为变化）。
+- **权限**：新增 3 码 purchase:putaway:assign / sales:pick:assign / sales:check:assign（permissions.go/seed/seed_test/m3_probe/swag 五处同源，BUTTON 冻结计数 133→136）。
+- **集成**：router.go 装配 search/userpref；迁移 000020–000023 本地 PG16 up/down 往返验证通过（一次性库）；migrations_test 增个人态表类别（user_preferences 复合主键不挂审计字段）；make swag 重生成（252 路径，8 新端点全就位）。
+- **门禁**：go build/vet/test 全量绿（含 T4–T13 测试矩阵：用户隔离/默认唯一/白名单/搜索过滤与短路/next 排序候选池/批量对账/并发恰一/优先级守卫/打印批量/retry-failed/幂等重放）。
+- **遗留**：前端 F1–F3 波次（GlobalSearch/快捷键/SfViewBar/BatchResultDrawer/工作台改版/页面接线）未开始；既有列表端点按需补过滤参数（上下文导航 §2.6）待 F3 开工核验后最小追加；CI 的 go test -race 关卡待 push 验证。
+
 ## [2026-10-06] 功能：演示数据补全轮——全页面全状态覆盖（dev_seed.sql §12–§17）+ 真库验证修复三处硬伤
 
 - **背景**：原演示集（§0–§11）只覆盖主链走通的少数状态，多数页面（库存锁定/调整、退货、异常中心、设备、文件/导入导出、通知/备份、运维任务）无数据，各单据状态机只命中 2–4 个态。本轮对照 72 张迁移表与各表 CHECK 值域逐表补齐，目标"每个页面有数据、每个业务状态有样例"。

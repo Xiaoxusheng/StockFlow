@@ -163,7 +163,7 @@ deleted_at
 3. 流水表只增不改，按时间分区或归档策略在设计中预留。
 4. 禁止无条件 `SELECT *`，禁止在循环中查询数据库（见 architecture.md §7）。
 5. **效率层一期补录（2026-10-06，迁移 000020–000023，计划 docs/plans/2026-10-06-efficiency-layer-phase1.md）**：
-   - 000022：全局搜索中缀匹配 pg_trgm GIN 索引批（`idx_*_trgm`，覆盖商品/SKU 名称与编码、条码、批次号、序列号、库位编码、仓库名称、往来单位名称、七类单据号与物流单号共 18 列，清单以迁移文件为准）；pg_trgm 扩展需安装权限，生产由超级用户执行迁移（deployment.md grants 流程），目标库拒绝扩展时回退=去索引保 ILIKE（功能等价、性能降级）。
+   - 000022：全局搜索中缀匹配 pg_trgm GIN 索引批（`idx_*_trgm`，覆盖商品/SKU 名称与编码、条码、批次号、序列号、库位编码、仓库名称、往来单位名称、七类单据号与物流单号共 17 列，清单以迁移文件为准；skus 表无 name 列——名称在 products.name，sku 搜索匹配 skus.code + products.name，不建 idx_skus_name_trgm，见 api.md §9 同日交付披露）；pg_trgm 扩展需安装权限，生产由超级用户执行迁移（deployment.md grants 流程），目标库拒绝扩展时回退=去索引保 ILIKE（功能等价、性能降级）。
    - 000023：三任务表部分索引 `idx_putaway_tasks_next` / `idx_pick_tasks_next` / `idx_check_tasks_next`（`(status, priority DESC, created_at)` WHERE 活动态）支撑 `/api/tasks/next` 真实 SQL 排序。
    - 000020/000021：user_saved_views 两条唯一索引（含 is_default 部分唯一）与 user_preferences 复合主键即全量索引，见 §2 效率层注记。
 

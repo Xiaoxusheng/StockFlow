@@ -13,13 +13,13 @@
 | 前端波次 | `usePagedList` 新增 `urlSync`（筛选/分页同步到 URL，刷新/分享/前进后退可还原）并全站列表页接入；路由级权限守卫（menu `resolveRoutePermission` 最长前缀匹配 + PcLayout 接入 + `useCrudPermissions.ts`）；Vite 生产拆包（vendor-react / vendor-charts，antd 不拆保 tree-shaking，见 vite.config.ts 注释） | ✅ 已提交 |
 | 后端契约测试 | internal/{auth,datax,devices,health,inventory,masterdata,printing,purchase,reports,returns,sales,stockops,sysops,warehouse} 各模块 handler/路由 HTTP 契约测试补全 | ✅ 已提交 |
 | 后端能力波次 | 计划 §2 各能力（任务 priority、/api/tasks 扩值域、迁移 000020 等） | 🔄 进行中（B1 已落盘：迁移 000020/000021 + internal/userpref 包；B2 搜索/B3 任务流/B4 批量与导入 待开工） |
-| 文档先行（本轮） | docs/api.md §1 域行（search/userpref/tasks-next/recent-operations/retry-failed）+ §9「2026-10-06 作业效率提升层一期」契约节（搜索/保存视图/用户偏好/tasks-next 排序口径披露/最近操作/批量结果契约与打印语义演进/priority×3+三新权限码/retry-failed/summary 增量）+ §7 幂等头键合成规则；docs/database.md §2 用户态实体组与效率层注记（000020–000023）+ §6 索引补录；docs/requirements.md §2.10 新节 + §2.2/§2.7/§2.8 交付批注 | ✅ 本轮完成（未改代码，changelog 留收尾统一写） |
+| 文档先行（本轮） | docs/api.md §1 域行（search/userpref/tasks-next/recent-operations/retry-failed）+ §9「2026-10-06 作业效率提升层一期」契约节（搜索/保存视图/用户偏好/tasks-next 排序口径披露/最近操作/批量结果契约与打印语义演进/priority×3+三新权限码/retry-failed/summary 增量）+ §7 幂等头键合成规则；docs/database.md §2 用户态实体组与效率层注记（000020–000023）+ §6 索引补录；docs/requirements.md §2.10 新节 + §2.2/§2.7/§2.8 交付批注 | ✅ 本轮完成（changelog 已随后端收口轮补写） |
 
 **门禁记录**：go build/vet/test 全绿；web typecheck 0 错、lint 0 错误 2 警告（usePagedList.ts:156、PadReceivePage.tsx:349 exhaustive-deps，既有）。
 **本地垃圾处置**：`web/.tmp-*`、`web/public/__urlsync-check.html`、`.workbuddy-ai/` 已入 .gitignore（含注入 token 的检查页，严禁入库），勿 `git add -f`。
 
-**当前进度（2026-10-06 文档先行完成）**：定稿计划已落 docs/plans/2026-10-06-efficiency-layer-phase1.md；后端侧契约文档按计划 §10 冻结完毕（api.md / database.md / requirements.md + 本文件四件，未改任何代码；changelog 留集成收口阶段统一写）。本会话实测：迁移 000020/000021 与 internal/userpref 包已由并行 B1 波次落盘（`ls db/migrations`、`ls internal/userpref`），000022（pg_trgm 搜索索引）/000023（任务 priority 列）仍为预留编号。
-**下一步（按计划 §6 波次）**：W0 门禁解锁（当场 `git status --porcelain` + 后端 `go build ./... && go vet ./... && go test ./...`、前端 `npm run typecheck && npm run lint` 全量重测，按包逐个清点在途文件并与在途会话协调收敛，禁止删除他人工作）→ B2 搜索 / B3 任务流 / B4 批量与导入 后端并行 + F1/F2 前端并行（B1 进行中）→ F3 页面接入 → Wave I 集成收口（permissions.go 三码 + seed/seed_test、`make swag`、frontend.md/scanner.md/testing.md 增量、changelog「作业效率提升层一期」条目）。
+**当前进度（2026-10-06 后端波次收口）**：B1–B4 后端波次与集成收口完成（权限三码 cb51539 先行；router.go 装配 search/userpref；make swag 252 路径 8 新端点就位；api.md §9 增「后端交付披露」节记录实现差异——skus 无 name 列搜索修正/打印 DUPLICATE_DATA_ID 等 reason/retry-failed 事务核验通过/头键 32 上限核验/moves 存量无行级键披露；migrations_test 增个人态表类别）。门禁：全量 go build/vet/test 绿；迁移 000020–000023 一次性库往返验证通过；dev 库 stockflow 已升至 23。
+**下一步（按计划 §6 波次）**：F1/F2 前端组件并行（GlobalSearch/ShortcutProvider 族/SfViewBar/SfTable 受控列/BatchResultDrawer 等，见 §5）→ F3 页面接入 → 打印消费点 PrintingCenterPage/SfQrPrintModal 适配批量结果形态（后端 409 语义已废止，前端不适配即行为错）→ frontend.md/scanner.md/testing.md 增量随 F 波次交付 → push 后验证 CI go test -race 关卡。
 
 ## 2026-10-06 演示数据补全轮（已交付，已随 8f23946 提交）
 

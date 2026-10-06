@@ -574,6 +574,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/checks/batch-claim": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "销售出库"
+                ],
+                "summary": "POST /api/checks/batch-claim",
+                "parameters": [
+                    {
+                        "description": "请求体（ids）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_sales.BatchClaimInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（批量结果契约）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/checks/{id}/claim": {
             "put": {
                 "consumes": [
@@ -650,6 +689,58 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/checks/{id}/priority": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "销售出库"
+                ],
+                "summary": "PUT /api/checks/:id/priority",
+                "parameters": [
+                    {
+                        "description": "请求体（priority 0-9）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_sales.TaskPriorityInput"
+                        }
+                    },
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（{id, priority}）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "409": {
+                        "description": "终态任务拒绝",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -2785,6 +2876,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/imports/{id}/retry-failed": {
+            "post": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "数据中心"
+                ],
+                "summary": "POST /api/imports/:id/retry-failed（仅 INVALID/FAILED 行建新任务）",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/imports/{id}/validate": {
             "post": {
                 "consumes": [
@@ -4064,6 +4189,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/picks/batch-claim": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "销售出库"
+                ],
+                "summary": "POST /api/picks/batch-claim",
+                "parameters": [
+                    {
+                        "description": "请求体（ids）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_sales.BatchClaimInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（批量结果契约）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/picks/{id}/claim": {
             "put": {
                 "consumes": [
@@ -4186,6 +4350,58 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/picks/{id}/priority": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "销售出库"
+                ],
+                "summary": "PUT /api/picks/:id/priority",
+                "parameters": [
+                    {
+                        "description": "请求体（priority 0-9）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_sales.TaskPriorityInput"
+                        }
+                    },
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（{id, priority}）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "409": {
+                        "description": "终态任务拒绝",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -5666,6 +5882,45 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/putaway/batch-claim": {
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "POST /api/putaway/batch-claim",
+                "parameters": [
+                    {
+                        "description": "请求体（ids）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_purchase.BatchClaimInput"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（批量结果契约）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/putaway/recommend": {
             "get": {
                 "produces": [
@@ -5826,6 +6081,58 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/putaway/{id}/priority": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "采购入库"
+                ],
+                "summary": "PUT /api/putaway/:id/priority（任务优先级，0-9；终态 409）",
+                "parameters": [
+                    {
+                        "description": "请求体（priority 0-9）",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/internal_purchase.TaskPriorityInput"
+                        }
+                    },
+                    {
+                        "type": "integer",
+                        "description": "路径参数 id",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（{id, priority}）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "409": {
+                        "description": "终态任务拒绝",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -7652,6 +7959,58 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/search": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "搜索"
+                ],
+                "summary": "GET /api/search",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "关键词（2-64 字符；\u003c2 返回空 groups 不做 SQL）",
+                        "name": "q",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "类型过滤（逗号分隔，sku/product/barcode/batch/serial/bin/warehouse/customer/supplier/doc/logistics）",
+                        "name": "types",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "仓库收窄过滤器（与数据权限求交，越界按无结果处理）",
+                        "name": "warehouse_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "每组条数（缺省 5，上限 20）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/serials": {
             "get": {
                 "produces": [
@@ -8708,6 +9067,52 @@ const docTemplate = `{
                 }
             }
         },
+        "/api/tasks/next": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/tasks/next",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "任务类型 putaway|picking|checking|receipt|exception",
+                        "name": "task_type",
+                        "in": "query",
+                        "required": true
+                    },
+                    {
+                        "type": "integer",
+                        "description": "排除的当前任务 ID（完成后取下一条场景）",
+                        "name": "current_task_id",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "仓库收窄过滤（与数据权限求交；exception 分支不生效）",
+                        "name": "warehouse_id",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（{has_next, task}）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
         "/api/transfers": {
             "get": {
                 "produces": [
@@ -9225,6 +9630,179 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/preferences": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "GET /api/user/preferences",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/preferences/{key}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "PUT /api/user/preferences/:key",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "key 白名单外 / 值非法或超 16KB",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/views": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "GET /api/user/views",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            },
+            "post": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "POST /api/user/views",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "409": {
+                        "description": "同名视图已存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/user/views/{id}": {
+            "put": {
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "PUT /api/user/views/:id",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "404": {
+                        "description": "视图不存在（含非本人）",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "409": {
+                        "description": "同名视图已存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            },
+            "delete": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "用户态"
+                ],
+                "summary": "DELETE /api/user/views/:id",
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "404": {
+                        "description": "视图不存在（含非本人）",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -9825,6 +10403,39 @@ const docTemplate = `{
                 "responses": {
                     "200": {
                         "description": "统一响应信封",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    },
+                    "400": {
+                        "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
+                        }
+                    }
+                }
+            }
+        },
+        "/api/workbench/recent-operations": {
+            "get": {
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "报表"
+                ],
+                "summary": "GET /api/workbench/recent-operations",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "返回条数（缺省 10，1–50）",
+                        "name": "limit",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "统一响应信封（{items:[...]}) ",
                         "schema": {
                             "$ref": "#/definitions/github_com_stockflow_server_internal_response.Envelope"
                         }
@@ -10490,11 +11101,30 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_purchase.BatchClaimInput": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "internal_purchase.CancelInput": {
             "type": "object",
             "properties": {
                 "reason": {
                     "type": "string"
+                }
+            }
+        },
+        "internal_purchase.TaskPriorityInput": {
+            "type": "object",
+            "properties": {
+                "priority": {
+                    "type": "integer"
                 }
             }
         },
@@ -10826,6 +11456,17 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_sales.BatchClaimInput": {
+            "type": "object",
+            "properties": {
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                }
+            }
+        },
         "internal_sales.CancelInput": {
             "type": "object",
             "properties": {
@@ -11032,6 +11673,14 @@ const docTemplate = `{
                 "status": {
                     "description": "SHIPPED 后续：IN_TRANSIT / SIGNED / ABNORMAL",
                     "type": "string"
+                }
+            }
+        },
+        "internal_sales.TaskPriorityInput": {
+            "type": "object",
+            "properties": {
+                "priority": {
+                    "type": "integer"
                 }
             }
         },

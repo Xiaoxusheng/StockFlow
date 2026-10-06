@@ -862,3 +862,40 @@ GET /api/workbench/summary   增量字段 timeout_count / mine_count / today_com
                              不变）。既有列表端点按需补 source_no/inbound_no 等过滤
                              query 参数（上下文导航核验后最小追加，禁新建聚合端点）。
 ```
+
+### 2026-10-06 效率层一期后端交付披露（B1–B4 实现波次落地差异汇总——同日契约先行节的验收补充，旧节零改动）
+
+```text
+搜索（B2，DDL 复核修正）：
+- skus 表无 name 列（名称在 products.name）——sku type 实际匹配 skus.code +
+  products.name；000022 实建 17 个 trgm 索引（无 idx_skus_name_trgm）。
+- logistics（shipments）匹配 shipment_no / tracking_no / outbound_no 三列（000008 DDL）。
+- batches / exceptions 无仓库列：warehouse_id 过滤对两 type 不生效（不出组）；
+  transfer 单号匹配 from_warehouse_id / to_warehouse_id 双仓 OR。
+- count 字段=该 type 匹配总数（COUNT(*) OVER() 同查询取数）；空结果组不返回；
+  limit<1 或非法值 400 invalidParam。
+
+打印批量结果演进（B4，契约先行节形状的逐条 reason 补充）：
+- 请求内重复 data_id → skipped(reason="DUPLICATE_DATA_ID")；对象缺失 →
+  failed(reason="PRINT_DATA_NOT_FOUND")；停用 SKU → failed("PRINT_SKU_DISABLED")。
+- 全部对象不可打印（0 可打印）→ 200 + 空结果集，不创建打印任务。
+
+retry-failed（B4，8.9 前置核验结论）：
+- 五域 Writer 落库均为逐行/逐单事务（期初库存逐行 database.Tx、PO/SO 整单回滚），
+  FAILED 行无部分落库——重导集含 INVALID + FAILED（回退方案未触发）。
+- 新任务为 PARSED 态、走正常校验+确认流程；响应复用 ImportUploadResult 形态
+  （含新任务 id）；源任务行状态零篡改。
+
+幂等头键（B4，§7 合成规则的长度核验）：
+- 最长行级通式（trout，单号≤21+行号+三维≤12 位）≈73 字符，+头键 32+1=106 ≤
+  varchar(128)——头键上限维持 32。
+- moves（移库）存量无行级键（§7 通式表未列 move 行，api.md 此前声称已有系口径
+  偏差）：头键缺省时保持无键（零行为变化）；带头键时按通式新增
+  move:{source_no}:{bin}:{sku}:{batch}。
+
+用户态（B1，行为口径补充）：
+- recent_visits 服务端裁剪=最新在前保留 20 条。
+- PUT /api/user/preferences/{key} 请求体为原始 JSON 值（非 {value:...} 包装信封）。
+
+工作台汇总（B3）：timeout_count / mine_count / today_completed_count 已交付，
+既有四计数形状不变。

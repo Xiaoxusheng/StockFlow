@@ -27,9 +27,11 @@ import (
 	"github.com/stockflow/server/internal/response"
 	"github.com/stockflow/server/internal/returns"
 	"github.com/stockflow/server/internal/sales"
+	"github.com/stockflow/server/internal/search"
 	"github.com/stockflow/server/internal/stockops"
 	"github.com/stockflow/server/internal/storage"
 	"github.com/stockflow/server/internal/sysops"
+	"github.com/stockflow/server/internal/userpref"
 	"github.com/stockflow/server/internal/warehouse"
 )
 
@@ -260,6 +262,13 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 		sysopsOpts = append(sysopsOpts, sysops.WithQueueStats(inspectorQueueStats{insp: rt.Inspector}))
 	}
 	sysops.RegisterRoutes(protected, db, rdb, sysopsOpts...)
+
+	// 效率提升层一期（docs/plans/2026-10-06-efficiency-layer-phase1.md §4.1）：
+	// 全局搜索（B2，组内逐 type 权限过滤，HasPermission 与 RequirePermission 同构）
+	// + 用户态（B1：保存视图 /api/user/views、用户偏好 /api/user/preferences，
+	// 仅认证无权限点，notifications 先例口径）。
+	search.RegisterRoutes(protected, db, rdb)
+	userpref.RegisterRoutes(protected, db)
 
 	// 上传放宽路由核验（启动期 fail-fast，防 datax 路由漂移致 body 上限守卫失效）。
 	verifyRelaxedRoutes(r, uploadLimits)
