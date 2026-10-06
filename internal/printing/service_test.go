@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/stockflow/server/internal/asynqx"
+	"github.com/stockflow/server/internal/batchresult"
 )
 
 func actor() Actor {
@@ -262,10 +263,10 @@ func TestCreateTask_MissingObjectPartialBatch(t *testing.T) {
 	if res.Total != 2 || res.SuccessCount != 1 || res.FailedCount != 1 || res.SkippedCount != 0 {
 		t.Fatalf("计数不符: %+v", res)
 	}
-	if res.Results[0].Status != BatchStatusSuccess {
+	if res.Results[0].Status != batchresult.StatusSuccess {
 		t.Fatalf("结果 1 应 success: %+v", res.Results[0])
 	}
-	if res.Results[1].Status != BatchStatusFailed || res.Results[1].Reason != "PRINT_DATA_NOT_FOUND" {
+	if res.Results[1].Status != batchresult.StatusFailed || res.Results[1].Reason != "PRINT_DATA_NOT_FOUND" {
 		t.Fatalf("结果 2 应 failed(PRINT_DATA_NOT_FOUND): %+v", res.Results[1])
 	}
 	// 任务仅含可打印对象。
@@ -419,10 +420,10 @@ func TestCreateTask_DisabledSKUPartialBatch(t *testing.T) {
 	if res.SuccessCount != 1 || res.FailedCount != 1 || res.SkippedCount != 0 {
 		t.Fatalf("计数不符: %+v", res)
 	}
-	if res.Results[0].Status != BatchStatusSuccess {
+	if res.Results[0].Status != batchresult.StatusSuccess {
 		t.Fatalf("可打印对象应 success: %+v", res.Results[0])
 	}
-	if res.Results[1].Status != BatchStatusFailed || res.Results[1].Reason != "PRINT_SKU_DISABLED" {
+	if res.Results[1].Status != batchresult.StatusFailed || res.Results[1].Reason != "PRINT_SKU_DISABLED" {
 		t.Fatalf("停用对象应 failed(PRINT_SKU_DISABLED): %+v", res.Results[1])
 	}
 	if len(env.queue.all()) != 1 {
@@ -463,13 +464,13 @@ func TestCreateTask_BatchResultShape_96_3_1(t *testing.T) {
 	failed := 0
 	for _, it := range res.Results {
 		switch it.Status {
-		case BatchStatusSuccess:
-		case BatchStatusFailed:
+		case batchresult.StatusSuccess:
+		case batchresult.StatusFailed:
 			failed++
 			if it.Reason != "PRINT_SKU_DISABLED" {
 				t.Fatalf("失败原因应为 PRINT_SKU_DISABLED: %+v", it)
 			}
-		case BatchStatusSkipped:
+		case batchresult.StatusSkipped:
 			if it.Reason != ReasonDuplicateDataID {
 				t.Fatalf("skipped 原因不符: %+v", it)
 			}

@@ -46,7 +46,9 @@ func TestRegisterRoutesMounting(t *testing.T) {
 		"GET /api/sales/product-rank":                false,
 		"GET /api/sales/status-composition":          false,
 		"GET /api/workbench/summary":                 false,
+		"GET /api/workbench/recent-operations":       false, // 效率层一期 §2.5（B3 交付，集成收口补录冻结清单）
 		"GET /api/tasks":                             false,
+		"GET /api/tasks/next":                        false, // 效率层一期 §2.4（B3 交付，集成收口补录冻结清单）
 	}
 	for _, route := range r.Routes() {
 		key := route.Method + " " + route.Path

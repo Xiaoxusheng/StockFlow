@@ -116,37 +116,15 @@ func paramError(field, reason string) *response.Error {
 // FieldView 模板绑定字段读视图（{key,label}，预设键序）。
 type FieldView = FieldPreset
 
-// ---- 批量结果契约（效率层一期计划 §2.7；api.md §9 冻结形态：
-// {total, success_count, failed_count, skipped_count, results:[{id,status,reason}]}）----
-
-// 批量结果逐条状态三态（skipped=幂等命中/已处目标态——plan §2.7 语义冻结）。
-const (
-	BatchStatusSuccess = "success"
-	BatchStatusFailed  = "failed"
-	BatchStatusSkipped = "skipped"
-)
+// ---- 批量结果契约（效率层一期计划 §2.7；api.md §9 冻结形状）——集成收口起
+// 直接消费 internal/batchresult 共享包（TaskBatchResult/TaskBatchItem 私有定义
+// 已收敛；JSON 契约零变化：id 为字符串、reason omitempty、skipped 可携 reason）。
+// 批量结果逐条状态取值 = batchresult.StatusSuccess/Failed/Skipped（"success"|
+// "failed"|"skipped"，同前）。
 
 // ReasonDuplicateDataID 请求内重复 data_id 的 skipped 原因（同批重复对象已在任务中
 // = 已处目标态；reason 用既有错误码形态的字符串）。
 const ReasonDuplicateDataID = "DUPLICATE_DATA_ID"
-
-// TaskBatchItem 批量结果逐条目（id=打印对象业务标识 data_id——重试语义=以失败
-// data_ids 重建任务，成功项绝不重跑）。
-type TaskBatchItem struct {
-	ID     string `json:"id"`
-	Status string `json:"status"` // success | failed | skipped
-	Reason string `json:"reason,omitempty"`
-}
-
-// TaskBatchResult 打印任务批量结果（POST /api/prints/tasks 响应演进形态；
-// 200 + 逐条结果，409+details.disabled_ids 整体拒绝语义废止）。
-type TaskBatchResult struct {
-	Total        int             `json:"total"`
-	SuccessCount int             `json:"success_count"`
-	FailedCount  int             `json:"failed_count"`
-	SkippedCount int             `json:"skipped_count"`
-	Results      []TaskBatchItem `json:"results"`
-}
 
 // TemplateView 模板视图。
 type TemplateView struct {

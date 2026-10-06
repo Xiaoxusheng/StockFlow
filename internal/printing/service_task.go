@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/stockflow/server/internal/asynqx"
+	"github.com/stockflow/server/internal/batchresult"
 	"github.com/stockflow/server/internal/docnum"
 	"github.com/stockflow/server/internal/middleware"
 	"github.com/stockflow/server/internal/response"
@@ -46,14 +47,15 @@ type renderPayload struct {
 }
 
 // CreateTask 创建打印任务（批量结果演进——效率层一期计划 §2.7：响应为批量结果形态
-// 200 + TaskBatchResult，整请求参数错误仍 400；部分对象不可打印（停用 SKU/数据缺失）
+// 200 + batchresult.Result（internal/batchresult 共享包，集成收口收敛，JSON 契约
+// 零变化），整请求参数错误仍 400；部分对象不可打印（停用 SKU/数据缺失）
 // 逐条 failed(reason=既有错误码)，其余对象正常建任务——409+details.disabled_ids
 // 整体拒绝语义废止，验收场景 4（100→96/3/1）硬前提）。
 //
 // 单据打印 = 单 ID，批量打印 = 多 ID（printing.md §3）；按筛选打印不交付：BY_FILTER
 // 属 datax 导出范围值，plan §7.2 冻结创建入参仅 data_ids，波次级全量单据打印由前端
 // 按上限分片，plan §18.4。
-func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInput) (*TaskBatchResult, error) {
+func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInput) (*batchresult.Result, error) {
 	if in.TemplateID <= 0 {
 		return nil, paramError("template_id", "必须为正整数")
 	}
@@ -126,31 +128,30 @@ func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInpu
 		return nil, err
 	}
 
-	res := &TaskBatchResult{Total: len(in.DataIDs)}
-	res.Results = make([]TaskBatchItem, 0, len(in.DataIDs))
-	rows := make([]ContentRow, 0, len(rowsByID)) // 可打印行（请求序）
+	items := make([]batchresult.Item, 0, len(in.DataIDs)) // 请求序逐条结果
+	rows := make([]ContentRow, 0, len(rowsByID))          // 可打印行（请求序）
 	for i, id := range in.DataIDs {
-		item := TaskBatchItem{ID: id}
+		item := batchresult.Item{ID: id}
 		switch {
 		case firstIdx[id] != i:
-			// 非首次出现 → skipped。
-			item.Status, item.Reason = BatchStatusSkipped, ReasonDuplicateDataID
-			res.SkippedCount++
+			// 非首次出现 → skipped（携 DUPLICATE_DATA_ID reason——api.md §9 披露形态；
+			// Builder.Skipped 语义冻结 reason 恒空，故直接构造 Item）。
+			item.Status, item.Reason = batchresult.StatusSkipped, ReasonDuplicateDataID
 		default:
 			if row, ok := rowsByID[id]; ok {
-				item.Status = BatchStatusSuccess
-				res.SuccessCount++
+				item.Status = batchresult.StatusSuccess
 				rows = append(rows, row)
 			} else {
-				item.Status, item.Reason = BatchStatusFailed, failReason[id]
-				res.FailedCount++
+				item.Status, item.Reason = batchresult.StatusFailed, failReason[id]
 			}
 		}
-		res.Results = append(res.Results, item)
+		items = append(items, item)
 	}
+	// 计数收敛入共享包（total=success+failed+skipped 逐条对账，不手工维护计数）。
+	res := batchresult.SummaryOf(items)
 	if len(rows) == 0 {
 		// 无可打印对象：不建任务不入队，逐条结果如实返回（全 failed，仍 200）。
-		return res, nil
+		return &res, nil
 	}
 
 	rule, err := docRule()
@@ -209,7 +210,7 @@ func (s *Service) CreateTask(ctx context.Context, actor Actor, in TaskCreateInpu
 		_ = s.HandleRenderTask(ctx, asynqx.Task{Type: asynqx.TaskTypePrintRender, Payload: payload, TaskID: task.PrintNo})
 	}
 
-	return res, nil
+	return &res, nil
 }
 
 // assembleBatch 逐对象装配（§2.7 批量演进）。reader 契约为整体成功或整体报错——
