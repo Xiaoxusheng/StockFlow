@@ -263,6 +263,9 @@ type PutawayTask struct {
 	TargetShelfID     int64             `gorm:"column:target_shelf_id" json:"target_shelf_id"`
 	TargetBinID       int64             `gorm:"column:target_bin_id" json:"target_bin_id"`
 	Status            string            `gorm:"column:status;size:16" json:"status"`
+	// Priority 任务优先级（效率层一期 B3，迁移 000023；0–9）——/api/tasks/next 排序层
+	// 数据来源；列表下发供前端「优先级」列与行内设置入口回显（PUT /api/putaway/{id}/priority）。
+	Priority          int16             `gorm:"column:priority" json:"priority"`
 	ClaimedBy         int64             `gorm:"column:claimed_by" json:"claimed_by"`
 	ClaimedAt         database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
 	CompletedAt       database.JSONTime `gorm:"column:completed_at" json:"completed_at"`

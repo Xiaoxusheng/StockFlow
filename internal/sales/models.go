@@ -124,6 +124,10 @@ type (
 		Qty               Qty               `gorm:"column:qty" json:"qty"`
 		PickedQty         Qty               `gorm:"column:picked_qty" json:"picked_qty"`
 		Status            string            `gorm:"column:status" json:"status"`
+		// Priority 任务优先级（效率层一期 B3，迁移 000023；0–9，默认 0）——
+		// /api/tasks/next 排序层（mine > priority > 超时 > created_at）的数据来源，
+		// 列表下发供前端「优先级」列与行内设置入口回显（PUT /api/picks/{id}/priority）。
+		Priority          int16             `gorm:"column:priority" json:"priority"`
 		AssigneeID        int64             `gorm:"column:assignee_id" json:"assignee_id"`
 		AssigneeName      string            `gorm:"column:assignee_name" json:"assignee_name"`
 		ClaimedAt         database.JSONTime `gorm:"column:claimed_at" json:"claimed_at"`
@@ -150,6 +154,9 @@ type (
 		SerialNo       string            `gorm:"column:serial_no" json:"serial_no"`
 		Qty            Qty               `gorm:"column:qty" json:"qty"`
 		Status         string            `gorm:"column:status" json:"status"`
+		// Priority 复核任务优先级（效率层一期 B3，迁移 000023；0–9）——/api/tasks/next
+		// checking 分支排序层（mine > priority > created_at）数据来源；列表下发供前端回显。
+		Priority       int16             `gorm:"column:priority" json:"priority"`
 		Result         string            `gorm:"column:result" json:"result"`
 		AssigneeID     int64             `gorm:"column:assignee_id" json:"assignee_id"`
 		AssigneeName   string            `gorm:"column:assignee_name" json:"assignee_name"`
