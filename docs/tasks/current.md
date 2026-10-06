@@ -21,6 +21,23 @@
 **当前进度（2026-10-06 后端波次收口）**：B1–B4 后端波次与集成收口完成（权限三码 cb51539 先行；router.go 装配 search/userpref；make swag 252 路径 8 新端点就位；api.md §9 增「后端交付披露」节记录实现差异——skus 无 name 列搜索修正/打印 DUPLICATE_DATA_ID 等 reason/retry-failed 事务核验通过/头键 32 上限核验/moves 存量无行级键披露；migrations_test 增个人态表类别）。门禁：全量 go build/vet/test 绿；迁移 000020–000023 一次性库往返验证通过；dev 库 stockflow 已升至 23。
 **下一步（按计划 §6 波次）**：F1/F2 前端组件并行（GlobalSearch/ShortcutProvider 族/SfViewBar/SfTable 受控列/BatchResultDrawer 等，见 §5）→ F3 页面接入 → 打印消费点 PrintingCenterPage/SfQrPrintModal 适配批量结果形态（后端 409 语义已废止，前端不适配即行为错）→ frontend.md/scanner.md/testing.md 增量随 F 波次交付 → push 后验证 CI go test -race 关卡。
 
+## 2026-10-06 作业效率提升层一期·前端 F 波次（已交付，本会话收口）
+
+**范围**：计划 §6 F1（全局层）/F2（表格与批量）/F3（页面接入）。后端 B1–B4 + 集成收口已于同日先落库（ae85b0e→b6665b6）。
+
+| 波次 | 内容 | 状态 |
+|---|---|---|
+| F1 全局层 | GlobalSearchModal（Ctrl/Cmd+K）+ searchTargets + shortcut 三件（Provider/注册表/帮助面板）+ RecentVisitsDropdown + SfPreferenceDrawer + usePreferences；**PcLayout 挂载**（ShortcutProvider 包裹 + 搜索入口升级 + 偏好菜单项 + 最近访问） | ✅ |
+| F2 组件与契约 | SfViewBar、**SfTable 受控列 API**（hiddenColumns/onHiddenColumnsChange，受控优先/非受控回退）、BatchResultDrawer、SfCompleteNextButton、SfRelationNav + config/relations.tsx、SfAutoRefreshSelect、ScanInput + useScanBuffer；hooks：useSavedViews/useNextTask/useAutoRefresh/useIdempotentMutation + utils/idempotency；API：task.next + recentOperations + summary 增量、data.retryFailed、printing.BatchResult + createTask 演进 | ✅ |
+| F3 页面接入 | 上下文导航六详情页（relations 注册表驱动）；SfViewBar 接入 **14 个列表页**；自动刷新接入拣货/复核/异常三页（含 usePagedList 新增 refetchInterval 透传）；Pad 收货/上架接「完成并处理下一条」；打印消费点（SfQrPrintModal + 打印中心重打）适配批量结果；导入任务「重新导入失败行」入口；工作台改版（该做什么 + 待我处理 Top5 + 最近操作） | ✅ |
+| 门禁 | web：typecheck EXIT=0、lint **0 错误**（3 存量警告）、build EXIT=0（30.67s）；后端零改动 | ✅ |
+
+**口径变更（必读）**：① **打印创建后不再直达预览页**——后端批量结果契约不返回新任务 ID（api.md §9 形状），改为「结果抽屉 → 关闭时提示并跳打印中心」，由任务列表进预览；② `usePagedList` 新增 additive 可选 `refetchInterval` 透传（原「禁改该文件」属 urlSync 协调期约束，urlSync 完成后解禁，缺省行为不变）；③ `BatchResultDrawer` 为全站唯一批量结果承载面（禁各页自写结果弹窗）。
+
+**遗留（如实挂账）**：批量领取 batch-claim 前端未接线（后端已交付、抽屉已就绪，缺列表页多选+按钮）；PC 出库四作业页未接「完成并处理下一条」（Pad 已接）；导出当前视图仅库存页透传真实筛选；useIdempotentMutation 未切换既有提交点（功能等价）；任务优先级行内设置入口未接；浏览器渲染/reduced-motion/暗色人工走查未执行（无自动化工具链）。
+
+**并行会话说明**：本轮工作区存在另一会话的在途产物（PackingPage/ShipmentPage 打包/发货写端点接线、PadPutawayPage 扫码接入、SfTable 受控列半成品、SfViewBar 组件主体）——已由本会话补齐其缺口（SfTable 派生值定义、SfViewBar 缺失 import、BatchResultDrawer 类型来源）并统一收口，禁止重复实现同一能力。
+
 ## 2026-10-06 演示数据补全轮（已交付，已随 8f23946 提交）
 
 **目标**：每个前端页面都有可展示数据、每个业务状态机都有样例。

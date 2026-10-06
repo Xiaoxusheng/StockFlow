@@ -14,6 +14,26 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：作业效率提升层一期前端交付（F1–F3 波次 + 页面接入收口）
+
+- **依据**：docs/plans/2026-10-06-efficiency-layer-phase1.md §2/§5/§6（F1 全局层、F2 表格与批量、F3 页面接入）+ api.md §9「2026-10-06 作业效率提升层一期」契约节（后端 B1–B4 已于同日先交付）。本节由多会话协同完成，分工与落地差异如实记录如下。
+- **F1 全局层**：`GlobalSearchModal`（Ctrl/Cmd+K 命令面板，类型分组 + SfStatusTag + 键盘导航，菜名搜索并入「页面」分组）+ `config/searchTargets.ts` + `shortcut/` 三件（ShortcutProvider 全站唯一 keydown 监听/注册表分发 + shortcuts.ts 集中注册表 + ShortcutHelpDrawer（? 呼出））+ `RecentVisitsDropdown` + `SfPreferenceDrawer` + `hooks/usePreferences.ts`；PcLayout 挂载完成（ShortcutProvider 包裹内容树、搜索入口由菜名 AutoComplete 升级为命令面板入口、用户菜单加「偏好设置」、通知旁加「最近访问」）。
+- **F2 组件与契约**：`SfViewBar`（保存视图下拉：应用/保存/重命名/删除/设为默认/恢复默认；双形态 `mode:'url'|'state'`，一律经 usePagedList 公开 API，禁止绕过 hook 直改 URL/state）+ **SfTable 受控列 API**（`hiddenColumns` / `onHiddenColumnsChange`，受控优先/非受控回退——不传新 props 的既有消费页零行为变化）+ `BatchResultDrawer`（批量结果统一抽屉：计数条 + 逐条三态 + 仅重试失败；全站唯一，禁各页自写结果弹窗）+ `SfCompleteNextButton` + `SfRelationNav` + `config/relations.tsx` + `SfAutoRefreshSelect` + `controllers/scanner/ScanInput.tsx` + `useScanBuffer`；hooks/API 增量：`useSavedViews`、`useNextTask`、`useAutoRefresh`、`useIdempotentMutation`、`utils/idempotency.ts`、`api/search.ts`、`api/savedViews.ts`、`api/userpref.ts`、`api/task.ts`（`next` + `recentOperations` + summary 增量三字段）、`api/data.ts`（`retryFailed`）、`api/printing.ts`（`BatchResult`/`BatchResultItem`/`BatchResultItemStatus` 类型 + `tasks.create` 返回类型演进）。
+- **F3 页面接入**：
+  - **上下文导航（§2.6，验收场景 7）**：新增 `config/relations.tsx` 注册表（sku/inbound/purchase_order/outbound/sales_order/count 六实体）+ `SfRelationNav`（权限 fail-closed、缺必需参数的关联项不渲染、跳转仅带**目标列表真实支持**的白名单过滤参数）；接入 SKU 详情、入库单详情、采购单详情、出库单详情、销售单详情、盘点单详情六页「关联业务」分区。
+  - **保存视图（§2.2，验收场景 2）**：14 个列表页接入 `SfViewBar`（实时库存/库存流水/批次/序列号/采购订单/收货/入库单/销售订单/销售出库/调拨/盘点任务/异常中心/拣货/复核），全部为 urlSync 页（应用视图 = 经 usePagedList 写 URL 展开筛选+分页），并经受控列 props 还原列显示。
+  - **任务页自动刷新（§2.11）**：拣货/复核/异常中心三页接入 `SfAutoRefreshSelect`；为此给 `usePagedList` 新增 additive 可选 `refetchInterval` 透传（缺省不轮询，既有页面零行为变化）——原实现缺口：`usePagedList` 未暴露 refetchInterval 通道，`useAutoRefresh` 的页签隐藏暂停/连续失败退避停轮无法生效。
+  - **完成并处理下一条（§2.4，验收场景 3）**：Pad 收货页（`task_type='receipt'`，无领取语义，命中当前页列表即站内切单）与 Pad 上架页（`task_type='putaway'`，claim 冲突视为可进入）接入 `SfCompleteNextButton`。
+  - **批量打印结果（§2.7，验收场景 4）**：`SfQrPrintModal` 与打印中心历史重打改为消费批量结果形态（成功/失败/跳过逐条呈现 + 仅重试失败），409 整体拒绝分支删除。
+  - **Excel 失败行重试（§2.8，验收场景 5）**：导入任务记录新增「重新导入失败行（N）」入口（仅 failed_rows>0 且持 `datax:import:create`），点击后创建新导入任务并置向导至「数据校验」步，复用六步流程。
+  - **工作台改版（§2.11，验收场景 8）**：四计数之外新增「我现在该做什么」（超时/待我处理/今日完成三项增量计数 + 待我处理 Top5 任务列表）与「最近操作」（本人 operation_logs 尾 10 条）两分区。
+- **口径变更披露（必须知悉）**：
+  1. **打印任务创建后不再直达预览页**：后端批量结果契约仅逐条返回 data_id 结果、**不返回新任务 ID**（api.md §9 冻结形状），故 `SfQrPrintModal` 创建成功后改为「结果抽屉 → 关闭时提示成功并跳打印中心」，由任务列表进入预览；打印中心历史重打同理（结果抽屉 + 列表刷新）。
+  2. **`usePagedList` 新增 `refetchInterval` 可选透传**（additive；计划 F2 原约束「禁改 usePagedList.ts」属 urlSync 协调期约束，urlSync 已完成后为使自动刷新能力真实可用而解禁，改动仅此一项、缺省行为不变）。
+  3. 自动刷新停轮粒度：`usePagedList` 场景下失败计数由内部 query 承担，连续失败 ≥2 次停轮语义与 `useAutoRefresh` 契约一致。
+- **门禁（本会话实测）**：`cd web && npm run typecheck`（tsc -b）EXIT=0；`npm run lint` **0 错误**（3 条存量 exhaustive-deps 警告：usePagedList.ts:163、ShipmentPage.tsx:166、PadReceivePage.tsx:351）；`npm run build`（tsc -b && vite build）EXIT=0（built in 30.67s）。后端零改动。
+- **遗留（如实挂账，未伪造）**：① **批量领取批次端点前端未接线**（`POST /api/{putaway,picks,checks}/batch-claim` 后端已交付，`BatchResultDrawer` 已就绪，但列表页多选 + 批量领取按钮未接）；② **PC 出库四作业页（拣货/复核/打包/发货）未接 `SfCompleteNextButton`**（Pad 收货/上架已接）；③ 列表页「导出当前视图」仅库存页透传真实筛选，其余页维持既有 SfExportButton 形态；④ `useIdempotentMutation` 已就绪但未切换既有提交点（收货/打包/发货仍用手工幂等键实现，功能等价）；⑤ 任务优先级行内设置入口未接线（后端 `PUT …/priority` 已交付）；⑥ 浏览器渲染实测与 reduced-motion/暗色人工走查未执行（无浏览器自动化工具链，与既往轮口径一致）；⑦ `workspace` 内并行会话在途文件（PackingPage/ShipmentPage 的打包/发货写端点接线、PadPutawayPage 扫码接入）与本轮一并存在于同一提交。
+
 ## [2026-10-06] 功能：作业效率提升层一期后端交付（B1–B4 四波次 + 集成收口）
 
 - **依据**：docs/plans/2026-10-06-efficiency-layer-phase1.md（契约先行契约见 api.md §9 同日两节）。前端波次（urlSync/路由守卫/拆包 + 契约测试）已随同日 feat(web) 提交；本轮交付后端能力与集成。

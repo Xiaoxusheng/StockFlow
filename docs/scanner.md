@@ -130,6 +130,19 @@ interface ScanResult {
 
 **约束**：业务页面禁止自己监听键盘，统一走 `ScannerManager → Scanner Event → 当前业务页面`。
 
+**一期临时口径（作业效率提升层一期，2026-10-06）**：一期交付的 HID 扫码原语是
+`components/scanner/ScanInput.tsx` + `hooks/useScanBuffer.ts`——**受控输入框内承接**：USB/蓝牙
+HID 扫码枪（键盘模拟 + Enter）与手工键入都在组件自身受控 `<Input>` 焦点内完成缓冲解析
+（`data-sf-scan-input` 标记并入 frontend.md §32 输入态抑制面：该焦点下页面级快捷键全部禁用）。
+本口径与上述「业务页面禁止自己监听键盘」**不冲突**：被禁止的是各页面自行监听全局键盘、各自实现
+扫码逻辑；`ScanInput` 是统一组件族的**唯一实现**，页面只消费组件、不碰键盘事件。完整
+`ScannerManager → Scanner EventBus → 业务页面` 事件总线架构（含 serial/zebra/honeywell/urovo/camera
+Source 与 `ScanField`/`ScanResult`/`ScanStatus`/`ScanHistory`/`ScanPreview` 全组件族、全局
+`ScannerProvider` 单例）仍归 **F15/F16 立项**，一期不引入。一期示范接入 `PadPutawayPage`；既有
+`ScanDirectCard`（components/device/ScanDirectCard.tsx，设备中心解析演示）保持不变。三模式
+（normal/fast/continuous）与智能下一步档位口径见 §6.4、frontend.md §22：`autoAdvance: 'safe'`
+仅允许查询/定位类低风险动作随连扫自动推进，确认收货/扣减类**必须显式按键**（禁止自动提交）。
+
 ### 3.2 扫码组件族
 
 前端基于 **React + Ant Design**（技术栈见 architecture.md §11.3）封装统一组件，通过全局 `ScannerProvider`（React Context）挂载 ScannerService；业务页面直接使用组件，禁止每个页面重新实现扫码逻辑：
