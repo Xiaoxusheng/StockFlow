@@ -133,6 +133,10 @@ API 按业务领域划分：
                         契约见 §9 同日节）
 /api/workbench/recent-operations 最近操作（本人 operation_logs 尾 N 条，reports 实现、
                         权限同上；2026-10-06 效率层一期）
+/api/workbench/priorities 工作台优先处理四组 count+TopN（超时收货/库位异常/临期库存/
+                        待复核订单；reports 实现、inventory:inventory:list 同上；
+                        只读统计零写语句、limit 缺省 5 合法域 1–20；2026-10-06 效率层
+                        一期工作台改版，口径见 §9 同日节）
 /api/search         全局业务搜索（Ctrl/Cmd+K 命令面板数据源；internal/search 实现、
                         仅认证+逐 type 权限过滤；2026-10-06 效率层一期）
 /api/user/views     保存视图 CRUD（internal/userpref 实现、认证即可无权限点；同上）
@@ -936,4 +940,37 @@ navigation.kind（单号前缀映射保留为回退）。
   （web/src/api/task.ts 等），挂账后续批次。
 - reports routes_test 冻结清单补录 GET /api/workbench/recent-operations 与
   GET /api/tasks/next（B3 交付端点，防回退）。
+```
+
+### 2026-10-06 工作台优先处理端点（GET /api/workbench/priorities——效率层一期工作台改版波次，§1 平台清单同步加行）
+
+```text
+端点：GET /api/workbench/priorities?limit=5（internal/reports/workbench_priority.go，
+      路由挂载 internal/reports/routes.go 效率层段——集成轮接线；权限
+      inventory:inventory:list，与 /workbench/summary、/workbench/recent-operations
+      同组同码）。只读统计零写语句（全参数化 SELECT）；limit 缺省 5、合法域 1–20、
+      越界 400（parsePriorityLimitQuery）。
+响应：data = {overdue_receipts, bin_exceptions, near_expiry_stock, pending_checks}
+      四组（键名冻结，workbenchPrioritiesDTO），每组 {count, items}（明细尾 N 条，
+      一律 created_at/到期日 ASC 真实 SQL ORDER BY，严禁前端推算）。前端契约
+      web/src/api/task.ts WorkbenchPriorities（taskApi.priorities）。
+四组口径（冻结）：
+① overdue_receipts 超时收货：inbound_orders 状态 RECEIVING 且 created_at ≤ 截止线
+  （截止线 = now − task.timeout.receive_hours 小时；task.timeout.* 族同读法，缺省
+  4 小时——sysops configSeeds 已补该键运行时可调，ensureSystemConfigKeys 幂等
+  补齐、不覆盖管理端已改值；行缺失仍走同值缺省兜底）；
+② bin_exceptions 库位异常：exceptions 已定位到库位（bin_id>0）且未闭环（状态 NOT IN
+  RESOLVED/CLOSED）——异常九类值域无「库位异常」类型，此为真实查询口径；exceptions
+  无仓库列（000010 DDL），本组不受仓库范围过滤（scopeOf 不生效，api.md 披露先例）；
+③ near_expiry_stock 临期库存：现存量为正、批次效期在（今天, 今天+窗口] 内——窗口 =
+  inventory.alert.expiry_days 阈值最大档（缺省 30 天，DashboardSummary 同源）；严格
+  排除已过期批次（expired 为预警页独立 level），与 /inventory/alerts?level=near_expiry
+  列表 total 同构；
+④ pending_checks 待复核订单：存在 PENDING 复核任务的出库单按 outbound_no 去重
+  计数（复核任务 SKU 一件一行，按单号去重即「待复核订单」真实集合），与点击直达的
+  /checking?status=PENDING 任务列表同源。
+前端消费（web/src/views/workbench/WorkbenchPage.tsx）：组头直达对应列表页真实筛选——
+  /inbound?status=RECEIVING、/exceptions（异常中心无 bin 筛选参数，不带 query）、
+  /inventory/alerts?level=near_expiry、/checking?status=PENDING，均为 urlSync 页可还原。
+routes_test 冻结清单补录 GET /api/workbench/priorities（集成收口，防回退）。
 ```

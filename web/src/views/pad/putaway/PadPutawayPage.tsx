@@ -196,9 +196,9 @@ function GuardedAction({
  *   COMPLETED 落账，purchase.go:71-75 已交付），默认筛「待领取」；
  * - 中栏：选中任务 PadInfoCard（SKU 编码经基础资料 options 映射 / 应上架数量 / 目标库位
  *   编码经 binApi options 映射，映射失败降级为 ID，不造假数据）；
- * - 右栏：三步序列操作区（步骤指示 Steps + ScanInput 快速模式扫码（HID 承接 + 手输兜底，
- *   frontend.md §22 一期示范；autoAdvance='safe'——三步比对为定位类低风险动作，连扫自动
- *   步进）+ 本地比对校验），
+ * - 右栏：三步序列操作区（步骤指示 Steps + ScanInput 三模式可切换扫码（HID 承接 + 手输兜底，
+ *   frontend.md §22 一期示范 + 扫码作业优化三模式切换；autoAdvance='safe'——三步比对为定位类
+ *   低风险动作，快速模式连扫自动步进）+ 本地比对校验），
  *   [领取任务] 接线 POST /api/putaway/{id}/claim，[完成上架] 接线
  *   POST /api/putaway/{id}/execute {bin_id?, remark}（IN_PROGRESS→COMPLETED 触发落账）；
  * - 竖屏：顶部当前上架任务卡 → 商品信息 / 步骤指示 → 任务列表滚动区 → 底部 PadActionBar。
@@ -524,7 +524,6 @@ export default function PadPutawayPage() {
             <>
               <Steps size="small" current={step} items={STEP_TITLES} />
               <ScanInput
-                mode="fast"
                 autoAdvance="safe"
                 hint={
                   step === 0
@@ -725,7 +724,6 @@ export default function PadPutawayPage() {
       <PadActionBar actions={actionBarActions} />
       <Modal title="扫码" open={scanOpen} footer={null} centered onCancel={() => setScanOpen(false)}>
         <ScanInput
-          mode="fast"
           autoAdvance="safe"
           autoFocus={false}
           hint={

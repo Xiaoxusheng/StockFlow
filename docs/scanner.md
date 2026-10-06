@@ -130,7 +130,7 @@ interface ScanResult {
 
 **约束**：业务页面禁止自己监听键盘，统一走 `ScannerManager → Scanner Event → 当前业务页面`。
 
-**一期临时口径（作业效率提升层一期，2026-10-06）**：一期交付的 HID 扫码原语是
+**一期临时口径（作业效率提升层一期，2026-10-06；扫码作业优化同日收口）**：一期交付的 HID 扫码原语是
 `components/scanner/ScanInput.tsx` + `hooks/useScanBuffer.ts`——**受控输入框内承接**：USB/蓝牙
 HID 扫码枪（键盘模拟 + Enter）与手工键入都在组件自身受控 `<Input>` 焦点内完成缓冲解析
 （`data-sf-scan-input` 标记并入 frontend.md §32 输入态抑制面：该焦点下页面级快捷键全部禁用）。
@@ -138,10 +138,21 @@ HID 扫码枪（键盘模拟 + Enter）与手工键入都在组件自身受控 `
 扫码逻辑；`ScanInput` 是统一组件族的**唯一实现**，页面只消费组件、不碰键盘事件。完整
 `ScannerManager → Scanner EventBus → 业务页面` 事件总线架构（含 serial/zebra/honeywell/urovo/camera
 Source 与 `ScanField`/`ScanResult`/`ScanStatus`/`ScanHistory`/`ScanPreview` 全组件族、全局
-`ScannerProvider` 单例）仍归 **F15/F16 立项**，一期不引入。一期示范接入 `PadPutawayPage`；既有
+`ScannerProvider` 单例）仍归 **F15/F16 立项**，一期不引入。既有
 `ScanDirectCard`（components/device/ScanDirectCard.tsx，设备中心解析演示）保持不变。三模式
 （normal/fast/continuous）与智能下一步档位口径见 §6.4、frontend.md §22：`autoAdvance: 'safe'`
 仅允许查询/定位类低风险动作随连扫自动推进，确认收货/扣减类**必须显式按键**（禁止自动提交）。
+
+**扫码作业优化（2026-10-06）**：三模式升级为**用户可切换偏好**——`stores/scan.ts` `useScanStore`
+（localStorage `sf.scan.mode` 持久化）为唯一模式源，`ScanInput` 未传 `mode` prop 时内置
+Segmented 切换器读写该 store（跨页面一致），显式传 `mode` 则页面受控并隐藏切换器；
+新增 `hooks/useSmartScanNext.ts` 智能下一步——统一调 `POST /api/scanner/resolve` 识别后按
+作业上下文（receive/quality/putaway/count/stockmove/transfer/inventory/global）映射为
+locate-task / locate-item / locate-bin / navigate 指令，页面执行「继续」步（单号前缀→作业页
+冻结路由表见该文件 `DOC_KIND_ROUTES`）。Pad 侧扫→判→继续收口：`PadActionBar` 扫码弹窗统一
+托管 `ScanInput`（未传 `onScanSubmit` 时走 global 智能路由），收货/质检/库存页弹窗扫码后
+保持打开可连扫；原 `PadScanStub` 占位原语全员下线删除（pad.css `.sf-pad-scan-stub` 样式随之移除）。
+盘点（盘盈亏）、移库等高风险/库存变动动作仍一律显式按键提交，扫码仅承担定位。
 
 ### 3.2 扫码组件族
 
@@ -450,6 +461,13 @@ PC USB 扫码枪不强行依赖震动。
 | 连续模式 | 连续扫码 → 自动累计 → 自动完成 | 数量累计类作业 |
 
 **根据业务危险程度决定是否允许自动确认**：库存变更、高风险动作不能无条件自动执行。
+
+**前端落地（扫码作业优化，2026-10-06）**：三模式为用户可切换偏好（`useScanStore` 持久化，
+`ScanInput` 内置切换器），模式只影响输入节奏与推进幅度（`useScanBuffer` 判定 viaGun /
+fastRhythm / repeatCount），**不改变风险分级**——自动推进仅在页面声明 `autoAdvance: 'safe'`
+（纯查询/定位）时发生；确认收货 / 上架执行 / 质检判定 / 登记实盘（盘盈亏）/ 完成移库等
+一切业务提交永远显式按键。连续模式的「自动完成」指同码累计计数与定位类动作自动推进，
+不含业务提交。
 
 ### 6.5 风险分级确认规则
 

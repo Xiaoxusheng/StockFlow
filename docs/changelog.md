@@ -14,6 +14,26 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：工作台『我现在该做什么』改版收口——优先处理端点挂路由 + 超时阈值运行时可调 + 文档补录
+
+- **背景**：工作台从 KPI 卡片改为『我现在该做什么』四块（我的工作区四计数 / 优先处理 / 最近操作 / 快捷入口，`WorkbenchPage.tsx` 改版 + `workbench_priority.go` 统计端点已由实现波次交付），本波次为集成收口：后端路由接线、运行时配置、docs 补录（api.md / frontend.md / changelog 归集成波次，计划 §6 Wave I 口径）。
+- **路由接线**：`internal/reports/routes.go` 效率层段追加 `rg.GET("/workbench/priorities", RequirePerm(auth.PermInventoryList), h.workbenchPriorities)`——与 /workbench/summary、/workbench/recent-operations 同组同码，零新权限码；`internal/reports/routes_test.go` 冻结端点清单补录该端点（漏注册即测试红）。四组口径（超时收货/库位异常/临期库存/待复核订单）见 api.md §9 同日节。
+- **运行时可调**：`internal/sysops/configs.go` configSeeds 补行 `task.timeout.receive_hours`（缺省 4，与 pick/putaway 同族同格式；ensureSystemConfigKeys 幂等补齐不覆盖管理端已改值，行缺失时后端仍走同值缺省兜底）；`workbench_priority.go` 头注同步（原「seed 暂未注册」表述已过时）。超时站内通知扫描（task_timeout_scan）仍仅覆盖拣货/上架，receive_hours 当前唯一读者为工作台优先处理组。
+- **入口核实（零改动）**：工作台路由与菜单已在库（router/index.tsx:303 `/workbench`、config/menu.tsx:38 『我的工作台』）；扫码三模式切换器内置于 ScanInput（未传 mode prop 时渲染 Segmented 并读写 useScanStore，localStorage `sf.scan.mode`），无独立接线点。
+- **文档**：api.md §1 平台清单加行 + §9 新增「工作台优先处理端点」节（limit 缺省 5 合法域 1–20、四组冻结键名 overdue_receipts/bin_exceptions/near_expiry_stock/pending_checks、组头直达列表页真实筛选）；frontend.md §15.1 四块结构增量登记（「优先处理」由计划复用 /api/tasks/next 升级为专用端点的差异披露、快捷入口七项落点、无直达链接的两计数口径）。
+- **遗留挂账**：①「超时」「今日已完成」两计数无直达链接（后端列表端点无对应筛选参数，不做伪装筛选）；②库位异常组不受仓库范围过滤（exceptions 无仓库列，000010 DDL，api.md 已披露）。
+
+## [2026-10-06] 功能：扫码作业优化——三模式可切换偏好 + 智能下一步 + Pad 扫→判→继续收口
+
+- **背景**：在效率层一期 `ScanInput`/`useScanBuffer` 扫码原语（frontend.md §22 一期示范接入 PadPutawayPage）之上做作业效率收口，严禁重做扫码系统：三模式从「页面写死 prop」升级为「用户可切换偏好」，新增按任务上下文的智能下一步，把 Pad 作业页「扫描→关弹窗→点确定→回列表→找下一条→再扫」压缩为「扫→判→继续」。高风险动作（库存调整/报损/盘盈亏等）保持人工确认，绝不自动执行（scanner.md §6.4/§6.5、requirements.md §2.10）。
+- **三模式可切换**：新增 `web/src/stores/scan.ts` `useScanStore`（localStorage `sf.scan.mode` 持久化，theme.ts 同款模式）为唯一模式源；`ScanInput` 未传 `mode` prop 时内置 antd Segmented 切换器（常规/快速/连续）读写 store（同一作业员跨页面一致），显式传 `mode` 则页面受控并隐藏切换器。模式只影响输入节奏与推进幅度（viaGun/fastRhythm/repeatCount 判定不变），不改变风险分级——自动推进仅在页面声明 `autoAdvance:'safe'`（纯查询/定位）时发生。
+- **智能下一步 `hooks/useSmartScanNext.ts`**：统一调 `POST /api/scanner/resolve`（前端不做业务解析，scanner.md §5.3），按作业上下文（receive/quality/putaway/count/stockmove/transfer/inventory/global）把识别结果映射为 locate-task / locate-item / locate-bin / navigate 指令交页面执行「继续」步；单号前缀→作业页冻结路由表 `DOC_KIND_ROUTES` 与 internal/devices/ports.go docPrefixOwners 15 值一一对应（收货任务→收货确认 /pad/receive、质检→/pad/quality、上架→/pad/putaway、拣货→PC /picking、复核/打包/发货→/checking /packing /shipment、盘点→/pad/count、调拨→/pad/transfer、异常→/pad/exception、RT 退货无统一作业页不入表）。resolve 失败（网络/无 scanner:resolve:list 权限）不伪造结果，返回 resolve-failed 携带真实错误信息。
+- **页面接入（扫→判→继续）**：PadActionBar 扫码弹窗统一托管 ScanInput（页面传 `onScanSubmit` 走页面上下文、未传走 global 智能路由，导航命中即收窗）；收货页（单据→定位任务卡选中进入收货确认、SKU→定位明细行提示待收数量）、质检页（QC 单→定位质检单、SKU→定位明细行）、库存页（SKU→按 sku_id 过滤、库位→按 bin_id 过滤库存列表＝定位库存，新增 binIdFilter 真实端点过滤；resolve 失败降级既有本地映射反查）、上架页（去硬编码 fast 模式转偏好切换）、移库页（三步扫码解析录入，不关窗连扫）、盘点页（ScanInput 仅定位明细行，登记实盘保持显式提交）。
+- **PadScanStub 下线**：占位原语全部消费者切换 ScanInput 后删除 `layouts/pad/PadScanStub.tsx` 及 index.ts 出口、pad.css `.sf-pad-scan-stub` 样式与 `--sf-pad-scan-zone-height` 孤儿 Token；既有 ScanDirectCard（设备中心解析演示）不动。
+- **文档**：scanner.md §3.1 一期口径增补「扫码作业优化」段 + §6.4 增前端落地口径（模式≠风险分级）；frontend.md §22 重写三模式/智能下一步/扫→判→继续三条 + §23 组件清单行同步。
+- **门禁（本会话实测）**：`cd web && npm run build`（tsc -b + vite build）✓ built in 33.17s。
+- **遗留挂账**：① PC 作业页（Picking/Checking 等）扫码输入承接与拣货上下文智能下一步归 F15/F16 或后续接线轮；② resolve 需 `scanner:resolve:list` 权限，未授权账号在库存页降级本地映射反查、其余页面如实提示识别失败；③ 浏览器运行时人工走查（真枪 HID 连扫节奏/模式切换持久化 Light+Dark）待环境。
+
 ## [2026-10-06] 修复：导出当前视图全链路收口——行源白名单补齐 + purchase 行源仓库数据权限修复 + 三页补接导出按钮
 
 - **背景**：效率层一期三域页面接入（库存/采购入库质检/销售出库退货）交付后的集成收口轮，处理各域 followups：导出行源筛选白名单与列表筛选逐键对齐（"导出=当前视图"承诺）、遗漏页面接线、全局一致性核对。只做接线与最小修复，不扩冻结导出模块集（registry.go 十六值 + 000011 CHECK 同源，扩集须先改 excel.md §2.1 立项）。

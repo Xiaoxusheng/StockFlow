@@ -42,9 +42,10 @@ import {
   PadActionBar,
   PadInfoCard,
   PadPageShell,
-  PadScanStub,
   usePadOrientation,
 } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
+import { useSmartScanNext } from '@/hooks/useSmartScanNext'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useNextTask } from '@/hooks/useNextTask'
 import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
@@ -531,10 +532,61 @@ export default function PadReceivePage() {
     list.resetToFirstPage()
   }
 
-  const handleScanSubmit = (code: string) => {
-    // 扫码链路属 Scan 端 / F16（frontend.md §19.2）：本轮仅本地接收手输编码
-    messageApi.info(`已接收手输编码：${code}（扫码直达收货属 Scan 端通用扫码中心）`)
-    setScanOpen(false)
+  /**
+   * 智能下一步（扫码作业优化 2026-10-06）：扫→判→继续。统一走 POST /api/scanner/resolve
+   * 识别（前端不做业务解析，scanner.md §5.3），按上下文落点：
+   * - 收货单据（IN/PO/RC）→ 在任务列表定位入库单并选中，进入收货确认（收货任务→收货确认）；
+   * - SKU → 定位当前入库单明细行（数量/批次/效期仍人工录入，§6.5 中风险：自动匹配+数量确认）；
+   * - 其他对象 → 库位信息提示或跳转对应作业页。
+   * 弹窗扫码后保持打开可连扫；[确认收货] 永远显式按键，绝不自动提交（requirements.md §2.10）。
+   */
+  const { resolveNext } = useSmartScanNext({ context: 'receive', page: '/pad/receive' })
+
+  const handleScanSubmit = async (code: string) => {
+    const { directive } = await resolveNext(code)
+    if (directive.kind === 'locate-task') {
+      const hit = list.items.find(
+        (order) => order.inbound_no === directive.code || order.source_no === directive.code,
+      )
+      if (hit) {
+        handleSelect(hit)
+        messageApi.success(
+          `${directive.message}：已选中 ${hit.inbound_no}，请录入本次收货数量后确认收货`,
+        )
+      } else {
+        messageApi.warning(
+          `${directive.message}：未在当前任务列表（状态筛选/分页范围）中找到，请翻页或调整筛选`,
+        )
+      }
+      return
+    }
+    if (directive.kind === 'locate-item') {
+      if (!selected || !detailQuery.data) {
+        messageApi.info(`${directive.message}：请先选择入库单任务卡，再定位明细行`)
+        return
+      }
+      const target = directive.code.toUpperCase()
+      const hit = detailItems.find((item) => skuLabel(item.sku_id).toUpperCase() === target)
+      if (!hit) {
+        messageApi.warning(`${directive.message}：当前入库单明细中无该 SKU 行`)
+        return
+      }
+      messageApi.success(
+        `${directive.message}：已定位 行${hit.line_no}（待收 ${formatNumber(lineRemaining(hit))}），请录入本次收货数量后确认`,
+      )
+      return
+    }
+    if (directive.kind === 'locate-bin') {
+      messageApi.info(`${directive.message}；收货目标库位可在明细行「目标库位」下拉中选择`)
+      return
+    }
+    if (directive.kind === 'navigate') {
+      messageApi.success(directive.message)
+      setScanOpen(false)
+      navigate(directive.path)
+      return
+    }
+    messageApi.warning(directive.message)
   }
 
   const totalOrdered = detailItems.reduce((sum, item) => sum + item.qty, 0)
@@ -769,13 +821,13 @@ export default function PadReceivePage() {
         )}
       </section>
 
-      <section className="sf-pad-card" aria-label="扫码占位">
+      <section className="sf-pad-card" aria-label="扫码">
         <h3 className="sf-pad-card-title">扫码</h3>
-        <PadScanStub
-          placeholder="手工输入采购单 / 入库单 / SKU 条码兜底"
-          onSubmit={(code) =>
-            messageApi.info(`已接收手输编码：${code}（扫码直达收货属 Scan 端通用扫码中心）`)
-          }
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入采购单 / 入库单 / SKU 条码（HID 扫码枪或手工输入）"
+          hint="识别收货单据 → 定位任务卡进入收货确认；识别 SKU → 定位明细行"
+          onScan={(code) => void handleScanSubmit(code)}
         />
       </section>
 
@@ -918,7 +970,12 @@ export default function PadReceivePage() {
         ]}
       />
       <Modal title="扫码" open={scanOpen} footer={null} centered onCancel={() => setScanOpen(false)}>
-        <PadScanStub onSubmit={handleScanSubmit} placeholder="手工输入采购单 / 入库单 / SKU 条码兜底" />
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入采购单 / 入库单 / SKU 条码（HID 扫码枪或手工输入）"
+          hint="识别收货单据 → 定位任务卡进入收货确认；识别 SKU → 定位明细行；扫码后可继续连扫"
+          onScan={(code) => void handleScanSubmit(code)}
+        />
       </Modal>
     </>
   )

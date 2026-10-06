@@ -20,7 +20,6 @@
   --sf-pad-safe-bottom: env(safe-area-inset-bottom, 0px);
   --sf-pad-header-height: 56px;
   --sf-pad-dot-size: 10px;
-  --sf-pad-scan-zone-height: 96px;
   --sf-pad-card-min-height: 64px;    /* 卡片行高下限 */
 
   display: flex;
@@ -413,44 +412,6 @@
   min-width: 0;
   height: var(--sf-pad-action-height);
   font-size: var(--sf-pad-font-body);
-}
-
-/* ---------- 扫码占位（§19.2/§22 边界：真实扫码属 Scan 端 / F16） ---------- */
-
-.sf-pad-scan-stub {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sf-space-3);
-}
-
-.sf-pad-scan-stub__zone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--sf-space-2);
-  min-height: var(--sf-pad-scan-zone-height);
-  border: 1px dashed var(--sf-border);
-  border-radius: var(--sf-radius-lg);
-  background: var(--sf-bg);
-  color: var(--sf-text-muted);
-  font-size: var(--sf-pad-font-body);
-}
-
-.sf-pad-scan-stub__icon {
-  font-size: var(--sf-pad-font-metric);
-}
-
-.sf-pad-scan-stub__note {
-  margin: 0;
-  color: var(--sf-text-secondary);
-  font-size: var(--sf-pad-font-label);
-  line-height: 1.5;
-}
-
-.sf-pad-scan-stub__input {
-  display: flex;
-  gap: var(--sf-space-2);
 }
 
 .sf-pad-muted-note {

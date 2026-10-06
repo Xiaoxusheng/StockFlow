@@ -505,11 +505,13 @@ Pad / Scan： 我的仓库任务、我的进行中、我的完成记录、我的
 **PC 工作台『我现在该做什么』改版（作业效率提升层一期，2026-10-06）**：进页面即回答"该干什么"——
 
 ```text
-待我处理（/api/tasks?status=in_progress）  超时任务  异常  今日已完成    ← 四计数（后端 summary 增量字段，additive）
-优先处理 TopN（复用 /api/tasks/next 服务端真实排序，严禁前端推算）
+待我处理（/api/tasks?status=in_progress）  超时  异常（/exceptions）  今日已完成    ← 四计数（后端 summary 增量字段，additive）
+优先处理（GET /api/workbench/priorities 四组 count+TopN：超时收货/库位异常/临期库存/待复核订单——真实 SQL 排序，组头直达列表页真实筛选）
 最近操作（本人 operation_logs 尾 N 条，SfTimeline/SfTable 渲染）
-快捷入口（MENU_TREE 驱动 + canAccess 过滤）
+快捷入口（扫码作业/收货/上架/拣货/复核/盘点/库存查询七项，MENU_TREE 权限码同源 + canAccess 过滤）
 ```
+
+**落地增量（效率层一期工作台改版波次，2026-10-06）**：「优先处理」由计划中的 `/api/tasks/next` 复用升级为专用只读端点 `GET /api/workbench/priorities`（四组口径、组头直达与 limit 约束见 api.md §9 同日节）；四计数中「超时」「今日已完成」无直达链接（任务列表无超时/完成日期筛选参数，不做伪装筛选）；快捷入口落点：扫码作业→`/pad/home`、收货→`/purchases/receipts`、上架→`/tasks?task_type=putaway`（无 PC 独立页面，真实筛选直达）、拣货→`/picking`、复核→`/checking`、盘点→`/counts`、库存查询→`/inventory/stock`。
 
 仅 PC 改版；Pad 首页一期维持不动（PadHomePage 不在改版范围）。
 
@@ -757,7 +759,9 @@ Scan 顶部固定：扫码设备状态（设备正常/设备异常）+ 网络状
 扫描盘点任务 → 盘点页面
 ```
 
-- 扫码输入三模式（作业效率提升层一期，2026-10-06）：`components/scanner/ScanInput.tsx` + `useScanBuffer`——`normal`（常规，扫后即解析）/ `fast`（快速，短间隔连扫自动推进）/ `continuous`（连续，同对象累计计数）。**智能下一步只对查询/定位类低风险动作自动执行**（prop `autoAdvance: 'none' | 'safe'`），确认收货/扣减类必须显式按键，禁止自动提交。复用 `POST /api/scanner/resolve`（前端不做业务解析）与 devices 2s 去重窗口；一期示范接入 PadPutawayPage，既有 ScanDirectCard 不动。
+- 扫码输入三模式（作业效率提升层一期，2026-10-06；扫码作业优化同日升级为可切换偏好）：`components/scanner/ScanInput.tsx` + `useScanBuffer`——`normal`（常规，扫后即解析）/ `fast`（快速，短间隔连扫自动推进）/ `continuous`（连续，同对象累计计数）。三模式为**用户偏好**：`stores/scan.ts` `useScanStore`（localStorage `sf.scan.mode`）为唯一模式源，`ScanInput` 未传 `mode` prop 时内置 Segmented 切换器读写 store（跨页面一致），显式传 `mode` 则页面受控并隐藏切换器。**智能下一步只对查询/定位类低风险动作自动执行**（prop `autoAdvance: 'none' | 'safe'`），确认收货/扣减类必须显式按键，禁止自动提交。
+- 智能下一步（扫码作业优化，2026-10-06）：`hooks/useSmartScanNext.ts`——统一调 `POST /api/scanner/resolve`（前端不做业务解析）识别，按作业上下文（receive/quality/putaway/count/stockmove/transfer/inventory/global）映射为 locate-task / locate-item / locate-bin / navigate 指令，页面执行「继续」步；单号前缀→作业页冻结路由表收口在 `DOC_KIND_ROUTES`（收货任务→收货确认 / 上架→上架 / 拣货→PC /picking / SKU·库位→库存页定位）。resolve 失败不伪造结果（返回 resolve-failed 携带真实错误，页面可走手输兜底）。devices 2s 去重窗口与既有 ScanDirectCard 不动。
+- 扫→判→继续收口（Pad）：`PadActionBar` 扫码弹窗统一托管 `ScanInput`——页面传 `onScanSubmit` 时按页面上下文处理，未传时走 global 智能路由（识别命中→进入对应作业页并收窗）；收货/质检/移库弹窗扫码后**保持打开**可连扫，把「扫描→关弹窗→点确定→回列表→找下一条→再扫」压缩为「扫→判→继续」。原 `PadScanStub` 占位原语全员下线删除（pad.css `.sf-pad-scan-stub` 样式随之移除）；盘点（盘盈亏）、移库等高风险/库存变动动作仍一律显式按键提交，扫码仅承担定位。
 - 一期临时口径：ScanInput 键盘缓冲解析限定在组件自身受控输入元素焦点内承接（ScanDirectCard HID 先例），不做页面级 window keydown 监听（与 scanner.md §3.1 冻结约束不冲突，输入框带 `[data-sf-scan-input]` 标记并入 §32 输入态抑制）；完整 ScannerManager→Event 总线架构归 F15/F16 立项，不在本期。
 
 ---
@@ -804,7 +808,8 @@ SfRelationNav      详情页关联业务导航（SfDetailSection 内 chip 组，
                    接入 SKU/流水/入库/采购单/出库/销售单/盘点 七详情页）
 SfAutoRefreshSelect  自动刷新选择器（关/10/30/60 秒，document.hidden 暂停，连续失败退避停轮；
                    配合 useAutoRefresh，任务型列表页工具栏）
-ScanInput / useScanBuffer  扫码输入三模式 normal/fast/continuous + 智能下一步（§22）
+ScanInput / useScanBuffer  扫码输入三模式 normal/fast/continuous（可切换偏好 useScanStore）
+                           + 智能下一步 useSmartScanNext（§22）
 useIdempotentMutation / utils/idempotency.ts  幂等提交包装（自动附 Idempotency-Key 头；
                    isPending 期间按钮 loading+disabled；服务端消费面按 api.md §7 逐端点口径）
 ```

@@ -52,6 +52,8 @@ var configSeeds = []configSeed{
 		Remark: "拣货任务创建后超过该时长未完成 → 站内通知（task_timeout_scan，backend-m3-plan §10.2）"},
 	{Key: "task.timeout.putaway_hours", Value: "4", Name: "上架任务超时阈值（小时）", Group: "作业任务", Type: "number",
 		Remark: "上架任务创建后超过该时长未完成 → 站内通知（task_timeout_scan，backend-m3-plan §10.2）"},
+	{Key: "task.timeout.receive_hours", Value: "4", Name: "收货任务超时阈值（小时）", Group: "作业任务", Type: "number",
+		Remark: "工作台「优先处理·超时收货」组截止线 = now − 该值小时（workbench_priority 效率层一期；行缺失走同值缺省，超时站内通知扫描仅覆盖拣货/上架）"},
 	{Key: "insight.replenishment.lead_time_days", Value: "7", Name: "补货建议：采购周期（天）", Group: "智能能力", Type: "number",
 		Remark: "补货建议目标库存公式参数（backend-m3-plan §9.3）"},
 	{Key: "insight.replenishment.buffer_days", Value: "3", Name: "补货建议：安全缓冲（天）", Group: "智能能力", Type: "number",

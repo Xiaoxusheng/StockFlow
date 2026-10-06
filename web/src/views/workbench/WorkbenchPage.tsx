@@ -1,83 +1,137 @@
-import { Card, Col, Row, Skeleton, Statistic, Tooltip, Typography } from 'antd'
-import { InfoCircleOutlined } from '@ant-design/icons'
+import { Col, Row, Skeleton, Tooltip, Typography } from 'antd'
+import {
+  AuditOutlined,
+  DatabaseOutlined,
+  ImportOutlined,
+  RightOutlined,
+  SafetyCertificateOutlined,
+  ScanOutlined,
+  SearchOutlined,
+  ShoppingOutlined,
+} from '@ant-design/icons'
+import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
   taskApi,
   type RecentOperationItem,
-  type TaskItem,
-  type WorkbenchSummary,
+  type WorkbenchPriorities,
+  type WorkbenchPriorityItem,
 } from '@/api/task'
-import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
+import { EXCEPTION_STATUS_TAG, type ExceptionStatus } from '@/api/exception'
+import { SfDetailSection } from '@/components/common/SfDetailSection'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
+import type { StatusSemantic } from '@/types/status'
+import { formatDateTime, formatNumber, formatQty } from '@/utils/format'
+import './workbench.css'
 
 const { Text } = Typography
 
 /**
- * 工作台四块入口（frontend.md §15.1 PC：我的待办 / 我的审批 / 我的任务 / 我的异常）。
- * path 仅指向 config/menu.tsx 既有菜单路径，不发明新菜单；
- * 待办 / 审批暂无对应菜单路径，后端模块上线前仅展示计数、不跳转。
- * 四计数经 taskApi.summary → GET /api/workbench/summary 真数据（2026-10-05 平台批交付，
- * 与 web/src/api/task.ts WorkbenchSummary 逐字段回对，2026-10-05 实测 200）；
- * 口径 tooltip 按 api.md §9 收口披露节④ 如实披露 Σ 差异。
- *
- * 2026-10-06 效率层一期（§2.11）改版：进页面即回答「该干什么」——
- * ① 增量计数（超时 / 待我处理 / 今日完成，summary additive 字段）；
- * ② 「待我处理」Top5（GET /api/tasks?status=in_progress，后端 assignee=me 恒过滤）；
- * ③ 「最近操作」（GET /api/workbench/recent-operations，读本人 operation_logs 尾 10 条，
- *    写入链路零新增——仍仅 middleware.Audit）。
+ * 我的工作台（/workbench，frontend.md §15.1 PC『我现在该做什么』）：
+ * 进页面即回答"该干什么"，四块紧凑高密度（2026-10-06 工作台优化改版）——
+ * ① 我的工作区：待我处理 / 超时 / 异常 / 今日已完成四计数
+ *    （GET /api/workbench/summary 增量字段，真数据；可直达处带真实筛选跳转）；
+ * ② 优先处理：超时收货 / 库位异常 / 临期库存 / 待复核订单四组 TopN
+ *    （GET /api/workbench/priorities，count 全量 + 明细尾 N 条，排序由后端 SQL 承担，
+ *    组头直达对应列表页真实筛选——/inbound?status=RECEIVING、/exceptions、
+ *    /inventory/alerts?level=near_expiry、/checking?status=PENDING，均为 urlSync 页可还原）；
+ * ③ 最近操作：本人 operation_logs 尾 10 条（GET /api/workbench/recent-operations）；
+ * ④ 快捷入口：MENU_TREE 权限码同源 + canAccess 过滤（§15.1），扫码作业为 Pad 作业端
+ *    入口（/pad/home，个人入口无权限码——与 Dashboard 菜单同性质）。
+ * 数据全部真实（禁止写死）；Loading/Empty/Error 齐备；仅 PC，Pad 首页不在改版范围。
  */
-interface WorkbenchEntry {
-  key: keyof WorkbenchSummary
-  label: string
-  path?: string
-  danger?: boolean
-}
 
-const ENTRIES: WorkbenchEntry[] = [
-  { key: 'todo_count', label: '我的待办' },
-  { key: 'approval_count', label: '我的审批' },
-  { key: 'task_count', label: '我的任务', path: '/tasks' },
-  { key: 'exception_count', label: '我的异常', path: '/exceptions', danger: true },
+/** 工作区四计数口径 tooltip（口径直引 internal/reports/workbench_summary.go 聚合注释） */
+const WORKSPACE_STATS: Array<{
+  key: 'mine_count' | 'timeout_count' | 'exception_count' | 'today_completed_count'
+  label: string
+  tooltip: string
+  path?: string
+  /** path 对应列表页所需权限码（与 MENU_TREE 同源；缺省=个人入口放行） */
+  permission?: string
+  danger?: boolean
+}> = [
+  {
+    key: 'mine_count',
+    label: '待我处理',
+    path: '/tasks?status=in_progress',
+    permission: 'inventory:stock:view',
+    tooltip: '指派给我且进行中的任务数（putaway IN_PROGRESS/PAUSED + pick CLAIMED/PICKING），点击查看任务清单',
+  },
+  {
+    key: 'timeout_count',
+    label: '超时',
+    tooltip: '本人进行中且超过超时阈值的任务数（上架/拣货，阈值 task.timeout.* 可配，缺省 4 小时；checking 无超时层）',
+  },
+  {
+    key: 'exception_count',
+    label: '异常',
+    path: '/exceptions',
+    permission: 'exception:view',
+    danger: true,
+    tooltip: '未闭环异常数（RESOLVED/CLOSED 之外，全量口径——异常单无仓库列），点击进入异常中心',
+  },
+  {
+    key: 'today_completed_count',
+    label: '今日已完成',
+    tooltip: '本人今日完成的任务数（putaway COMPLETED / pick PICKED / check DONE，按完成时间落在当日）',
+  },
 ]
 
-/** Σ 差异共享披露（api.md §9 收口披露节④ tooltip 义务）：四块互斥，
- * Σ(todo+approval+task+exception) ≠ Dashboard「待处理任务」计数——pendingTask
- * （dashboard.go:613）= 待收货 + 六作业块 + 异常，不含审批，即 Σ = 其 + 审批数。 */
-const SIGMA_NOTE =
-  '四块互斥拆分，Σ ≠ Dashboard「待处理任务」计数（后者 = 待收货+六作业块+异常，不含审批；Σ = 其 + 审批数）'
-
-/** 四计数口径 tooltip（口径直引 internal/reports/workbench_summary.go:9-17 后端聚合口径） */
-const SUMMARY_TOOLTIPS: Record<keyof WorkbenchSummary, string> = {
-  todo_count: `我的待办：采购单待收货（APPROVED / PARTIAL_RECEIVED 单据型待办）。${SIGMA_NOTE}`,
-  approval_count: `我的审批：五单据待审聚合（采购/销售/调拨/库存调整待审批 + 盘点待复核）。${SIGMA_NOTE}`,
-  task_count: `我的任务：六作业块活动任务（上架/拣货/复核/打包/发货/盘点），不含审批。${SIGMA_NOTE}`,
-  exception_count: `我的异常：未闭环异常（RESOLVED / CLOSED 之外，全量口径）。${SIGMA_NOTE}`,
-  // additive 增量字段（效率层一期）不参与四块 Σ 口径，故不设 tooltip 文案
-  timeout_count: '超时任务数（本人进行中且超时阈值已过：上架/拣货按 task.timeout.* 配置）。',
-  mine_count: '指派给我且进行中的任务数（六作业块活动任务子集）。',
-  today_completed_count: '今日已完成任务数（本人，按完成时间落在当日）。',
-}
-
-/** 待我处理任务列（GET /api/tasks?status=in_progress，后端 assignee=me 恒过滤） */
-const TASK_COLUMNS: ColumnsType<TaskItem> = [
-  { title: '任务号', dataIndex: 'task_no', width: 170, ellipsis: true },
-  { title: '类型', dataIndex: 'task_type', width: 100 },
-  { title: '来源单号', dataIndex: 'source_no', width: 160, ellipsis: true, render: (v?: string) => v ?? '-' },
-  { title: '状态', dataIndex: 'status', width: 100, render: (v: string) => <SfStatusTag status={v} /> },
+/** 优先处理四组（key=WorkbenchPriorities 组键；path=组头直达链接；hint=口径披露） */
+const PRIORITY_GROUPS: Array<{
+  key: keyof WorkbenchPriorities
+  label: string
+  path: string
+  permission?: string
+  hint: string
+}> = [
   {
-    title: '进度',
-    key: 'qty',
-    width: 110,
-    align: 'right',
-    render: (_: unknown, r: TaskItem) => `${formatNumber(r.completed_qty)} / ${formatNumber(r.total_qty)}`,
+    key: 'overdue_receipts',
+    label: '超时收货',
+    path: '/inbound?status=RECEIVING',
+    permission: 'inbound:view',
+    hint: '收货中（RECEIVING）且创建超过收货超时阈值的入库单，按创建先后排序',
   },
-  { title: '创建时间', dataIndex: 'created_at', width: 150, render: (v: string) => formatDateTime(v) },
+  {
+    key: 'bin_exceptions',
+    label: '库位异常',
+    path: '/exceptions',
+    permission: 'exception:view',
+    hint: '已定位到库位且未闭环的异常单，按创建先后排序（异常单无仓库列，全量口径）',
+  },
+  {
+    key: 'near_expiry_stock',
+    label: '临期库存',
+    path: '/inventory/alerts?level=near_expiry',
+    permission: 'inventory:stock:view',
+    hint: '效期在临期窗口内（inventory.alert.expiry_days 最大档，缺省 30 天）且现存量为正的批次库存，按最先到期排序',
+  },
+  {
+    key: 'pending_checks',
+    label: '待复核订单',
+    path: '/checking?status=PENDING',
+    permission: 'checking:view',
+    hint: '存在待复核（PENDING）复核任务的出库单（按单去重），按最早创建排序',
+  },
+]
+
+/** 快捷入口（MENU_TREE 权限码同源 + canAccess 过滤；扫码作业=Pad 作业端入口） */
+const QUICK_ENTRIES: Array<{ label: string; path: string; permission?: string; icon: ReactNode }> = [
+  { label: '扫码作业', path: '/pad/home', icon: <ScanOutlined /> },
+  { label: '收货', path: '/purchases/receipts', permission: 'purchase:receipt:view', icon: <ImportOutlined /> },
+  { label: '上架', path: '/tasks?task_type=putaway', permission: 'inventory:stock:view', icon: <DatabaseOutlined /> },
+  { label: '拣货', path: '/picking', permission: 'picking:view', icon: <ShoppingOutlined /> },
+  { label: '复核', path: '/checking', permission: 'checking:view', icon: <SafetyCertificateOutlined /> },
+  { label: '盘点', path: '/counts', permission: 'count:view', icon: <AuditOutlined /> },
+  { label: '库存查询', path: '/inventory/stock', permission: 'inventory:stock:view', icon: <SearchOutlined /> },
 ]
 
 /** 最近操作列（GET /api/workbench/recent-operations：本人 operation_logs 尾 N 条） */
@@ -106,14 +160,27 @@ const OP_COLUMNS: ColumnsType<RecentOperationItem> = [
   },
 ]
 
-/** 我的工作台（/workbench，menu.tsx 既有菜单；GET /api/workbench/summary 真实数据） */
+/** 异常组原态 → 标签（EXCEPTION_STATUS_TAG 唯一映射；未登记原态兜底中性标签） */
+function renderExceptionStatus(status: string) {
+  const meta = EXCEPTION_STATUS_TAG[status as ExceptionStatus]
+  return (
+    <SfStatusTag
+      label={meta?.label ?? status}
+      semantic={(meta?.semantic ?? 'neutral') as StatusSemantic}
+    />
+  )
+}
+
+/** 我的工作台（GET /api/workbench/summary + /priorities + /recent-operations 真实数据） */
 export default function WorkbenchPage() {
   const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+
   const summary = useQuery({ queryKey: ['workbench', 'summary'], queryFn: taskApi.summary })
-  /** 待我处理 Top5（后端 assignee=me 恒过滤，真数据；无进行中任务时呈现真实空态） */
-  const myTasks = useQuery({
-    queryKey: ['workbench', 'mine-tasks'],
-    queryFn: () => taskApi.list({ status: 'in_progress', page: 1, pageSize: 5 }),
+  /** 优先处理四组（count 全量 + 明细尾 5 条；后端路由未接线时呈现统一错误态——预期行为） */
+  const priorities = useQuery({
+    queryKey: ['workbench', 'priorities'],
+    queryFn: () => taskApi.priorities(5),
   })
   /** 最近操作（只读端点；失败时呈现统一错误态，不造假记录） */
   const recentOps = useQuery({
@@ -123,16 +190,19 @@ export default function WorkbenchPage() {
 
   return (
     <div className="sf-page">
-      <SfPageHeader title="我的工作台" subtitle="待办 / 审批 / 任务 / 异常 入口总览" />
-      <Card size="small">
+      <SfPageHeader title="我的工作台" subtitle="我现在该做什么" />
+
+      {/* ① 我的工作区：四计数（真实统计；可直达处跳对应列表真实筛选，否则仅口径披露） */}
+      <SfDetailSection
+        title="我的工作区"
+        extra={<Text type="secondary">待我处理 / 超时 / 异常 / 今日已完成</Text>}
+      >
         {summary.isPending ? (
-          <Row gutter={[16, 16]}>
-            {ENTRIES.map((entry) => (
-              <Col key={entry.key} xs={12} md={6}>
-                <Skeleton.Node active style={{ width: '100%', height: 64 }} />
-              </Col>
+          <div className="sf-wb-stats">
+            {WORKSPACE_STATS.map((s) => (
+              <Skeleton.Node key={s.key} active style={{ width: '100%', height: 48 }} />
             ))}
-          </Row>
+          </div>
         ) : summary.error ? (
           <SfError
             error={summary.error}
@@ -140,84 +210,170 @@ export default function WorkbenchPage() {
             description="工作台汇总接口（/api/workbench/summary）暂不可用"
           />
         ) : (
-          <Row gutter={[16, 16]}>
-            {ENTRIES.map((entry) => {
-              const path = entry.path
+          <div className="sf-wb-stats">
+            {WORKSPACE_STATS.map((s) => {
+              const clickable = !!s.path && canAccess(user, s.permission)
               return (
-                <Col key={entry.key} xs={12} md={6}>
-                  <Card
-                    size="small"
-                    hoverable={path !== undefined}
-                    style={{ cursor: path !== undefined ? 'pointer' : undefined }}
-                    onClick={path ? () => navigate(path) : undefined}
+                <div
+                  key={s.key}
+                  className={clickable ? 'sf-wb-stat sf-wb-stat--link' : 'sf-wb-stat'}
+                  onClick={clickable ? () => navigate(s.path!) : undefined}
+                  role={clickable ? 'button' : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  onKeyDown={
+                    clickable
+                      ? (e) => {
+                          if (e.key === 'Enter') navigate(s.path!)
+                        }
+                      : undefined
+                  }
+                >
+                  <Tooltip title={s.tooltip}>
+                    <span className="sf-wb-stat__label">
+                      {s.label}
+                      <RightOutlined aria-hidden className="sf-wb-stat__arrow" />
+                    </span>
+                  </Tooltip>
+                  <span
+                    className={s.danger ? 'sf-wb-stat__value sf-wb-stat__value--danger' : 'sf-wb-stat__value'}
                   >
-                    <Statistic
-                      title={
-                        <Tooltip title={SUMMARY_TOOLTIPS[entry.key]}>
-                          <span>
-                            {entry.label}
-                            <InfoCircleOutlined
-                              aria-hidden
-                              style={{ marginInlineStart: 4, color: 'var(--sf-text-muted)' }}
-                            />
-                          </span>
-                        </Tooltip>
-                      }
-                      value={formatNumber(summary.data?.[entry.key])}
-                      valueStyle={entry.danger ? { color: 'var(--sf-danger)' } : undefined}
-                    />
-                  </Card>
-                </Col>
+                    {formatNumber(summary.data?.[s.key])}
+                  </span>
+                </div>
               )
             })}
-          </Row>
+          </div>
         )}
-      </Card>
+      </SfDetailSection>
 
       <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
-        <Col xs={24} xl={14}>
+        <Col xs={24} xl={16}>
+          {/* ② 优先处理：四组 TopN（count 全量 + 明细尾 5 条；组头直达对应列表页） */}
           <SfDetailSection
-            title="我现在该做什么"
-            extra={<Text type="secondary">超时 / 待我处理 / 今日完成</Text>}
+            title="优先处理"
+            extra={<Text type="secondary">超时收货 / 库位异常 / 临期库存 / 待复核订单</Text>}
           >
-            <SfSummaryBar
-              items={[
-                { label: '超时任务', value: formatNumber(summary.data?.timeout_count) },
-                { label: '待我处理', value: formatNumber(summary.data?.mine_count) },
-                { label: '今日完成', value: formatNumber(summary.data?.today_completed_count) },
-              ]}
-            />
-            <div style={{ marginTop: 12 }}>
-              <SfTable<TaskItem>
-                variant="nested"
-                rowKey="id"
-                columns={TASK_COLUMNS}
-                dataSource={myTasks.data?.items ?? []}
-                loading={myTasks.isFetching}
-                error={myTasks.error}
-                onRetry={myTasks.refetch}
-                emptyText="当前没有进行中的任务；可到「我的任务」查看与领取"
-                scrollX={790}
+            {priorities.isPending ? (
+              <Row gutter={[12, 12]}>
+                {PRIORITY_GROUPS.map((g) => (
+                  <Col key={g.key} xs={24} md={12} xxl={6}>
+                    <Skeleton.Node active style={{ width: '100%', height: 120 }} />
+                  </Col>
+                ))}
+              </Row>
+            ) : priorities.error ? (
+              <SfError
+                error={priorities.error}
+                onRetry={priorities.refetch}
+                description="优先处理接口（/api/workbench/priorities）暂不可用"
               />
+            ) : (
+              <Row gutter={[12, 12]}>
+                {PRIORITY_GROUPS.map((g) => {
+                  const group = priorities.data?.[g.key]
+                  const items = group?.items ?? []
+                  const clickable = canAccess(user, g.permission)
+                  return (
+                    <Col key={g.key} xs={24} md={12} xxl={6}>
+                      <div className="sf-wb-group">
+                        <div className="sf-wb-group__head">
+                          <Tooltip title={g.hint}>
+                            <span className="sf-wb-group__label">{g.label}</span>
+                          </Tooltip>
+                          {clickable ? (
+                            <button
+                              type="button"
+                              className="sf-wb-group__link"
+                              onClick={() => navigate(g.path)}
+                            >
+                              {formatNumber(group?.count)} 条
+                              <RightOutlined aria-hidden className="sf-wb-group__arrow" />
+                            </button>
+                          ) : (
+                            <span className="sf-wb-group__count">{formatNumber(group?.count)} 条</span>
+                          )}
+                        </div>
+                        {items.length === 0 ? (
+                          <div className="sf-wb-group__empty">暂无待处理</div>
+                        ) : (
+                          <ul className="sf-wb-items">
+                            {items.map((it) => (
+                              <PriorityItemRow key={`${it.id}-${it.title}`} item={it} />
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </Col>
+                  )
+                })}
+              </Row>
+            )}
+          </SfDetailSection>
+        </Col>
+        <Col xs={24} xl={8}>
+          {/* ④ 快捷入口：MENU_TREE 权限码同源 + canAccess 过滤 */}
+          <SfDetailSection title="快捷入口" extra={<Text type="secondary">按权限过滤</Text>}>
+            <div className="sf-wb-quick">
+              {QUICK_ENTRIES.filter((e) => canAccess(user, e.permission)).map((e) => (
+                <button
+                  key={e.path}
+                  type="button"
+                  className="sf-wb-quick__item"
+                  onClick={() => navigate(e.path)}
+                >
+                  <span className="sf-wb-quick__icon" aria-hidden>
+                    {e.icon}
+                  </span>
+                  <span>{e.label}</span>
+                </button>
+              ))}
             </div>
           </SfDetailSection>
         </Col>
-        <Col xs={24} xl={10}>
-          <SfDetailSection title="最近操作" extra={<Text type="secondary">本人最近 10 条</Text>}>
-            <SfTable<RecentOperationItem>
-              variant="nested"
-              rowKey={(r) => `${r.time}-${r.action}-${r.object_id ?? ''}-${r.request_id ?? ''}`}
-              columns={OP_COLUMNS}
-              dataSource={recentOps.data?.items ?? []}
-              loading={recentOps.isFetching}
-              error={recentOps.error}
-              onRetry={recentOps.refetch}
-              emptyText="暂无操作记录（业务动作经审计中间件写入 operation_logs）"
-              scrollX={630}
-            />
-          </SfDetailSection>
-        </Col>
       </Row>
+
+      {/* ③ 最近操作：本人 operation_logs 尾 10 条（时间/动作/对象/结果） */}
+      <div style={{ marginTop: 16 }}>
+        <SfDetailSection title="最近操作" extra={<Text type="secondary">本人最近 10 条</Text>}>
+          <SfTable<RecentOperationItem>
+            variant="nested"
+            rowKey={(r) => `${r.time}-${r.action}-${r.object_id ?? ''}-${r.request_id ?? ''}`}
+            columns={OP_COLUMNS}
+            dataSource={recentOps.data?.items ?? []}
+            loading={recentOps.isFetching}
+            error={recentOps.error}
+            onRetry={recentOps.refetch}
+            emptyText="暂无操作记录（业务动作经审计中间件写入 operation_logs）"
+            scrollX={630}
+          />
+        </SfDetailSection>
+      </div>
     </div>
+  )
+}
+
+/** 优先处理明细行（统一行形状：标题+状态 / 副题 / 明细+时间；纯展示不伪装行级详情） */
+function PriorityItemRow({ item }: { item: WorkbenchPriorityItem }) {
+  return (
+    <li className="sf-wb-item">
+      <div className="sf-wb-item__main">
+        <span className="sf-wb-item__title" title={item.title}>
+          {item.title}
+        </span>
+        {item.status ? renderExceptionStatus(item.status) : null}
+      </div>
+      {item.subtitle ? (
+        <div className="sf-wb-item__meta" title={item.subtitle}>
+          {item.subtitle}
+        </div>
+      ) : null}
+      <div className="sf-wb-item__foot">
+        <span className="sf-wb-item__detail" title={item.detail}>
+          {item.detail}
+          {item.qty !== undefined ? ` · ${formatQty(item.qty)}` : ''}
+        </span>
+        {item.time ? <span className="sf-wb-item__time">{formatDateTime(item.time)}</span> : null}
+      </div>
+    </li>
   )
 }

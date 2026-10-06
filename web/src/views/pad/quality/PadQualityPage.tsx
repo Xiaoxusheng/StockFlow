@@ -42,9 +42,10 @@ import {
   PadActionBar,
   PadInfoCard,
   PadPageShell,
-  PadScanStub,
   usePadOrientation,
 } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
+import { useSmartScanNext } from '@/hooks/useSmartScanNext'
 import { usePagedList } from '@/hooks/usePagedList'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
 
@@ -455,10 +456,53 @@ export default function PadQualityPage() {
     list.resetToFirstPage()
   }
 
-  const handleScanSubmit = (code: string) => {
-    // 扫码链路属 Scan 端 / F16（frontend.md §19.2）：本轮仅本地接收手输编码
-    messageApi.info(`已接收手输编码：${code}（扫码直达质检属 Scan 端通用扫码中心）`)
-    setScanOpen(false)
+  /**
+   * 智能下一步（扫码作业优化 2026-10-06）：扫→判→继续。resolve 识别质检单（QC）→
+   * 在任务列表定位并选中进入质检；SKU → 定位明细行（判定数量仍人工录入）；其他对象 →
+   * 提示或跳转对应作业页。质检判定永远显式提交（requirements.md §2.10）。
+   */
+  const { resolveNext } = useSmartScanNext({ context: 'quality', page: '/pad/quality' })
+
+  const handleScanSubmit = async (code: string) => {
+    const { directive } = await resolveNext(code)
+    if (directive.kind === 'locate-task') {
+      const hit = list.items.find(
+        (order) => order.qc_no === directive.code || order.source_no === directive.code,
+      )
+      if (hit) {
+        handleSelect(hit)
+        messageApi.success(`${directive.message}：已选中质检单 ${hit.qc_no}，请按明细行录入判定`)
+      } else {
+        messageApi.warning(
+          `${directive.message}：未在当前任务列表（状态筛选/分页范围）中找到，请翻页或调整筛选`,
+        )
+      }
+      return
+    }
+    if (directive.kind === 'locate-item') {
+      if (!selected || !detailQuery.data) {
+        messageApi.info(`${directive.message}：请先选择质检单，再定位明细行`)
+        return
+      }
+      const target = directive.code.toUpperCase()
+      const hit = detailItems.find((item) => {
+        const code = skuCodeMap.get(String(item.sku_id)) ?? ''
+        return code.toUpperCase() === target
+      })
+      if (!hit) {
+        messageApi.warning(`${directive.message}：当前质检单明细中无该 SKU 行`)
+        return
+      }
+      messageApi.success(`${directive.message}：已定位质检明细行，请录入检验数量与结果`)
+      return
+    }
+    if (directive.kind === 'navigate') {
+      messageApi.success(directive.message)
+      setScanOpen(false)
+      navigate(directive.path)
+      return
+    }
+    messageApi.warning(directive.message)
   }
 
   const totalInspected = detailItems.reduce((sum, item) => sum + item.qty_inspected, 0)
@@ -653,13 +697,13 @@ export default function PadQualityPage() {
         </p>
       </section>
 
-      <section className="sf-pad-card" aria-label="扫码占位">
+      <section className="sf-pad-card" aria-label="扫码">
         <h3 className="sf-pad-card-title">扫码</h3>
-        <PadScanStub
-          placeholder="手工输入质检单 / SKU 条码兜底"
-          onSubmit={(code) =>
-            messageApi.info(`已接收手输编码：${code}（扫码直达质检属 Scan 端通用扫码中心）`)
-          }
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入质检单 / SKU 条码（HID 扫码枪或手工输入）"
+          hint="识别质检单 → 定位任务卡进入质检；识别 SKU → 定位明细行"
+          onScan={(code) => void handleScanSubmit(code)}
         />
       </section>
 
@@ -830,7 +874,12 @@ export default function PadQualityPage() {
         ]}
       />
       <Modal title="扫码" open={scanOpen} footer={null} centered onCancel={() => setScanOpen(false)}>
-        <PadScanStub onSubmit={handleScanSubmit} placeholder="手工输入质检单 / SKU 条码兜底" />
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入质检单 / SKU 条码（HID 扫码枪或手工输入）"
+          hint="识别质检单 → 定位任务卡；识别 SKU → 定位明细行；扫码后可继续连扫"
+          onScan={(code) => void handleScanSubmit(code)}
+        />
       </Modal>
     </>
   )

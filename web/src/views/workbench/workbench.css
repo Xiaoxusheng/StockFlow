@@ -1,0 +1,234 @@
+/**
+ * 我的工作台样式（frontend.md §15.1『我现在该做什么』紧凑高密度改版，2026-10-06）。
+ *
+ * 颜色 / 间距 / 圆角 / 阴影一律引用 tokens.css 的 --sf-* Design Token，
+ * 本文件不定义任何色值字面量（AGENTS.md 硬性规则 3）；动效只用于反馈
+ * （hover 边框/底色过渡，零 transition:all——frontend.md §31）。
+ */
+
+/* ===== ① 我的工作区：四计数条（紧凑条形，非 KPI 大卡） ===== */
+.sf-wb-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sf-space-3);
+}
+
+.sf-wb-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  background: var(--sf-surface);
+  border: var(--sf-border-width) solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  min-width: 0;
+}
+
+.sf-wb-stat--link {
+  cursor: pointer;
+  transition:
+    border-color var(--sf-motion-normal) var(--sf-motion-ease),
+    background-color var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+.sf-wb-stat--link:hover {
+  border-color: var(--sf-primary);
+  background: var(--sf-surface-hover);
+}
+
+.sf-wb-stat__label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-1);
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text-secondary);
+  line-height: 1.4;
+  align-self: flex-start;
+}
+
+.sf-wb-stat__arrow {
+  font-size: 10px;
+  color: var(--sf-text-muted);
+}
+
+.sf-wb-stat__value {
+  font-size: var(--sf-font-size-section-title);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--sf-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-wb-stat__value--danger {
+  color: var(--sf-danger);
+}
+
+/* 窄屏四计数退化为两列 */
+@media (max-width: 768px) {
+  .sf-wb-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* ===== ② 优先处理：四组 TopN（组框 + 明细行） ===== */
+.sf-wb-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-2);
+  height: 100%;
+  padding: var(--sf-space-3);
+  border: var(--sf-border-width) solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  background: var(--sf-surface);
+  min-width: 0;
+}
+
+.sf-wb-group__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+}
+
+.sf-wb-group__label {
+  font-size: var(--sf-font-size-body);
+  font-weight: 600;
+  color: var(--sf-text);
+}
+
+.sf-wb-group__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-primary);
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-wb-group__link:hover {
+  color: var(--sf-primary-hover);
+}
+
+.sf-wb-group__arrow {
+  font-size: 10px;
+}
+
+.sf-wb-group__count {
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-wb-group__empty {
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text-muted);
+  padding: var(--sf-space-2) 0;
+}
+
+/* 明细行列表：细分隔线列表式（同通知条目裁定——无卡片无底色，排版承担层级） */
+.sf-wb-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-wb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sf-space-2) 0;
+  border-top: var(--sf-border-width) solid var(--sf-border);
+  min-width: 0;
+}
+
+.sf-wb-item__main {
+  display: flex;
+  align-items: center;
+  gap: var(--sf-space-2);
+  min-width: 0;
+}
+
+.sf-wb-item__title {
+  font-size: var(--sf-font-size-secondary);
+  font-weight: 500;
+  color: var(--sf-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-wb-item__meta {
+  font-size: var(--sf-font-size-caption);
+  color: var(--sf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-wb-item__foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  min-width: 0;
+}
+
+.sf-wb-item__detail {
+  font-size: var(--sf-font-size-caption);
+  color: var(--sf-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.sf-wb-item__time {
+  flex-shrink: 0;
+  font-size: var(--sf-font-size-caption);
+  color: var(--sf-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===== ④ 快捷入口：图标 + 文字紧凑行按钮 ===== */
+.sf-wb-quick {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sf-space-1);
+}
+
+.sf-wb-quick__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sf-space-2);
+  padding: var(--sf-space-2) var(--sf-space-3);
+  border: var(--sf-border-width) solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  background: var(--sf-surface);
+  font-size: var(--sf-font-size-secondary);
+  color: var(--sf-text);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color var(--sf-motion-normal) var(--sf-motion-ease),
+    background-color var(--sf-motion-normal) var(--sf-motion-ease);
+}
+
+.sf-wb-quick__item:hover {
+  border-color: var(--sf-primary);
+  background: var(--sf-surface-hover);
+  color: var(--sf-primary);
+}
+
+.sf-wb-quick__icon {
+  display: inline-flex;
+  font-size: var(--sf-font-size-body);
+  color: var(--sf-text-secondary);
+}
+
+.sf-wb-quick__item:hover .sf-wb-quick__icon {
+  color: var(--sf-primary);
+}

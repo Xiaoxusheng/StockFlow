@@ -124,6 +124,42 @@ export const TASK_PRIORITY_OPTIONS = Array.from({ length: 10 }, (_, i) => ({
   value: i,
 }))
 
+/**
+ * 优先处理明细行（GET /api/workbench/priorities，internal/reports/workbench_priority.go
+ * priorityItem JSON tag 同源）：四组统一行形状，Detail 为后端组装的人读文本；
+ * Qty 数量类明细（近效期现存量）缺省不下发；Status 仅异常组携原态
+ * （OPEN/ASSIGNED/PROCESSING/PENDING_REVIEW，EXCEPTION_STATUS_TAG 渲染）；
+ * Time 时间锚点（近效期行无自然时间锚点为 null）。
+ */
+export interface WorkbenchPriorityItem {
+  id: number | string
+  title: string
+  subtitle: string
+  detail: string
+  qty?: number
+  status?: string
+  time?: string | null
+}
+
+/** 优先处理单组：count 全量计数 + items 尾 N 条（TopN 截断，count ≠ items.length） */
+export interface WorkbenchPriorityGroup {
+  count: number
+  items: WorkbenchPriorityItem[]
+}
+
+/**
+ * 优先处理四组统计（GET /api/workbench/priorities?limit=，口径见后端文件头注——
+ * 超时收货阈值 task.timeout.receive_hours 族缺省 4h；库位异常不受仓库范围过滤；
+ * 临期窗口 = inventory.alert.expiry_days 最大档，与 /inventory/alerts?level=near_expiry
+ * 同构；待复核订单 = 存在 PENDING 复核任务的出库单去重计数）。
+ */
+export interface WorkbenchPriorities {
+  overdue_receipts: WorkbenchPriorityGroup
+  bin_exceptions: WorkbenchPriorityGroup
+  near_expiry_stock: WorkbenchPriorityGroup
+  pending_checks: WorkbenchPriorityGroup
+}
+
 export const taskApi = {
   /** 工作台四块入口计数（预置端点，后端未就绪时页面呈现统一错误态） */
   summary: () => http.get<WorkbenchSummary>('/api/workbench/summary'),
@@ -137,6 +173,11 @@ export const taskApi = {
   /** 我的最近操作（GET /api/workbench/recent-operations，本人 operation_logs 尾 N 条，只读） */
   recentOperations: (limit?: number) =>
     http.get<{ items: RecentOperationItem[] }>('/api/workbench/recent-operations', {
+      params: limit ? { limit } : undefined,
+    }),
+  /** 优先处理四组统计（GET /api/workbench/priorities，limit=每组明细条数 缺省 5 上限 20） */
+  priorities: (limit?: number) =>
+    http.get<WorkbenchPriorities>('/api/workbench/priorities', {
       params: limit ? { limit } : undefined,
     }),
 }

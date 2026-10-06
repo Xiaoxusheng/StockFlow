@@ -28,10 +28,10 @@ import {
   PadActionBar,
   PadInfoCard,
   PadPageShell,
-  PadScanStub,
   usePadOrientation,
   type PadActionBarAction,
 } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -306,9 +306,10 @@ export default function PadStockMovePage() {
     }
   }
 
+  /** 扫码弹窗：扫→判→继续——按当前步骤解析录入后不关窗，可连续扫码推进三步（扫码作业优化
+   * 2026-10-06）；弹窗由用户显式关闭 */
   const handleFinishScan = (code: string) => {
     handleCodeSubmit(code)
-    setScanOpen(false)
   }
 
   // 确认移库守卫（§21.7 具体原因；后端 moves.go:56-64 仍做强校验）
@@ -380,9 +381,10 @@ export default function PadStockMovePage() {
         当前源库位：{sourceBinItem ? `${sourceBinItem.code}（仓 ${String(sourceBinItem.warehouse_id)}）` : sourceBin || EMPTY_TEXT}
       </div>
       {activeStep === 1 ? (
-        <PadScanStub
-          onSubmit={(code) => resolveBinInput(code, 'source')}
-          placeholder="手输源库位编码兜底"
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入 / 手输源库位编码"
+          onScan={(code) => resolveBinInput(code, 'source')}
         />
       ) : (
         <Button size="large" className="sf-pad-sm-btn" onClick={() => setActiveStep(1)}>
@@ -486,9 +488,10 @@ export default function PadStockMovePage() {
         当前目标库位：{targetBinItem ? `${targetBinItem.code}（仓 ${String(targetBinItem.warehouse_id)}）` : targetBin || EMPTY_TEXT}
       </div>
       {activeStep === 3 ? (
-        <PadScanStub
-          onSubmit={(code) => resolveBinInput(code, 'target')}
-          placeholder="手输目标库位编码兜底"
+        <ScanInput
+          autoFocus={false}
+          placeholder="扫入 / 手输目标库位编码"
+          onScan={(code) => resolveBinInput(code, 'target')}
         />
       ) : (
         <Button size="large" className="sf-pad-sm-btn" onClick={() => setActiveStep(3)}>
@@ -697,18 +700,20 @@ export default function PadStockMovePage() {
 
   const scanModal = (
     <Modal title="扫码" open={scanOpen} footer={null} centered onCancel={() => setScanOpen(false)}>
-      <PadScanStub
-        onSubmit={handleFinishScan}
+      <ScanInput
+        autoFocus={false}
         placeholder={
           activeStep === 2
-            ? '手输 SKU 编码兜底（解析为商品）'
+            ? '扫入 / 手输 SKU 编码（解析为商品）'
             : activeStep === 1
-              ? '手输源库位编码兜底'
-              : '手输目标库位编码兜底'
+              ? '扫入 / 手输源库位编码'
+              : '扫入 / 手输目标库位编码'
         }
+        hint="按当前步骤（源库位 / SKU / 目标库位）解析录入；扫码后可继续连扫"
+        onScan={handleFinishScan}
       />
       <p className="sf-pad-muted-note">
-        扫码能力属 Scan 端与 F16（frontend.md §19.2 边界）；本页手输按当前步骤（源库位 / SKU / 目标库位）解析录入。
+        三步录入均为定位类动作；[完成移库] 仍需显式提交，库存变动以后端强校验为准（scanner.md §6.5）。
       </p>
     </Modal>
   )

@@ -31,6 +31,7 @@ type ServiceOption = Option
 //	GET /api/tasks                        inventory:inventory:list   我的任务列表
 //	GET /api/tasks/next                   inventory:inventory:list   自动下一条（效率层一期 B3）
 //	GET /api/workbench/recent-operations  inventory:inventory:list   最近操作（效率层一期 B3）
+//	GET /api/workbench/priorities         inventory:inventory:list   优先处理四组（效率层一期）
 //	GET /api/inventory/analytics                 inventory:inventory:list   库存分析
 //	GET /api/inventory/sku-top                   inventory:inventory:list   SKU 库存 TOP N
 //	GET /api/inventory/turnover-trend            inventory:inventory:list   库存周转趋势
@@ -123,4 +124,9 @@ func RegisterRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client, opts ..
 	// /api/tasks/next 静态段与 /api/tasks 同组共存，无 gin 路由冲突）。
 	rg.GET("/tasks/next", RequirePerm(auth.PermInventoryList), h.nextTask)
 	rg.GET("/workbench/recent-operations", RequirePerm(auth.PermInventoryList), h.recentOperations)
+
+	// 效率层一期（2026-10-06——工作台「优先处理」四组 count+TopN；挂同码
+	// inventory:inventory:list（summary/recent-operations 同组同码先例）；只读
+	// 统计零写语句，四组口径见 workbench_priority.go 文件头注；limit 白名单）。
+	rg.GET("/workbench/priorities", RequirePerm(auth.PermInventoryList), h.workbenchPriorities)
 }

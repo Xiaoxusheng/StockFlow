@@ -16,5 +16,4 @@ export {
 } from './PadActionBar'
 export { PadTaskCard, PAD_TASK_TYPE_LABEL, type PadTaskCardProps } from './PadTaskCard'
 export { PadInfoCard, type PadInfoCardProps, type PadInfoItem } from './PadInfoCard'
-export { PadScanStub, type PadScanStubProps } from './PadScanStub'
 export { usePadOrientation, type PadOrientation } from './usePadOrientation'

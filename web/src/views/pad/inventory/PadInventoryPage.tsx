@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button, message } from 'antd'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import {
   inventoryApi,
   type InventoryChangeType,
@@ -15,7 +16,9 @@ import { binApi } from '@/api/warehouse'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
-import { PadActionBar, PadInfoCard, PadPageShell, PadScanStub, usePadOrientation } from '@/layouts/pad'
+import { PadActionBar, PadInfoCard, PadPageShell, usePadOrientation } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
+import { useSmartScanNext } from '@/hooks/useSmartScanNext'
 import { usePagedList } from '@/hooks/usePagedList'
 import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
 import './inventory.css'
@@ -55,16 +58,20 @@ interface StockLabels {
  * Pad 库存查询页（frontend.md §20.2 卡片化 / §20.3 三栏 / §20.4 竖屏；唯一含真实端点的查询页）：
  * - 顶部汇总条：inventoryApi.stockSummary 七计数大字，失败「-」占位不拖垮整页（§9.5）；
  * - 横屏三栏：左=库存卡片列表（inventoryApi.stock，大字 total/available/locked），
- *   中=选中 SKU 商品信息 PadInfoCard，右=该 SKU 库存流水（inventoryApi.ledger）+ PadScanStub；
+ *   中=选中 SKU 商品信息 PadInfoCard，右=该 SKU 库存流水（inventoryApi.ledger）+ ScanInput 扫码定位
+ *   （扫码作业优化 2026-10-06：resolve 识别 SKU/库位 → 过滤库存列表 = 定位库存）；
  * - 竖屏堆叠：汇总条 → 选中详情内联 → 库存卡列表 → PadActionBar [返回][扫码][异常]。
  * 五维定位以 ID 呈现（InventoryView 无联表编码，PC 端 SfInventoryTable 同口径），
  * SKU / 库位编码经基础资料 options 端点本地映射补充，映射失败降级为 ID，不造假数据。
  */
 export default function PadInventoryPage() {
   const orientation = usePadOrientation()
+  const navigate = useNavigate()
   const [messageApi, messageContext] = message.useMessage()
   const [selected, setSelected] = useState<StockItem | null>(null)
   const [skuIdFilter, setSkuIdFilter] = useState<InventoryId | undefined>(undefined)
+  /** 扫码定位库位过滤（StockQuery.bin_id 真实端点过滤，handler.go:230-245） */
+  const [binIdFilter, setBinIdFilter] = useState<InventoryId | undefined>(undefined)
 
   // 汇总条（GET /api/inventory/summary snake_case）：失败呈「-」，不阻塞列表
   const summary = useQuery({
@@ -95,7 +102,10 @@ export default function PadInventoryPage() {
   const stockList = usePagedList<StockItem, StockQuery>({
     queryKey: ['pad', 'inventory', 'stock'],
     fetch: (q) => inventoryApi.stock(q),
-    params: useMemo<StockQuery>(() => ({ sku_id: skuIdFilter }), [skuIdFilter]),
+    params: useMemo<StockQuery>(
+      () => ({ sku_id: skuIdFilter, bin_id: binIdFilter }),
+      [skuIdFilter, binIdFilter],
+    ),
     defaultPageSize: 20,
   })
 
@@ -118,27 +128,60 @@ export default function PadInventoryPage() {
   }
   const selectedLabels = selected ? labelsOf(selected) : null
 
-  /** 扫码 / 手输兜底：数字按 SKU ID 过滤，文本按 SKU 编码映射反查；未命中如实提示 */
-  const handleCodeSubmit = (code: string) => {
+  /**
+   * 智能下一步（扫码作业优化 2026-10-06）：扫→判→定位库存。统一走 POST /api/scanner/resolve
+   * 识别（前端不做业务解析），SKU → 按 sku_id 过滤、库位 → 按 bin_id 过滤（均为真实端点
+   * 过滤，handler.go:230-245）；识别为单据 → 跳转对应作业页。resolve 请求失败（网络 /
+   * 无 scanner:resolve:list 权限）时降级本地映射反查（数字按 SKU ID、文本按 SKU 编码），
+   * 未命中如实提示。纯查询定位类低风险动作（autoAdvance='safe'）。
+   */
+  const { resolveNext } = useSmartScanNext({ context: 'inventory', page: '/pad/inventory' })
+
+  const handleCodeSubmit = async (code: string) => {
     const value = code.trim()
-    if (/^\d+$/.test(value)) {
-      setSkuIdFilter(value)
-      setSelected(null)
-      stockList.resetToFirstPage()
-      messageApi.info(`已按 SKU ID ${value} 过滤库存列表`)
+    if (!value) return
+    const { directive } = await resolveNext(value)
+    if (directive.kind === 'locate-item' && directive.objectType !== 'sku') {
+      // 批次 / 序列号：Pad 库存页只做 SKU / 库位定位，不做伪定位（scanner.md §7.13 序列号
+      // 追溯与批次分布归 PC 追溯页 / Scan 端承接）
+      messageApi.info(`${directive.message}；Pad 库存页支持 SKU / 库位定位，批次与序列号请至 PC「库存追溯」查询`)
       return
     }
-    const hit = [...skuMap.values()].find((sku) => sku.code === value)
-    if (hit) {
-      setSkuIdFilter(String(hit.id))
+    if (directive.kind === 'locate-item' || directive.kind === 'locate-bin') {
+      const isBin = directive.kind === 'locate-bin'
+      setSkuIdFilter(isBin ? undefined : directive.id)
+      setBinIdFilter(isBin ? directive.id : undefined)
       setSelected(null)
       stockList.resetToFirstPage()
-      messageApi.info(`已按 SKU 编码 ${hit.code} 过滤库存列表`)
+      messageApi.success(`${directive.message}：已过滤库存列表`)
       return
     }
-    messageApi.warning(
-      '未匹配到该 SKU 编码；扫码直达库存属 Scan 端通用扫码中心（frontend.md §21.5），本轮为占位入口',
-    )
+    if (directive.kind === 'navigate') {
+      messageApi.success(directive.message)
+      navigate(directive.path)
+      return
+    }
+    if (directive.kind === 'resolve-failed') {
+      // 降级：resolve 不可用（网络/权限）时按既有本地映射反查，不虚构识别结果
+      if (/^\d+$/.test(value)) {
+        setSkuIdFilter(value)
+        setBinIdFilter(undefined)
+        setSelected(null)
+        stockList.resetToFirstPage()
+        messageApi.info(`${directive.message}；已按本地兜底以 SKU ID ${value} 过滤库存列表`)
+        return
+      }
+      const hit = [...skuMap.values()].find((sku) => sku.code === value)
+      if (hit) {
+        setSkuIdFilter(String(hit.id))
+        setBinIdFilter(undefined)
+        setSelected(null)
+        stockList.resetToFirstPage()
+        messageApi.info(`${directive.message}；已按本地兜底以 SKU 编码 ${hit.code} 过滤库存列表`)
+        return
+      }
+    }
+    messageApi.warning(directive.message)
   }
 
   const summaryNode = (
@@ -177,7 +220,9 @@ export default function PadInventoryPage() {
         ) : stockList.items.length === 0 ? (
           <SfEmpty
             description={
-              skuIdFilter ? '该 SKU 下当前仓库没有库存记录，试试清除过滤' : '当前仓库暂无库存记录'
+              skuIdFilter || binIdFilter
+                ? '当前过滤条件下没有库存记录，试试重新扫码或清除过滤'
+                : '当前仓库暂无库存记录'
             }
           />
         ) : (
@@ -350,9 +395,15 @@ export default function PadInventoryPage() {
   const scanNode = (
     <section className="sf-pad-card" aria-label="扫码查询">
       <h3 className="sf-pad-card-title">扫码查询</h3>
-      <PadScanStub onSubmit={handleCodeSubmit} placeholder="手输 SKU 编码 / SKU ID 查询库存" />
+      <ScanInput
+        autoFocus={false}
+        autoAdvance="safe"
+        placeholder="扫入 SKU / 库位条码（HID 扫码枪或手工输入）"
+        hint="识别 SKU → 过滤库存列表；识别库位 → 按库位过滤库存"
+        onScan={(code) => void handleCodeSubmit(code)}
+      />
       <p className="sf-pad-muted-note">
-        扫码直达库存属 Scan 端通用扫码中心（frontend.md §21.5），本轮为占位入口；手输可按 SKU 编码 / ID 过滤左列库存
+        识别经 POST /api/scanner/resolve（前端不做业务解析，scanner.md §5.3）；纯查询定位低风险动作
       </p>
     </section>
   )

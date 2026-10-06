@@ -2,7 +2,7 @@ import { Button, InputNumber } from 'antd'
 import { CameraOutlined } from '@ant-design/icons'
 import type { CountItem, CountOrder } from '@/api/count'
 import { SfEmpty } from '@/components/common/SfEmpty'
-import { PadScanStub } from '@/layouts/pad'
+import { ScanInput } from '@/components/scanner/ScanInput'
 import { EMPTY_TEXT, formatNumber } from '@/utils/format'
 
 /** 实盘录入表单值：仅数量（差异原因/备注已移除——后端 CountRegistration 无此字段
@@ -41,7 +41,8 @@ export interface RegisterPanelProps {
  * 实盘数量大录入位 + 差异（实盘-系统，前端计算仅为录入预览，同 PC diffCell 口径）
  * + [登记实盘]（批量幂等 PUT /api/counts/{id}/items，items 数组按
  * (InventoryRowID, SerialNo) 提交，登记 0 必须显式提交，inventory-rules.md §9）
- * + 盘点差异拍照入口占位（frontend.md §20.6，同收货/质检口径）+ PadScanStub。
+ * + 盘点差异拍照入口占位（frontend.md §20.6，同收货/质检口径）+ ScanInput 扫码定位明细行
+ * （扫码作业优化 2026-10-06：三模式可切换，仅定位不登记——盘盈亏属高风险，登记必须显式提交）。
  * 禁止在前端算库存：差异仅为行内展示，调整由后端差异审核后走库存调整单（business-flow.md §10.2）。
  */
 export function RegisterPanel({
@@ -148,9 +149,11 @@ export function RegisterPanel({
             </Button>
           </span>
 
-          <PadScanStub
-            onSubmit={onScanSubmit}
-            placeholder="手输 SKU 编码 / 库位编码，定位明细行"
+          <ScanInput
+            autoFocus={false}
+            placeholder="扫入 SKU / 库位编码，定位明细行"
+            hint="扫码仅定位明细行；登记实盘（盘盈亏落账）必须显式按 [登记实盘] 提交"
+            onScan={onScanSubmit}
           />
         </div>
       )}
