@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Typography } from 'antd'
+import { Button, Card, Space, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useNavigate } from 'react-router'
@@ -18,6 +18,7 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
@@ -91,6 +92,10 @@ export default function InboundPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作）；无筛选空态才放「新建入库单」真实入口（同 StockListPage） */
+  const hasFilters = Object.keys(list.params).length > 0
+
   const columns: ColumnsType<InboundOrder> = [
     { title: '入库单号', dataIndex: 'inbound_no', width: 170, fixed: 'left' },
     {
@@ -156,15 +161,35 @@ export default function InboundPage() {
         title="入库管理"
         subtitle="收货 → 质检 → 上架（支持部分收货）"
         extra={
-          canCreate ? (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/inbound/new')}
-            >
-              新建入库单
-            </Button>
-          ) : undefined
+          <Space wrap>
+            <SfExportButton
+              module="PURCHASE_INBOUND"
+              /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create
+                 （internal/auth/permissions.go:307）——持列表权限而无导出权限者不渲染该按钮 */
+              permission="datax:export:create"
+              /* 导出当前视图：严格透传 InboundExportSource.applyFilters 白名单认领的筛选键
+                 （keyword/status/source_type/source_no/warehouse_id，internal/purchase/datax_export.go；
+                 keyword/source_type/source_no 为行源 2026-10-06 补齐键，语义与列表 ListInbounds
+                 一致：keyword 按 inbound_no/source_no ILIKE 模糊、source_no 精确匹配）——
+                 导出范围与当前视图逐键对齐 */
+              scopeParams={{
+                keyword: list.params.keyword,
+                status: list.params.status,
+                source_type: list.params.source_type,
+                source_no: list.params.source_no,
+                warehouse_id: list.params.warehouse_id,
+              }}
+            />
+            {canCreate ? (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => navigate('/inbound/new')}
+              >
+                新建入库单
+              </Button>
+            ) : undefined}
+          </Space>
         }
       />
       <Card size="small">
@@ -216,7 +241,11 @@ export default function InboundPage() {
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有入库单"
           emptyAction={
-            canCreate ? (
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : canCreate ? (
               <Button type="primary" onClick={() => navigate('/inbound/new')}>
                 新建入库单
               </Button>

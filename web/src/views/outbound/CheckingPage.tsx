@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   CHECK_CLAIM_PERMISSION,
   CHECK_EXECUTE_PERMISSION,
+  outboundApi,
   outboundTaskApi,
   type CheckResultType,
   type CheckTask,
@@ -27,7 +28,8 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { resolveErrorMessage } from '@/api/client'
 import type { BatchResult } from '@/api/printing'
-import { TASK_PRIORITY_OPTIONS } from '@/api/task'
+import { TASK_PRIORITY_OPTIONS, type TaskItem } from '@/api/task'
+import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
@@ -168,6 +170,74 @@ export default function CheckingPage() {
     setCheckTarget(record)
     form.resetFields()
     form.setFieldsValue({ pass: 'pass' })
+  }
+
+  /** 弹窗提交（Promise 化，供按钮组 onComplete 消费）：表单校验失败 / 后端拒绝均 reject——
+      错误提示仍由 confirmMutation.onError 负责（SfCompleteNextButton 契约：组件不重复弹错）。
+      fail 路径登记异常后同样视为「完成当前」，可继续推进下一条 */
+  const submitCheckConfirm = async (): Promise<unknown> => {
+    if (!checkTarget) return undefined
+    const v = await form.validateFields()
+    const pass = v.pass === 'pass'
+    const serial = typeof v.serial === 'string' && v.serial.trim() ? v.serial.trim() : undefined
+    return confirmMutation.mutateAsync({
+      id: checkTarget.id,
+      payload: pass ? { pass: true, serial } : { pass: false, result: v.result, serial },
+    })
+  }
+
+  /**
+   * 下一条任务的领取（§2.4）：checking 候选池=PENDING 且 assignee ∈ (本人, 0)——
+   * 未指派任务经 claim 原子指派；已指派本人 → claim 冲突吞掉（幂等，视为可进入，
+   * 与 PadPutawayPage 同口径）；被他人指派/无领取权限 → 由 gotoNext 以详情真实状态复核。
+   */
+  const claimNextCheckTask = async (next: TaskItem) => {
+    if (next.raw_status !== 'PENDING') return
+    try {
+      await outboundTaskApi.checks.claim(next.id)
+      message.success(`已领取任务 ${next.task_no}`)
+    } catch {
+      // 指派冲突：视为可进入，由 gotoNextCheckTask 以详情真实状态裁决
+    }
+  }
+
+  /**
+   * 进入下一条（§2.4「完成后自动下一条」）：GET /api/outbounds/{no} 详情还原完整
+   * CheckTask（TaskItem 无 SKU/序列号——复核表单需完整任务对象，禁止拼半截对象），
+   * id 精确匹配；复核不要求先领取（service_outbound.go ConfirmCheck），PENDING 即可进入；
+   * 其余状态提示并停留列表。source_no=出库单号
+   * （workbench.go nextTaskCheckBranch 投影 ck.outbound_no AS source_no）。
+   */
+  const gotoNextCheckTask = (next: TaskItem) => {
+    const no = next.source_no
+    if (!no) {
+      message.warning(`下一条任务 ${next.task_no} 缺少出库单号，请从列表处理`)
+      invalidate()
+      return
+    }
+    void outboundApi
+      .get(no)
+      .then((detail) => {
+        invalidate()
+        const hit = (detail.checks ?? []).find((c) => String(c.id) === String(next.id))
+        if (!hit) {
+          message.warning(`下一条任务 ${next.task_no} 未能从出库单详情还原，请从列表处理`)
+          return
+        }
+        if (hit.status !== 'PENDING') {
+          message.info(
+            `下一条任务 ${next.task_no} 当前为「${CHECK_STATUS_TAG[hit.status]?.label ?? hit.status}」，请从列表处理`,
+          )
+          return
+        }
+        setCheckTarget(hit)
+        form.resetFields()
+        form.setFieldsValue({ pass: 'pass' })
+      })
+      .catch((e) => {
+        invalidate()
+        message.error(`进入下一条任务失败：${resolveErrorMessage(e)}`)
+      })
   }
 
   /** 复核结论联动：fail 时显示异常类型选择；序列号任务显示扫描输入 */
@@ -422,28 +492,23 @@ export default function CheckingPage() {
 
       {/* 复核确认弹窗（PENDING→DONE/EXCEPTION，不要求先领取）：
           通过时序列号任务的扫描值必须与任务序列号一致（service_outbound.go:630-631）；
-          异常路径 result 必须为五类之一，登记异常中心 */}
+          异常路径 result 必须为五类之一，登记异常中心。
+          footer 按钮组（§2.4 完成后自动下一条）：完成后调 GET /api/tasks/next 重新查询
+          （后端 SQL 排序，前端零推算）→ 领取指派 → 以出库单详情还原完整任务进入弹窗 */}
       <Modal
         open={!!checkTarget}
         title={`复核确认 · ${checkTarget?.check_no ?? ''}`}
-        okText="提交复核"
-        confirmLoading={confirmMutation.isPending}
         onCancel={() => setCheckTarget(null)}
-        onOk={() => {
-          form
-            .validateFields()
-            .then((v) => {
-              const pass = v.pass === 'pass'
-              const serial = typeof v.serial === 'string' && v.serial.trim() ? v.serial.trim() : undefined
-              confirmMutation.mutate({
-                id: checkTarget!.id,
-                payload: pass ? { pass: true, serial } : { pass: false, result: v.result, serial },
-              })
-            })
-            .catch(() => {
-              // 表单校验失败：Form.Item 已内联提示
-            })
-        }}
+        footer={
+          <SfCompleteNextButton
+            onComplete={submitCheckConfirm}
+            nextQuery={{ task_type: 'checking', current_task_id: checkTarget?.id }}
+            onClaimNext={claimNextCheckTask}
+            onNavigateNext={gotoNextCheckTask}
+            completing={confirmMutation.isPending}
+            backText="关闭"
+          />
+        }
       >
         {checkTarget && (
           <Form form={form} layout="vertical">

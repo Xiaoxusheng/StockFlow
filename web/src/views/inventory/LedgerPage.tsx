@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { Card, Typography } from 'antd'
+import { Button, Card, Drawer, Flex, Typography } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -10,11 +10,15 @@ import {
 } from '@/api/inventory'
 import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfRelationNav } from '@/components/common/SfRelationNav'
+import type { RelationContext, RelationItem } from '@/config/relations'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
-import { formatNumber } from '@/utils/format'
+import { formatDateTime, formatNumber } from '@/utils/format'
+import type { PageQuery } from '@/types/api'
 
 const { Text } = Typography
 
@@ -132,6 +136,74 @@ const COLUMNS: ColumnsType<LedgerItem> = [
   { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string) => v || '-' },
 ]
 
+/** 操作列（组件内组装：render 依赖行级关联 Drawer 的 setState） */
+function operationColumn(onOpen: (record: LedgerItem) => void): ColumnsType<LedgerItem>[number] {
+  return {
+    title: '操作',
+    key: 'operation',
+    fixed: 'right',
+    width: 72,
+    render: (_: unknown, record: LedgerItem) => (
+      <Button
+        type="link"
+        size="small"
+        style={{ padding: 0 }}
+        onClick={(e) => {
+          e.stopPropagation()
+          onOpen(record)
+        }}
+      >
+        关联
+      </Button>
+    ),
+  }
+}
+
+/** 关联 Drawer 内嵌列表列（精简口径，同 relations.tsx LEDGER_COLUMNS 的五列） */
+const LEDGER_RELATION_COLUMNS: ColumnsType<LedgerItem> = [
+  { title: '流水号', dataIndex: 'ledger_no', width: 150 },
+  { title: '单据编号', dataIndex: 'business_no', width: 150, render: (v: string) => v || '-' },
+  {
+    title: '变更类型',
+    dataIndex: 'change_type',
+    width: 100,
+    render: (v: InventoryChangeType) => CHANGE_TYPE_LABEL[v] ?? v,
+  },
+  { title: '数量', dataIndex: 'qty_change', width: 88, align: 'right', render: renderQty },
+  { title: '发生时间', dataIndex: 'created_at', width: 150, render: (v: string) => formatDateTime(v) },
+]
+
+/** 行级 extra 关联项：同单据流水（LedgerPage 行为计划 §2.6 接入点；inventory/ledger 列表
+ * 支持 business_no 精确过滤——relations.tsx 文件头白名单实读口径，不改共享注册表） */
+function ledgerBusinessRelation(): RelationItem {
+  return {
+    key: 'ledger-business',
+    label: '同单据流水',
+    permission: 'inventory:ledger:view',
+    hint: '该单据编号下的全部库存流水',
+    to: (ctx: RelationContext) => {
+      const no = pickBusinessNo(ctx)
+      return no ? `/inventory/ledger?business_no=${encodeURIComponent(no)}` : null
+    },
+    list: (ctx: RelationContext) => {
+      const no = pickBusinessNo(ctx)
+      return no
+        ? {
+            title: `同单据流水（${no}）`,
+            fetch: (q: PageQuery) => inventoryApi.ledger({ ...q, business_no: no } as LedgerQuery),
+            columns: LEDGER_RELATION_COLUMNS,
+          }
+        : null
+    },
+  }
+}
+
+function pickBusinessNo(ctx: RelationContext): string | undefined {
+  const value = ctx.business_no
+  if (value === undefined || value === null || value === '') return undefined
+  return String(value)
+}
+
 /** 可选维度 ID 0 值显示占位符（0=非批次/不在库） */
 function renderIdOrDash(value: LedgerItem['batch_id']): string {
   return String(value) === '0' ? '-' : String(value)
@@ -151,10 +223,36 @@ export default function LedgerPage() {
 
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+  /** 行级关联业务 Drawer（计划 §2.6 接入点「LedgerPage 行」）：SfRelationNav 承载 */
+  const [relationRow, setRelationRow] = useState<LedgerItem | null>(null)
+
+  const columns: ColumnsType<LedgerItem> = [...COLUMNS, operationColumn(setRelationRow)]
+  /** 空态 CTA：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空 URL 并回第 1 页，真实动作） */
+  const hasFilters = Object.keys(list.params).length > 0
 
   return (
     <div className="sf-page">
-      <SfPageHeader title="库存流水" subtitle="库存变化完整轨迹，与库存保持一致" />
+      <SfPageHeader
+        title="库存流水"
+        subtitle="库存变化完整轨迹，与库存保持一致"
+        extra={
+            <SfExportButton
+              module="INVENTORY_LEDGER"
+              /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create（同 StockListPage） */
+              permission="datax:export:create"
+              /* 导出当前视图（计划 §2.11）：严格透传 INVENTORY_LEDGER 导出行源的筛选白名单键
+               * （internal/inventory/datax_export.go：warehouse_id/sku_id/change_type/
+               * business_no/serial_no，serial_no 为行源 2026-10-06 补齐键，与列表侧同为精确匹配） */
+              scopeParams={{
+                warehouse_id: list.params.warehouse_id,
+                sku_id: list.params.sku_id,
+                change_type: list.params.change_type,
+                business_no: list.params.business_no,
+                serial_no: list.params.serial_no,
+              }}
+            />
+        }
+      />
       <Card size="small">
         <SfSearchForm
           fields={[
@@ -184,7 +282,7 @@ export default function LedgerPage() {
           onHiddenColumnsChange={setHiddenColumns}
           storageKey="inventory-ledger"
           rowKey="id"
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -194,9 +292,44 @@ export default function LedgerPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存流水"
-          scrollX={1960}
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : undefined
+          }
+          scrollX={2032}
         />
       </Card>
+
+      {/* 行级关联业务（计划 §2.6「LedgerPage 行」）：SKU 视角关联项由共享注册表
+          RELATIONS.sku 承载（库存/流水/批次/序列号/调拨出入库/盘点调整/追溯——均以
+          sku_id 为主键，真实可达），同单据流水经 extra 追加（不改共享注册表）；
+          权限 fail-closed 过滤与缺参不渲染由 SfRelationNav 统一兜底 */}
+      <Drawer
+        title={relationRow ? `关联业务 · ${relationRow.ledger_no || '库存流水'}` : '关联业务'}
+        open={relationRow !== null}
+        width={420}
+        destroyOnHidden
+        onClose={() => setRelationRow(null)}
+      >
+        {relationRow && (
+          <Flex vertical gap={8}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              以该流水行的 SKU / 单据编号为上下文查看关联业务；点击关联项优先在抽屉内嵌查看，不离开当前页。
+            </Typography.Text>
+            <SfRelationNav
+              entity="sku"
+              context={{
+                sku_id: relationRow.sku_id,
+                business_no: relationRow.business_no || undefined,
+              }}
+              extra={[ledgerBusinessRelation()]}
+            />
+          </Flex>
+        )}
+      </Drawer>
     </div>
   )
 }

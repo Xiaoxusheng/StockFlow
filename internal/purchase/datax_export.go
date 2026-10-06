@@ -103,6 +103,20 @@ func dateCell(t time.Time) datax.CellValue {
 	return datax.CellValue{T: datax.CellDate, D: t.Format("2006-01-02 15:04:05")}
 }
 
+// applyWarehouseScope 仓库数据权限（fail-closed：指定范围空集 = 不可见任何行；
+// 与 inventory/stockops/sales/warehouse 行源同口径，plan §13.6）。此前 purchase 三行源
+// 均未按 ExportFilter 仓库范围过滤（contract.go:181-183 契约要求），受限仓库数据权限的
+// 用户导出范围会宽于其列表可见范围（列表经 applyScope 过滤）——2026-10-06 集成轮补齐。
+func applyWarehouseScope(q *gorm.DB, f datax.ExportFilter, column string) *gorm.DB {
+	if f.AllWarehouses {
+		return q
+	}
+	if len(f.WarehouseIDs) == 0 {
+		return q.Where("1 = 0")
+	}
+	return q.Where(column+" IN ?", f.WarehouseIDs)
+}
+
 // ---- 采购订单行源（PURCHASE_ORDER）----
 
 // POExportSource 采购订单行源。
@@ -142,12 +156,23 @@ func (s *POExportSource) Count(ctx context.Context, f datax.ExportFilter) (int64
 	return n, nil
 }
 
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 PurchaseListPage SfExportButton
+// scopeParams 对齐（keyword/status/supplier_id/warehouse_id）——keyword/warehouse_id
+// 此前按"未知键忽略"静默丢弃，导出范围会宽于当前视图（2026-10-06 集成轮补齐；
+// 语义与列表 ListPOs 一致：keyword 按 po_no ILIKE 模糊，repository.go:294-309）。
 func (s *POExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
+	q = applyWarehouseScope(q, f, "warehouse_id")
+	if kw := likeEscape(f.Filters["keyword"]); kw != "" {
+		q = q.Where("po_no ILIKE ?", "%"+kw+"%")
+	}
 	if st := f.Filters["status"]; st != "" {
 		q = q.Where("status = ?", st)
 	}
 	if sup := f.Filters["supplier_id"]; sup != "" {
 		q = q.Where("supplier_id = ?", sup)
+	}
+	if wh := f.Filters["warehouse_id"]; wh != "" {
+		q = q.Where("warehouse_id = ?", wh)
 	}
 	return applyCommon(q, f)
 }
@@ -216,9 +241,24 @@ func (s *InboundExportSource) Count(ctx context.Context, f datax.ExportFilter) (
 	return n, nil
 }
 
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 InboundPage SfExportButton
+// scopeParams 对齐（keyword/status/source_type/source_no/warehouse_id）——
+// keyword/source_type/source_no 此前按"未知键忽略"静默丢弃，导出范围会宽于当前视图
+// （2026-10-06 集成轮补齐；语义与列表 ListInbounds 一致：keyword 按 inbound_no/source_no
+// ILIKE 模糊、source_no 精确匹配，repository.go:389-407）。
 func (s *InboundExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
+	q = applyWarehouseScope(q, f, "warehouse_id")
+	if kw := likeEscape(f.Filters["keyword"]); kw != "" {
+		q = q.Where("inbound_no ILIKE ? OR source_no ILIKE ?", "%"+kw+"%", "%"+kw+"%")
+	}
 	if st := f.Filters["status"]; st != "" {
 		q = q.Where("status = ?", st)
+	}
+	if stp := f.Filters["source_type"]; stp != "" {
+		q = q.Where("source_type = ?", stp)
+	}
+	if sn := f.Filters["source_no"]; sn != "" {
+		q = q.Where("source_no = ?", sn)
 	}
 	if wh := f.Filters["warehouse_id"]; wh != "" {
 		q = q.Where("warehouse_id = ?", wh)
@@ -299,9 +339,24 @@ func (s *QualityExportSource) Count(ctx context.Context, f datax.ExportFilter) (
 	return n, nil
 }
 
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 QualityInspectionListPage
+// SfExportButton scopeParams 对齐（keyword/status/source_type/source_no/warehouse_id）——
+// keyword/source_type/source_no 此前按"未知键忽略"静默丢弃，导出范围会宽于当前视图
+// （2026-10-06 集成轮补齐；语义与列表 ListQCs 一致：keyword 按 qc_no/source_no ILIKE
+// 模糊、source_no 精确匹配，repository.go:544-562）。
 func (s *QualityExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
+	q = applyWarehouseScope(q, f, "warehouse_id")
+	if kw := likeEscape(f.Filters["keyword"]); kw != "" {
+		q = q.Where("qc_no ILIKE ? OR source_no ILIKE ?", "%"+kw+"%", "%"+kw+"%")
+	}
 	if st := f.Filters["status"]; st != "" {
 		q = q.Where("status = ?", st)
+	}
+	if stp := f.Filters["source_type"]; stp != "" {
+		q = q.Where("source_type = ?", stp)
+	}
+	if sn := f.Filters["source_no"]; sn != "" {
+		q = q.Where("source_no = ?", sn)
 	}
 	if wh := f.Filters["warehouse_id"]; wh != "" {
 		q = q.Where("warehouse_id = ?", wh)

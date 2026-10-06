@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { Card, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
@@ -14,7 +14,9 @@ import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
@@ -72,6 +74,9 @@ export default function OutboundPage() {
     fetch: (q) => outboundApi.list(q),
     urlSync: true,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，映射失败降级为 ID，不造假数据）
   const warehouseOptions = useQuery({
@@ -142,6 +147,20 @@ export default function OutboundPage() {
       <SfPageHeader
         title="出库管理"
         subtitle="分配 → 拣货 → 复核 → 打包 → 发货"
+        extra={
+          /* 导出当前视图（§2.11）：scopeParams 仅透传 SALES_OUTBOUND 行源白名单键
+             （internal/sales/datax_export.go:60-68：warehouse_id/status/so_no——
+             outbound_no 列表可筛但行源不支持，如实不传）；排序/列为一期固定口径（计划 §1.2） */
+          <SfExportButton
+            module="SALES_OUTBOUND"
+            permission="datax:export:create"
+            scopeParams={{
+              warehouse_id: list.params.warehouse_id,
+              status: list.params.status,
+              so_no: list.params.so_no,
+            }}
+          />
+        }
       />
       <Card size="small">
         <SfSearchForm
@@ -153,16 +172,31 @@ export default function OutboundPage() {
               name: 'warehouse_id',
               label: '仓库',
               control: 'select',
-              options: (warehouseOptions.data ?? []).map((w) => ({
-                label: `${w.name}（${w.code}）`,
-                value: idKey(w.id),
+              options: (warehouseOptions.data ?? []).map((item) => ({
+                label: `${item.name}（${item.code}）`,
+                value: idKey(item.id),
               })),
             },
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
+          /* 保存视图：与查询/重置同行渲染（SalesOutboundListPage 同款形态，mode=url） */
+          extraActions={
+            <SfViewBar
+              pageKey="outbound.order"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
         />
         <SfTable<OutboundOrder>
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="outbound-orders"
           rowKey="id"
           columns={columns}

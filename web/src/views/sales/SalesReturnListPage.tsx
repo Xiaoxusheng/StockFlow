@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SalesReturnCreateDrawer } from './SalesReturnCreateDrawer'
@@ -54,6 +55,9 @@ export default function SalesReturnListPage() {
     fetch: (q) => salesApi.returns.list(q),
     urlSync: true,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // 仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
   const warehousesQuery = useQuery({
@@ -129,8 +133,23 @@ export default function SalesReturnListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
+          /* 保存视图：与查询/重置同行渲染（mode=url，urlSync 页——视图应用经 usePagedList API 写 URL） */
+          extraActions={
+            <SfViewBar
+              pageKey="sales.return"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
         />
         <SfTable<SalesReturnOrder>
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="sales-returns"
           rowKey="id"
           columns={columns}

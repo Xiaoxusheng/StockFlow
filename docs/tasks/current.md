@@ -38,7 +38,7 @@
 
 **清偿轮（2026-10-06 续，commit 22e1856 / 803ef67）**：清掉两项会致能力失真的缺口——① **批量领取前端接线**（拣货/复核/我的任务三处：多选 + 批量领取 + BatchResultDrawer，`api/outbound.ts` 补 picks/checks batchClaim；我的任务页按行 task_type 分组调用后合并结果）；② **任务优先级行内设置入口**（拣货/复核列表优先级列 + Pad 上架信息卡；为此补**后端 priority 字段下发**——三张任务表模型此前未映射迁移 000023 的 priority 列，导致 `/api/tasks/next` 排序层无数据来源）。门禁：后端 go build/vet/test 全量绿、前端 typecheck/lint/build 全绿。
 
-**遗留（截至清偿轮，剩 4 项）**：② PC 出库四作业页（拣货/复核/打包/发货）未接「完成并处理下一条」（Pad 收货/上架已接）；③ 导出当前视图仅库存页透传真实筛选（其余页维持既有 SfExportButton 形态）；④ useIdempotentMutation 已就绪但未切换既有提交点（收货/打包/发货仍用手工幂等键，功能等价）；⑥ 浏览器渲染/reduced-motion/暗色人工走查未执行（无自动化工具链）。
+**遗留（截至清偿轮，剩 4 项）**：② PC 出库四作业页（拣货/复核/打包/发货）未接「完成并处理下一条」（Pad 收货/上架已接；拣货/复核两页已随三域页面接入轮接 SfCompleteNextButton，打包/发货因 /api/tasks/next 白名单五值不含仍挂账）；③ 导出当前视图透传缺口——三域页面接入轮已扩至库存/采购/质检/销售出库页，集成收口轮（2026-10-06）行源白名单补齐 7 源 10 键 + purchase 行源仓库数据权限修复 + Transfer/Count/Exception 三页补接导出按钮，其余页（Batch/Serial/Receipt/SalesOrder/拣货/复核）因后端无导出行源维持不放假入口，详见 changelog 同日条目；④ useIdempotentMutation 已就绪但未切换既有提交点（收货/打包/发货仍用手工幂等键，功能等价）；⑥ 浏览器渲染/reduced-motion/暗色人工走查未执行（无自动化工具链）。
 
 **并行会话说明**：本轮工作区存在另一会话的在途产物（PackingPage/ShipmentPage 打包/发货写端点接线、PadPutawayPage 扫码接入、SfTable 受控列半成品、SfViewBar 组件主体）——已由本会话补齐其缺口（SfTable 派生值定义、SfViewBar 缺失 import、BatchResultDrawer 类型来源）并统一收口，禁止重复实现同一能力。
 

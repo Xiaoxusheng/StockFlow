@@ -101,6 +101,9 @@ func (s *TransferExportSource) Columns() []datax.Column {
 func (s *TransferExportSource) Summary() []datax.SummaryRow { return nil }
 
 // applyFilters 筛选（白名单键 + 数据权限：调出仓或调入仓在范围内可见）。
+// 键清单与 TransferListPage SfExportButton scopeParams 对齐（status/type/transfer_no）——
+// transfer_no 此前按"未知键忽略"静默丢弃（2026-10-06 集成轮补齐；与列表侧同为精确匹配，
+// repo_gorm.go:235）。
 func (s *TransferExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
 	if !f.AllWarehouses {
 		if len(f.WarehouseIDs) == 0 {
@@ -114,6 +117,9 @@ func (s *TransferExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *g
 	}
 	if tt := f.Filters["type"]; tt != "" {
 		q = q.Where("type = ?", tt)
+	}
+	if no := f.Filters["transfer_no"]; no != "" {
+		q = q.Where("transfer_no = ?", no)
 	}
 	return applyCommon(q, f)
 }
@@ -189,7 +195,9 @@ func (s *CountExportSource) Columns() []datax.Column {
 // Summary 合计声明（无）。
 func (s *CountExportSource) Summary() []datax.SummaryRow { return nil }
 
-// applyFilters 筛选（白名单键 + 数据权限）。
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 CountTaskListPage SfExportButton
+// scopeParams 对齐（status/warehouse_id/count_no）——count_no 此前按"未知键忽略"静默
+// 丢弃（2026-10-06 集成轮补齐；与列表侧同为精确匹配，repo_gorm.go:315）。
 func (s *CountExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
 	if !f.AllWarehouses {
 		if len(f.WarehouseIDs) == 0 {
@@ -203,6 +211,9 @@ func (s *CountExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm
 	}
 	if wh := f.Filters["warehouse_id"]; wh != "" {
 		q = q.Where("warehouse_id = ?", wh)
+	}
+	if no := f.Filters["count_no"]; no != "" {
+		q = q.Where("count_no = ?", no)
 	}
 	return applyCommon(q, f)
 }

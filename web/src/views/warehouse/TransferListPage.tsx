@@ -25,6 +25,7 @@ import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
@@ -292,6 +293,22 @@ export default function TransferListPage() {
       <SfPageHeader
         title="调拨"
         subtitle="调拨单：仓库→仓库 / 库位→库位，两端均生成库存流水（business-flow.md §10.1）"
+        extra={
+          /* 导出当前视图（计划 §5.4 F3 列表页接入集，集成轮补齐）：scopeParams 严格透传
+             TransferExportSource 白名单认领键（status/type/transfer_no，
+             internal/stockops/datax_export.go；transfer_no 为行源 2026-10-06 补齐键，
+             与列表侧同为精确匹配）——warehouse_id 列表筛选为调出仓维度快捷键，行源数据
+             权限按调出仓/调入仓双列过滤，BY_FILTER 无该键如实不传 */
+          <SfExportButton
+            module="TRANSFER"
+            permission="datax:export:create"
+            scopeParams={{
+              status: list.params.status,
+              type: list.params.type,
+              transfer_no: list.params.transfer_no,
+            }}
+          />
+        }
       />
       <Card size="small">
         <SfToolbar

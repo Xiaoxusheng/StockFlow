@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card, Typography } from 'antd'
+import { Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type BatchItem, type BatchQuery } from '@/api/inventory'
@@ -64,6 +64,10 @@ export default function BatchListPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作；无筛选空态=批次台账尚未产生，不放假入口） */
+  const hasFilters = Object.keys(list.params).length > 0
+
   return (
     <div className="sf-page">
       <SfPageHeader
@@ -108,6 +112,13 @@ export default function BatchListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有批次库存"
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : undefined
+          }
           scrollX={1430}
         />
       </Card>

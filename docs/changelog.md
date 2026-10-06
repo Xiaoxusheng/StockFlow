@@ -14,6 +14,17 @@
 
 ## 文档记录
 
+## [2026-10-06] 修复：导出当前视图全链路收口——行源白名单补齐 + purchase 行源仓库数据权限修复 + 三页补接导出按钮
+
+- **背景**：效率层一期三域页面接入（库存/采购入库质检/销售出库退货）交付后的集成收口轮，处理各域 followups：导出行源筛选白名单与列表筛选逐键对齐（"导出=当前视图"承诺）、遗漏页面接线、全局一致性核对。只做接线与最小修复，不扩冻结导出模块集（registry.go 十六值 + 000011 CHECK 同源，扩集须先改 excel.md §2.1 立项）。
+- **导出行源白名单补齐（7 源 10 键，语义与各域列表 repo 完全一致）**：INVENTORY_LEDGER 增 `serial_no`（精确，inventory/repository.go ledgerFilter）；PURCHASE_ORDER 增 `keyword`（po_no ILIKE）/`warehouse_id`；PURCHASE_INBOUND 与 QUALITY 各增 `keyword`（inbound_no|qc_no + source_no ILIKE）/`source_type`/`source_no`（精确）；TRANSFER 增 `transfer_no`、COUNT 增 `count_no`、EXCEPTION 增 `source_type`/`source_no`（均精确）。此前这些键按"未知键忽略"静默丢弃（datax contract.go），按其筛选后导出范围宽于当前视图、导出文件 meta（describeExportCondition）失真。前端同步：LedgerPage/PurchaseListPage/InboundPage/QualityInspectionListPage 四页 scopeParams 补键，页面注释从"宁缺勿假"口径改记补齐出处。
+- **purchase 行源仓库数据权限修复（安全）**：POExportSource/InboundExportSource/QualityExportSource 此前未按 ExportFilter 仓库范围过滤（contract.go:181-183 契约要求、inventory/sales/stockops/warehouse/returns 行源均有），受限仓库数据权限用户导出范围宽于其列表可见范围（列表经 applyScope 过滤）——补 `applyWarehouseScope` fail-closed（空集=不可见任何行）。
+- **三页补接「导出当前视图」（计划 §5.4 F3 列表页接入集收尾）**：TransferListPage（TRANSFER）、CountTaskListPage（COUNT）、ExceptionCenterPage（EXCEPTION）此前有 SfViewBar 无导出按钮，而后端行源早已装配（router.go:349-351）——补 SfExportButton（permission=datax:export:create fail-closed，scopeParams 仅透传各自行源白名单键）。至此 F3 十四页清单中：11 页有真实导出（含库存 4 页既有），Batch/Serial/Receipt/SalesOrder/Picking/Checking 六页后端无对应导出行源，维持不放假入口（挂账不动）。
+- **followup 核销**：purchase 域报的「ExportTaskPage BY_FILTER 预置筛选不回显」核实为过时——回显 Alert 已随 905884f 交付（ExportTaskPage.tsx:471-481，`key=value` 逐项只读展示），本轮零改动。
+- **全局一致性核对（五件事）**：快捷键 Ctrl/Cmd+R=shortcuts.ts:55-59 invalidateQueries({refetchType:'active'}) 由 PcLayout ShortcutProvider 全局承载；保存视图 SfViewBar 十八页 pageKey 全站唯一；批量结果 BatchResultDrawer 为唯一承载面（Picking/Checking/MyTasks/PrintingCenter + Pad 下一条按钮组）；关联业务 SfRelationNav 计划 §2.6 七处接入点全接（Device/Exception 详情不在计划清单）；导出按钮 11 页 scopeParams 键集与行源白名单逐一比对一致。
+- **门禁（本会话实测）**：`gofmt -l internal` 空；`go build ./... && go vet ./...` 绿；`go test ./...` 28 包全 ok；`cd web && npm run build` ✓ built in 30.78s；改动七文件 eslint 0 问题（全仓 0 错误 3 存量警告：usePagedList.ts:163、ShipmentPage.tsx:166、PadReceivePage.tsx:351，非本轮引入）。
+- **遗留挂账**：① 新导出模块（BATCHES/SERIALS/RECEIPT/SALES_ORDER/拣货复核任务/打包/发货/销售退货）需先改 excel.md §2.1 冻结清单 + 000011 CHECK 迁移评估 + registry + 行源，再按本轮同构接按钮；② /api/tasks/next 白名单五值无 packing/shipment（计划 §1.2 冻结不做）；③ 浏览器运行时人工走查（关联 Drawer 叠加/空态 CTA Light+Dark）与任务下一条链路连库验收待环境。
+
 ## [2026-10-06] 功能：效率层一期后端集成收口（幂等中间件挂载 + 批量结果收敛 + 迁移 000024）
 
 - **背景**：三位并行实现者交付落库/在途后（B1 用户态 ae85b0e、B2 搜索 315565d+导航补齐、B3 任务流 0b8e8a6、B4 批量与导入 b220dea、C 幂等/批量结果/错误 Excel 在途），本波次按各 wiringNotes 完成集成装配：router 挂载、批量端点统一结构、迁移收口、文档回写。只做接线与必要小修，不重写他人实现。

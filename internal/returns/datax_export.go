@@ -82,7 +82,10 @@ func (s *ExceptionExportSource) Columns() []datax.Column {
 // Summary 合计声明（无）。
 func (s *ExceptionExportSource) Summary() []datax.SummaryRow { return nil }
 
-// applyFilters 筛选（白名单键 + TIME_RANGE + SELECTED）。
+// applyFilters 筛选（白名单键 + TIME_RANGE + SELECTED）。键清单与 ExceptionCenterPage
+// SfExportButton scopeParams 对齐（status/type/source_type/source_no）——source_type/
+// source_no 此前按"未知键忽略"静默丢弃（2026-10-06 集成轮补齐；语义与列表一致：均精确
+// 匹配，returns/repository.go:315-319）。
 func (s *ExceptionExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
 	if st := f.Filters["status"]; st != "" {
 		q = q.Where("status = ?", st)
@@ -92,6 +95,12 @@ func (s *ExceptionExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *
 	}
 	if an := f.Filters["assignee_id"]; an != "" {
 		q = q.Where("assignee_id = ?", an)
+	}
+	if stp := f.Filters["source_type"]; stp != "" {
+		q = q.Where("source_type = ?", stp)
+	}
+	if sn := f.Filters["source_no"]; sn != "" {
+		q = q.Where("source_no = ?", sn)
 	}
 	if f.TimeFrom != nil {
 		q = q.Where("created_at >= ?", *f.TimeFrom)

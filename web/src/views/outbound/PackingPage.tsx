@@ -273,6 +273,14 @@ export default function PackingPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有打包记录"
+          emptyAction={
+            /* 空状态 CTA：打包动作由本页发起（选 CHECKED 出库单），有权限时引导直达 */
+            canPack ? (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setPackOpen(true)}>
+                新建打包
+              </Button>
+            ) : undefined
+          }
           scrollX={1470}
         />
       </Card>

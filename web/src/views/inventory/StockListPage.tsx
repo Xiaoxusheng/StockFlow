@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card } from 'antd'
+import { Button, Card } from 'antd'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { inventoryApi, type StockItem, type StockQuery } from '@/api/inventory'
@@ -32,6 +32,10 @@ export default function StockListPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined = 非受控（沿用 localStorage 列偏好）；
    * 应用视图后置为视图的 hidden 列键数组，用户手动改列经 onChange 回写（不禁用本地持久化） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作；无筛选空态=库存尚未产生，不放假入口） */
+  const hasFilters = Object.keys(list.params).length > 0
 
   // 键名取 snake_case 汇总字段（StockSummary；口径见 api/inventory.ts 注释：
   // abnormal = 冻结+残次、near_expiry 含已过期）。
@@ -116,6 +120,13 @@ export default function StockListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有库存"
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : undefined
+          }
           scrollX={1520}
           onRow={(record: StockItem) => ({
             onClick: () => navigate(`/inventory/stock/${encodeURIComponent(String(record.id))}`),

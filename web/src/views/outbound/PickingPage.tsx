@@ -6,6 +6,7 @@ import type { ColumnsType } from 'antd/es/table'
 import {
   PICK_CLAIM_PERMISSION,
   PICK_EXECUTE_PERMISSION,
+  outboundApi,
   outboundTaskApi,
   type PickTask,
   type PickTaskQuery,
@@ -34,7 +35,8 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { resolveErrorMessage } from '@/api/client'
 import type { BatchResult } from '@/api/printing'
-import { TASK_PRIORITY_OPTIONS } from '@/api/task'
+import { TASK_PRIORITY_OPTIONS, type TaskItem } from '@/api/task'
+import { SfCompleteNextButton } from '@/components/task/SfCompleteNextButton'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
@@ -176,6 +178,82 @@ export default function PickingPage() {
     setConfirmTarget(record)
     form.resetFields()
     form.setFieldsValue({ picked_qty: record.qty })
+  }
+
+  /** 弹窗提交（Promise 化，供按钮组 onComplete 消费）：表单校验失败 / 后端拒绝均 reject——
+      错误提示仍由 confirmMutation.onError 负责，组件不重复弹错（SfCompleteNextButton 契约） */
+  const submitPickConfirm = async (): Promise<unknown> => {
+    if (!confirmTarget) return undefined
+    const v = await form.validateFields()
+    const lines =
+      typeof v.serials === 'string'
+        ? v.serials
+            .split('\n')
+            .map((s: string) => s.trim())
+            .filter(Boolean)
+        : []
+    return confirmMutation.mutateAsync({
+      id: confirmTarget.id,
+      payload: {
+        picked_qty: v.picked_qty,
+        ...(lines.length > 0 ? { serials: lines } : {}),
+      },
+    })
+  }
+
+  /**
+   * 下一条任务的领取（§2.4）：候选池含 PENDING 未领取 → claim 原子抢占；
+   * 本人已领取（CLAIMED/PICKING，raw_status 判定）→ 无需重复领取。
+   * 领取冲突（被他人抢先/无领取权限 403）吞掉——与 PadPutawayPage 同口径：
+   * 后端状态机为最终裁决，能否进入由 gotoNext 以出库单详情的真实状态复核。
+   */
+  const claimNextPickTask = async (next: TaskItem) => {
+    if (next.raw_status !== 'PENDING') return
+    try {
+      await outboundTaskApi.picks.claim(next.id)
+      message.success(`已领取任务 ${next.task_no}`)
+    } catch {
+      // 领取冲突：视为可进入，由 gotoNextPickTask 以详情真实状态裁决
+    }
+  }
+
+  /**
+   * 进入下一条（§2.4「完成后自动下一条」）：GET /api/outbounds/{no} 详情还原完整
+   * PickTask（TaskItem 无 SKU/库位/序列号管理标记——确认表单需完整任务对象，
+   * 禁止用 TaskItem 拼半截对象造假），id 精确匹配；仅 CLAIMED（已领取待确认）
+   * 可进入确认弹窗，其余状态提示并停留列表。source_no=出库单号
+   * （workbench.go nextTaskPickBranch 投影 pk.outbound_no AS source_no）。
+   */
+  const gotoNextPickTask = (next: TaskItem) => {
+    const no = next.source_no
+    if (!no) {
+      message.warning(`下一条任务 ${next.task_no} 缺少出库单号，请从列表处理`)
+      invalidate()
+      return
+    }
+    void outboundApi
+      .get(no)
+      .then((detail) => {
+        invalidate()
+        const hit = (detail.picks ?? []).find((p) => String(p.id) === String(next.id))
+        if (!hit) {
+          message.warning(`下一条任务 ${next.task_no} 未能从出库单详情还原，请从列表处理`)
+          return
+        }
+        if (hit.status !== 'CLAIMED') {
+          message.info(
+            `下一条任务 ${next.task_no} 当前为「${PICK_STATUS_TAG[hit.status]?.label ?? hit.status}」，请从列表处理`,
+          )
+          return
+        }
+        setConfirmTarget(hit)
+        form.resetFields()
+        form.setFieldsValue({ picked_qty: hit.qty })
+      })
+      .catch((e) => {
+        invalidate()
+        message.error(`进入下一条任务失败：${resolveErrorMessage(e)}`)
+      })
   }
 
   // SKU / 仓库 / 库位 ID → 编码/名称（options.ts：一次取全基础资料，失败降级为 ID）
@@ -447,36 +525,23 @@ export default function PickingPage() {
       />
 
       {/* 拣货确认弹窗（CLAIMED→PICKED）：实拣数量 ≤ 任务量（后端 ErrPickExceed 守卫）；
-          序列号 SKU 逐件采集，行数须与实拣数量一致（service_outbound.go validateSerialsForPick） */}
+          序列号 SKU 逐件采集，行数须与实拣数量一致（service_outbound.go validateSerialsForPick）。
+          footer 按钮组（§2.4 完成后自动下一条）：完成后调 GET /api/tasks/next 重新查询
+          （后端 SQL 排序，前端零推算）→ 领取 → 以出库单详情还原完整任务进入弹窗 */}
       <Modal
         open={!!confirmTarget}
         title={`拣货确认 · ${confirmTarget?.pick_no ?? ''}`}
-        okText="确认拣货"
-        confirmLoading={confirmMutation.isPending}
         onCancel={() => setConfirmTarget(null)}
-        onOk={() => {
-          form
-            .validateFields()
-            .then((v) => {
-              const lines =
-                typeof v.serials === 'string'
-                  ? v.serials
-                      .split('\n')
-                      .map((s: string) => s.trim())
-                      .filter(Boolean)
-                  : []
-              confirmMutation.mutate({
-                id: confirmTarget!.id,
-                payload: {
-                  picked_qty: v.picked_qty,
-                  ...(lines.length > 0 ? { serials: lines } : {}),
-                },
-              })
-            })
-            .catch(() => {
-              // 表单校验失败：Form.Item 已内联提示
-            })
-        }}
+        footer={
+          <SfCompleteNextButton
+            onComplete={submitPickConfirm}
+            nextQuery={{ task_type: 'picking', current_task_id: confirmTarget?.id }}
+            onClaimNext={claimNextPickTask}
+            onNavigateNext={gotoNextPickTask}
+            completing={confirmMutation.isPending}
+            backText="关闭"
+          />
+        }
       >
         {confirmTarget && (
           <Form form={form} layout="vertical">

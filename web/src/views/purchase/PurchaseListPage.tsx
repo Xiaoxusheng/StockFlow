@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Typography } from 'antd'
+import { Button, Card, Space, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -23,6 +23,7 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
@@ -96,6 +97,10 @@ export default function PurchaseListPage() {
 
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作）；无筛选空态才放「新建采购订单」真实入口（同 StockListPage） */
+  const hasFilters = Object.keys(list.params).length > 0
 
   const columns: ColumnsType<PurchaseOrder> = [
     { title: '采购单号', dataIndex: 'po_no', width: 180, fixed: 'left' },
@@ -184,15 +189,33 @@ export default function PurchaseListPage() {
         title="采购订单"
         subtitle="草稿 → 待审核 → 已审核 → 到货 → 完成"
         extra={
-          canCreate ? (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => navigate('/purchases/new')}
-            >
-              新建采购订单
-            </Button>
-          ) : undefined
+          <Space wrap>
+            <SfExportButton
+              module="PURCHASE_ORDER"
+              /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create
+                 （internal/auth/permissions.go:307）——持列表权限而无导出权限者不渲染该按钮 */
+              permission="datax:export:create"
+              /* 导出当前视图：严格透传 POExportSource.applyFilters 白名单认领的筛选键
+                 （keyword/status/supplier_id/warehouse_id，internal/purchase/datax_export.go；
+                 keyword/warehouse_id 为行源 2026-10-06 补齐键，语义与列表 ListPOs 一致：
+                 keyword 按 po_no ILIKE 模糊）——导出范围与当前视图逐键对齐 */
+              scopeParams={{
+                keyword: list.params.keyword,
+                status: list.params.status,
+                supplier_id: list.params.supplier_id,
+                warehouse_id: list.params.warehouse_id,
+              }}
+            />
+            {canCreate ? (
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => navigate('/purchases/new')}
+              >
+                新建采购订单
+              </Button>
+            ) : undefined}
+          </Space>
         }
       />
       <Card size="small">
@@ -230,7 +253,11 @@ export default function PurchaseListPage() {
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有采购订单"
           emptyAction={
-            canCreate ? (
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : canCreate ? (
               <Button type="primary" onClick={() => navigate('/purchases/new')}>
                 新建采购订单
               </Button>

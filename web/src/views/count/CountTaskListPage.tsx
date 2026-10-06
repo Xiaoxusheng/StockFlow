@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Button, Card, Typography } from 'antd'
+import { Button, Card, Space, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import {
   COUNT_CREATE_PERMISSION,
   COUNT_SCOPE_MODE_LABEL,
@@ -234,11 +235,26 @@ export default function CountTaskListPage() {
         title="盘点中心"
         subtitle="全盘 / 按库区 / 按货架 / 按库位 / 按 SKU（单号 CK- 前缀，DRAFT→COUNTING→PENDING_REVIEW→COMPLETED）"
         extra={
-          canCreate ? (
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/counts/new')}>
-              新建盘点单
-            </Button>
-          ) : undefined
+          <Space wrap>
+            {/* 导出当前视图（计划 §5.4 F3 列表页接入集，集成轮补齐）：scopeParams 严格透传
+                CountExportSource 白名单认领键（status/warehouse_id/count_no，
+                internal/stockops/datax_export.go；count_no 为行源 2026-10-06 补齐键，
+                与列表侧同为精确匹配） */}
+            <SfExportButton
+              module="COUNT"
+              permission="datax:export:create"
+              scopeParams={{
+                warehouse_id: list.params.warehouse_id,
+                status: list.params.status,
+                count_no: list.params.count_no,
+              }}
+            />
+            {canCreate ? (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/counts/new')}>
+                新建盘点单
+              </Button>
+            ) : undefined}
+          </Space>
         }
       />
       <Card size="small">

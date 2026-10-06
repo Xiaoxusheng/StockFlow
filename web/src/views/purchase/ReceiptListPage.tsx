@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Card } from 'antd'
+import { Button, Card } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
@@ -36,6 +36,10 @@ export default function ReceiptListPage() {
 
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作）；收货由 Pad 收货作业产生，PC 无创建入口，不放假按钮 */
+  const hasFilters = Object.keys(list.params).length > 0
 
   const columns: ColumnsType<Receipt> = [
     { title: '收货单号', dataIndex: 'receipt_no', width: 180, fixed: 'left' },
@@ -85,6 +89,8 @@ export default function ReceiptListPage() {
       <SfPageHeader
         title="收货"
         subtitle="到货 → 收货 → 质检 → 上架 → 入库完成"
+        /* 导出当前视图：datax 十六导出模块（internal/datax/registry.go:21-38）无收货行源，
+           不放假导出入口；待后端补 RECEIPT 行源后接 SfExportButton（followup） */
       />
       <Card size="small">
         <SfSearchForm
@@ -120,6 +126,13 @@ export default function ReceiptListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有收货记录"
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : undefined
+          }
           scrollX={1010}
         />
       </Card>

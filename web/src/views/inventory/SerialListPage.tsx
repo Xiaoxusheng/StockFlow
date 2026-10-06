@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Card } from 'antd'
+import { Button, Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type SerialItem, type SerialQuery, type SerialStatus } from '@/api/inventory'
@@ -86,6 +86,10 @@ export default function SerialListPage() {
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作；无筛选空态=序列号尚未产生，不放假入口） */
+  const hasFilters = Object.keys(list.params).length > 0
+
   return (
     <div className="sf-page">
       <SfPageHeader
@@ -131,6 +135,13 @@ export default function SerialListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有序列号记录"
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : undefined
+          }
           scrollX={1400}
         />
       </Card>

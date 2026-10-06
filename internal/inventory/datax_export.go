@@ -235,7 +235,10 @@ func (s *LedgerExportSource) Summary() []datax.SummaryRow {
 	return []datax.SummaryRow{{ColumnKey: "qty_change", Label: "合计"}}
 }
 
-// applyFilters 筛选（白名单键 + 数据权限）。
+// applyFilters 筛选（白名单键 + 数据权限）。键清单与 LedgerPage SfExportButton
+// scopeParams 对齐（warehouse_id/sku_id/change_type/business_no/serial_no）——
+// serial_no 此前按"未知键忽略"静默丢弃，按序列号过滤后导出会得到比列表更宽的
+// 结果（2026-10-06 集成轮补齐；列表侧为精确匹配，repository.go ledgerFilter.where）。
 func (s *LedgerExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gorm.DB {
 	q = applyWarehouseScope(q, f, "warehouse_id")
 	if wh := f.Filters["warehouse_id"]; wh != "" {
@@ -249,6 +252,9 @@ func (s *LedgerExportSource) applyFilters(q *gorm.DB, f datax.ExportFilter) *gor
 	}
 	if bn := f.Filters["business_no"]; bn != "" {
 		q = q.Where("business_no = ?", bn)
+	}
+	if sn := f.Filters["serial_no"]; sn != "" {
+		q = q.Where("serial_no = ?", sn)
 	}
 	return applyCommon(q, f, "created_at")
 }

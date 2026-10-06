@@ -343,6 +343,14 @@ export default function ShipmentPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有发货单"
+          emptyAction={
+            /* 空状态 CTA：发货确认由本页发起（选 PACKED/PARTIAL_SHIPPED 出库单），有权限时引导直达 */
+            canShip ? (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setShipOpen(true)}>
+                发货确认
+              </Button>
+            ) : undefined
+          }
           scrollX={1480}
         />
       </Card>

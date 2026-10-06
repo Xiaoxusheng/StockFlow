@@ -22,7 +22,9 @@ import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
+import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfToolbar } from '@/components/table/SfToolbar'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
@@ -112,6 +114,13 @@ export default function QualityInspectionListPage() {
     fetch: (q) => qualityApi.inspections(q),
     urlSync: true,
   })
+
+  /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
+  const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
+
+  /** 空态 CTA（frontend.md §31 #8）：仅有生效筛选时提供「清空筛选」（applyFilters({}) 写空
+   * URL 并回第 1 页——真实动作）；无筛选空态才放「手动建单」真实入口（同 StockListPage） */
+  const hasFilters = Object.keys(list.params).length > 0
 
   const handleCreated = (order: QualityInspectionItem) => {
     void queryClient.invalidateQueries({ queryKey: ['quality', 'orders'] })
@@ -205,6 +214,26 @@ export default function QualityInspectionListPage() {
       <SfPageHeader
         title="质检"
         subtitle="质检单：免检 / 抽检 / 全检，处理结果九值（business-flow.md §4）"
+        extra={
+            <SfExportButton
+              module="QUALITY"
+              /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create
+                 （internal/auth/permissions.go:307）——持列表权限而无导出权限者不渲染该按钮 */
+              permission="datax:export:create"
+              /* 导出当前视图：严格透传 QualityExportSource.applyFilters 白名单认领的筛选键
+                 （keyword/status/source_type/source_no/warehouse_id，internal/purchase/datax_export.go；
+                 keyword/source_type/source_no 为行源 2026-10-06 补齐键，语义与列表 ListQCs
+                 一致：keyword 按 qc_no/source_no ILIKE 模糊、source_no 精确匹配）——
+                 导出范围与当前视图逐键对齐 */
+              scopeParams={{
+                keyword: list.params.keyword,
+                status: list.params.status,
+                source_type: list.params.source_type,
+                source_no: list.params.source_no,
+                warehouse_id: list.params.warehouse_id,
+              }}
+            />
+        }
       />
       <Card size="small">
         {canCreate && (
@@ -224,8 +253,23 @@ export default function QualityInspectionListPage() {
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
+          /* 保存视图：与查询/重置同行渲染（Inbound/Purchase/Receipt 列表页同款） */
+          extraActions={
+            <SfViewBar
+              pageKey="quality.inspection"
+              mode="url"
+              paged={{ applyFilters: list.applyFilters, onPageChange: list.onPageChange }}
+              appliedFilters={list.params as unknown as Record<string, unknown>}
+              currentFilters={list.formValues}
+              currentPageSize={list.pagination.pageSize}
+              currentHiddenColumns={hiddenColumns}
+              onHiddenColumnsChange={setHiddenColumns}
+            />
+          }
         />
         <SfTable<QualityInspectionItem>
+          hiddenColumns={hiddenColumns}
+          onHiddenColumnsChange={setHiddenColumns}
           storageKey="quality-orders"
           rowKey="id"
           columns={columns}
@@ -238,6 +282,17 @@ export default function QualityInspectionListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有质检单"
+          emptyAction={
+            hasFilters ? (
+              <Button type="link" size="small" onClick={() => list.applyFilters({})}>
+                清空筛选
+              </Button>
+            ) : canCreate ? (
+              <Button type="primary" onClick={() => setCreateOpen(true)}>
+                手动建单
+              </Button>
+            ) : undefined
+          }
           scrollX={1740}
         />
       </Card>

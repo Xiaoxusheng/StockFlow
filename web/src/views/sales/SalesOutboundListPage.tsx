@@ -14,6 +14,7 @@ import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
@@ -123,6 +124,21 @@ export default function SalesOutboundListPage() {
       <SfPageHeader
         title="出库"
         subtitle="库存分配 → 拣货 → 复核 → 打包 → 发货"
+        extra={
+          /* 导出当前视图（§2.11）：严格按当前筛选跳导出中心预填——scopeParams 仅透传
+             SALES_OUTBOUND 行源白名单键（internal/sales/datax_export.go:60-68：
+             warehouse_id/status/so_no；outbound_no 列表可筛但行源不支持，如实不传）；
+             排序/列一期为行源固定口径（计划 §1.2 披露，不构成假导出） */
+          <SfExportButton
+            module="SALES_OUTBOUND"
+            permission="datax:export:create"
+            scopeParams={{
+              warehouse_id: list.params.warehouse_id,
+              status: list.params.status,
+              so_no: list.params.so_no,
+            }}
+          />
+        }
       />
       <Card size="small">
         <SfSearchForm
