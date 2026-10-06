@@ -51,3 +51,8 @@ data/
 config.yaml
 config.*.yaml
 !config.example.yaml
+
+# 本地 Agent / 浏览器自动化临时产物（调试遗留，含临时 Chrome profile 与注入 token 的检查页，勿入库）
+.workbuddy-ai/
+.tmp-*
+web/public/__urlsync-check.html
