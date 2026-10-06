@@ -158,15 +158,17 @@ export function SfSearchForm({
             label={field.label}
             style={{
               marginBottom: 0,
-              /* basis 220px：3 字段 + 查询/重置 在 1161px 视口（内容区 871px）恰好不折行；
-                 宽屏时自由增长到 --sf-search-field-width 上限，窄屏收缩而不折行。
+              /* 布局优先级：**一行不折行 > 字段宽度**（用户口径「实在多了才换行」）。
+                 basis 170px / minWidth 150px：字段可随空间收缩，把横向空间让给
+                 「查询/重置 + extraActions（视图、自动刷新）」整组不折行；
+                 宽屏时仍自由增长到 --sf-search-field-width 上限。
                  时间范围控件更宽（两个日期 + 分隔），单独放宽上限与下限。 */
-              flex: field.control === 'dateRange' ? '1 1 300px' : '1 1 220px',
+              flex: field.control === 'dateRange' ? '1 1 300px' : '1 1 170px',
               maxWidth:
                 field.control === 'dateRange'
                   ? 'calc(var(--sf-search-field-width) + 120px)'
                   : 'var(--sf-search-field-width)',
-              minWidth: field.control === 'dateRange' ? 240 : 200,
+              minWidth: field.control === 'dateRange' ? 240 : 150,
             }}
           >
             {field.control === 'select' ? (
