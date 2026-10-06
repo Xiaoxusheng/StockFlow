@@ -184,3 +184,50 @@ App 版本检查与升级链路（预留架构）
 ## 11. 验收级测试（对应 requirements.md 场景）
 
 9 个验收场景（采购入库、销售出库、调拨、盘点、Excel、打印、追溯、扫码枪现场验收、工业 PDA 现场验收）作为端到端验收用例，发布前全部人工/自动化走通。
+
+---
+
+## 12. 作业效率提升层一期专项测试（2026-10-06）
+
+> 依据 [docs/plans/2026-10-06-efficiency-layer-phase1.md](plans/2026-10-06-efficiency-layer-phase1.md) §7 收编。
+> 涉及新包 internal/search、internal/userpref 及 reports/sales/purchase/printing/datax/stockops 增量；
+> 后端测试零外部依赖（fakedb/fakeRepo 项目约定，先例 internal/purchase/fakedb_test.go），集成链路仍按 §3 构建标签机制执行。
+
+### 12.1 后端单元测试矩阵
+
+| # | 用例 | 断言要点 |
+|---|---|---|
+| T1 | 搜索权限过滤 | 无 masterdata:sku:list 的用户查询→结果不含 sku 分组；有码则含且 items 形状齐（GET /api/search 端点只挂认证，组内按用户权限集逐 type 过滤；超管直通语义与 RequirePermission 同构） |
+| T2 | 搜索数据权限 | warehouse_id 越用户 scope→该分组空结果；scope 交集生效（不 403，防范围探测） |
+| T3 | 搜索短路 | q 长度 <2 零 SQL 执行（repo 调用计数=0）；limit 缺省 5、上限 20 |
+| T4 | 视图按用户隔离 | 用户 A 建视图，B GET/PUT/DELETE→404（非本人防探测）；A 的列表不见 B 的行（全部查询强制 user_id=当前用户） |
+| T5 | 视图默认唯一 | 设新默认后旧默认自动清除；并发设默认最终恰一个（部分唯一索引兜底） |
+| T6 | 偏好读写 | key 白名单外→400 invalidParam；GET ?keys= 过滤生效；单值 >16KB→400；recent_visits 服务端裁剪至 20 条 |
+| T7 | next 排序与候选池 | 四层排序（本人进行中 > priority > 超时 > created_at）逐层断言（超时阈值注入）；候选池含未领取 PENDING（照抄 /api/tasks 原 assignee 硬过滤会恒 has_next=false，必须 (本人进行中) OR (PENDING 未领取)）；checking 分支无超时层；receipt/exception 分支仅 created_at 排序；current_task_id 被排除；无候选 has_next=false；白名单外 task_type→400 |
+| T8 | 批量结果计数 | PENDING→success；本人已领→skipped；他人已领/状态非法→failed(既有冲突码)；混合批次 total/success_count/failed_count/skipped_count 与 results 逐条对账；批量不整体回滚 |
+| T9 | 并发双确认 | 同一任务两 goroutine 并发 claim（fake repo 原子 UPDATE 抢占）恰一 success 一 failed；对齐 TestConcurrentLockNoOversell 模式 |
+| T10 | priority 守卫 | 完成/取消态设优先级→409；值域外→400；审计写入 |
+| T11 | 打印批量结果 | 不可打印 SKU→failed(reason=PRINT_SKU_DISABLED)；100→96/3/1 计数形状断言；全成功不返回 409（旧 409+disabled_ids 整体拒绝语义已废止） |
+| T12 | Excel 失败行往返 | retry-failed 仅收源任务 INVALID/FAILED 行建新导入任务；重跑不再产生重复单据（fake writer 计数=失败行数）；源任务行状态不被篡改 |
+| T13 | 幂等重复提交 | 同 Idempotency-Key 二次提交返回首次结果且库存/流水/单据不变（行级键=头键前缀合成规则，api.md §7；锚定 internal/inventory/integration_test.go 既有幂等/并发用例保持绿） |
+| T14 | 路由冻结端点集 | search/userpref/next/recent-ops/batch-claim×3/priority×3/retry-failed 全部进入各包 routes_test 冻结清单（漏注册即测试红） |
+| T15 | 迁移双向 | 000020–000023 本地 up + down 往返验证（database.md 迁移硬要求；无 PG 环境时如实挂账，不入「已验证」） |
+
+### 12.2 前端测试策略（维持既有现状）
+
+web 无自动化测试设施（实测 package.json scripts 仅 dev/build/lint/typecheck/preview；引入 vitest 已有裁决先例不做），
+一期门禁 = `npm run typecheck`（tsc -b）+ `npm run lint` + `npm run build`，**不新增测试框架**。
+
+**人工验收矩阵**（交付时逐项执行并记录结果）：
+
+```text
+8 个验收场景（效率层计划 §9）：Ctrl+K 输入 SKU001 三分组直达 / 保存视图登出重登还原 /
+收货任务 001 完成进 002 / 批量打印 100→96/3/1 仅重试失败 3 张 / Excel 980/20 只重导 20 行 /
+连点确认收货 10 次仅一次库存变化+一条流水 / SKU 详情关联业务一屏七项可达 / 进工作台即知该干什么
+快捷键全表走查：§32 键位逐键验证（含 G 系 chord 800ms 序列窗口、? 帮助面板、Ctrl+R 刷新）
+快捷键与输入框冲突：焦点在输入框/文本域/下拉/可编辑区时页面级快捷键全部禁用；
+  扫码输入框（[data-sf-scan-input]）内击键不触发快捷键；Esc 不双抢 antd Modal/Drawer
+权限口径：G 系跳转无权限时提示不跳转；全局搜索无权限分组不出现；保存视图仅本人可见可改
+状态与主题：Light/Dark 两主题 × 1440/1024/768 三宽度；Loading/Empty/Error 状态真实接口形态
+动效核验：reduced-motion 下新增动效（搜索结果/批量结果/任务切换/反馈）归零
+```

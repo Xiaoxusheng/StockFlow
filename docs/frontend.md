@@ -238,6 +238,10 @@ Dashboard
 - `page`（默认）：独立列表页，含工具栏/三档密度（默认紧凑）/列显示隐藏/全屏/刷新/统一分页（`共 x 条` + 条/页 + 快跳）。
 - `nested`：详情页/抽屉内嵌表——无工具栏无分页（除非显式传 pagination），仍统一密度、空态、错误态与首载骨架（loading 且无数据时以骨架条占位保持表头结构；dataSource 传入时首载与刷新不再叠加 Spin 蒙层，统一走 data-loading 压暗/淡入，见 §31）。
 
+**受控列 API（作业效率提升层一期，2026-10-06）**：SfTable 新增 `hiddenColumns?: string[]` + `onHiddenColumnsChange?: (hidden: string[]) => void`——受控优先/非受控回退：不传新 props 的既有消费页零行为变化（storageKey 照旧持久化）；保存视图应用=页面将视图 hidden 列集经受控 prop 生效（不写 localStorage，避免覆盖用户手动列偏好）；用户手动改列=onChange 回传 + storageKey 照旧持久化。
+
+**保存视图（SfViewBar）范围披露（一期）**：视图保存 filters_json（SfSearchForm cleanValues 产物）+ columns_json（hidden 列键数组）+ page_size；`sort_json` 仅为服务端排序通道预留（一期恒空、不采集——SfTable 排序为 antd 非受控，服务端排序超一期范围）；列拖拽排序维持既有裁定不做。视图应用一律经 usePagedList 公开 API（urlSync 页展开写入 URL query、旧形态页置 params，SfViewBar 以 `mode: 'url' | 'state'` 声明形态），禁止绕过 hook 直改 URL 或页面 state——URL 参数为最终事实源，`view=<id>` 仅作当前视图名标记，用户改动任一筛选即清除。
+
 ### 6.2 表格视觉
 
 ```text
@@ -498,9 +502,28 @@ PC：         我的待办、我的审批、我的任务、我的异常
 Pad / Scan： 我的仓库任务、我的进行中、我的完成记录、我的异常
 ```
 
+**PC 工作台『我现在该做什么』改版（作业效率提升层一期，2026-10-06）**：进页面即回答"该干什么"——
+
+```text
+待我处理（/api/tasks?status=in_progress）  超时任务  异常  今日已完成    ← 四计数（后端 summary 增量字段，additive）
+优先处理 TopN（复用 /api/tasks/next 服务端真实排序，严禁前端推算）
+最近操作（本人 operation_logs 尾 N 条，SfTimeline/SfTable 渲染）
+快捷入口（MENU_TREE 驱动 + canAccess 过滤）
+```
+
+仅 PC 改版；Pad 首页一期维持不动（PadHomePage 不在改版范围）。
+
 ### 15.2 全局搜索
 
-PC Header 提供 `搜索 SKU / 单据 / 库位 / SN / 箱码`：输入 SKU001 显示商品、库存、相关订单、相关单据。支持快捷搜索、高级筛选、保存筛选条件。
+PC Header 提供 `搜索 SKU / 单据 / 库位 / SN / 箱码`：输入 SKU001 显示商品、库存、相关订单、相关单据。支持快捷搜索、高级筛选、保存筛选条件（落地为列表页保存视图，SfViewBar，见 §6.1）。
+
+**落地（作业效率提升层一期，2026-10-06）**：Header 菜名 AutoComplete 升级为 `GlobalSearchModal` 命令面板（Ctrl/Cmd+K 呼出，组件清单见 §23）：
+
+- 数据源 `GET /api/search`（契约见 api.md §9 效率层节）：按 type 分组返回（SKU/商品/条码/批次/SN/库位/仓库/客户/供应商/单据/物流），状态展示复用 SfStatusTag。
+- 权限先行：端点只挂认证，组内按用户权限集逐 type 过滤——无对应 list 权限码的 type 不查询不出组（超管直通语义与 RequirePermission 同构）；`warehouse_id` 为收窄过滤器，越界仓库按该 type 无结果处理（不 403，防范围探测）。前端跳转映射（`config/searchTargets.ts`）同样经 canAccess 校验，无权限项置灰。
+- 交互：防抖 300ms；↑↓/Enter/Esc/Tab 键盘导航，点击直达详情；跳转路由由前端映射（后端不编码前端路由）。
+- 原 Header 菜名搜索降级为面板『页面』分组（候选源仍走 MENU_TREE + canAccess）。
+- 禁止第二套：全局搜索是全站唯一跨域搜索入口，业务页面不得自建搜索浮层。
 
 ### 15.3 通知
 
@@ -517,6 +540,8 @@ Header 通知入口（未读数量实时更新），内容：审批、库存预�
 ### 16.1 批量操作
 
 列表支持：批量审核、批量打印、批量导出、批量作废、批量分派。点击后显示"已选择 28 条"；危险操作必须明确数量、明确影响、二次确认，并展示失败列表（requirements.md §2.8）。
+
+批量结果统一经 `BatchResultDrawer` 展示（作业效率提升层一期，2026-10-06）：计数条（total/success/failed/skipped）+ 逐条列表 + SfStatusTag 三态 + 【仅重试失败】按钮（重试=以失败 ids 重新发起同一批量端点，成功项绝不重跑）；契约见 api.md §9。**禁止各页面自写结果弹窗。**
 
 ### 16.2 危险操作
 
@@ -723,6 +748,9 @@ Scan 顶部固定：扫码设备状态（设备正常/设备异常）+ 网络状
 扫描盘点任务 → 盘点页面
 ```
 
+- 扫码输入三模式（作业效率提升层一期，2026-10-06）：`components/scanner/ScanInput.tsx` + `useScanBuffer`——`normal`（常规，扫后即解析）/ `fast`（快速，短间隔连扫自动推进）/ `continuous`（连续，同对象累计计数）。**智能下一步只对查询/定位类低风险动作自动执行**（prop `autoAdvance: 'none' | 'safe'`），确认收货/扣减类必须显式按键，禁止自动提交。复用 `POST /api/scanner/resolve`（前端不做业务解析）与 devices 2s 去重窗口；一期示范接入 PadPutawayPage，既有 ScanDirectCard 不动。
+- 一期临时口径：ScanInput 键盘缓冲解析限定在组件自身受控输入元素焦点内承接（ScanDirectCard HID 先例），不做页面级 window keydown 监听（与 scanner.md §3.1 冻结约束不冲突，输入框带 `[data-sf-scan-input]` 标记并入 §32 输入态抑制）；完整 ScannerManager→Event 总线架构归 F15/F16 立项，不在本期。
+
 ---
 
 ## 23. 组件封装清单
@@ -746,6 +774,30 @@ SfScanInput / SfScanStatus       扫码输入/状态（scanner.md §3.2）
 SfDeviceStatus     设备状态
 SfTaskCard         任务卡片（Pad/Scan）
 SfInventorySummary / SfInventoryTable   库存汇总/表格
+```
+
+**作业效率提升层一期新增（2026-10-06）**——统一组合使用，禁止第二套实现（不建第二套搜索/偏好/视图/批量/快捷键体系，样式一律 `--sf-*` Token + 既有 Sf 组件族）：
+
+```text
+GlobalSearchModal  全局搜索命令面板（Ctrl/Cmd+K 呼出；Header 菜名搜索并入『页面』分组，§15.2）
+SfViewBar          保存视图栏（应用/保存/重命名/删除/设为默认/恢复默认；置 SfToolbar extra 区，§6.1；
+                   mode:'url'|'state' 双形态，应用一律经 usePagedList 公开 API）
+ShortcutProvider   全站唯一 keydown 监听与快捷键分发（含 shortcuts.ts 集中注册表，§32；PC only）
+ShortcutHelpDrawer 快捷键帮助面板（? 呼出，注册表驱动零手写文档，§32.4）
+RecentVisitsDropdown  最近访问下拉（读 user_preferences.recent_visits，Header 通知按钮旁）
+SfPreferenceDrawer 偏好设置抽屉（默认仓库/清除最近数据；PC 用户菜单『偏好设置』入口；
+                   读写走 usePreferences——读+防抖写，localStorage 先行渲染防闪变）
+BatchResultDrawer  批量结果统一抽屉（计数条+逐条三态+仅重试失败；打印/批量领取共用，§16.1）
+SfCompleteNextButton  「完成并处理下一条」（配合 useNextTask 调 /api/tasks/next，claim 已被领取冲突视为可进入；
+                   收货/上架作业页先行，PC 出库四作业页随其接线轮）
+SfRelationNav      详情页关联业务导航（SfDetailSection 内 chip 组，config/relations.tsx 注册表驱动，
+                   canAccess fail-closed 过滤，点击优先开 Drawer/带 query 预填跳转；
+                   接入 SKU/流水/入库/采购单/出库/销售单/盘点 七详情页）
+SfAutoRefreshSelect  自动刷新选择器（关/10/30/60 秒，document.hidden 暂停，连续失败退避停轮；
+                   配合 useAutoRefresh，任务型列表页工具栏）
+ScanInput / useScanBuffer  扫码输入三模式 normal/fast/continuous + 智能下一步（§22）
+useIdempotentMutation / utils/idempotency.ts  幂等提交包装（自动附 Idempotency-Key 头；
+                   isPending 期间按钮 loading+disabled；服务端消费面按 api.md §7 逐端点口径）
 ```
 
 ---
@@ -799,7 +851,7 @@ src/
 ├── assets/
 ├── components/
 │   ├── common/  table/  form/  scanner/
-│   ├── inventory/  task/  device/
+│   ├── search/  shortcut/  batch/  inventory/  task/  device/
 ├── layouts/          PC Layout / Pad Layout
 ├── router/           路由 + 权限守卫
 ├── stores/           zustand 分片（§18.1）
@@ -985,3 +1037,50 @@ render: (_, r) => <SfRowActions><Button>编辑</Button><Button>删除</Button></
   SfEmpty 新 props 全可选（Pad 11 个引用文件渲染与现状一致）；`@media (hover:none)` 操作区恒 1。
 - **时序纪律**：先 API 后反馈（trigger/triggerRemove 仅在回调内调用）；动画只在视觉层，不阻塞业务操作；
   动效三层：微交互 120~180ms / 组件 180~250ms / 反馈 220~700ms，无 1s 以上长动画。
+
+### 31.6 效率层一期动效增量（2026-10-06）
+
+新增组件动画**只用于反馈**：全局搜索结果出现、Drawer 打开、批量结果揭示、任务切换（Alt+→ 下一条）、
+成功/失败反馈；仍遵守 §31.5 全部硬性约束——零 `transition: all`、时长一律 `var(--sf-motion-*)`、
+reduced-motion 媒体查询内归零、无 1s 以上长动画；快捷键驱动的界面切换不添加额外过渡（键盘操作要求即时响应）。
+
+---
+
+## 32. 快捷键规范（作业效率提升层一期，2026-10-06）
+
+> PC 专用：ShortcutProvider 包裹 PcLayout 内容树。Pad 不挂载——Pad 卡片可达性层已有自身 keydown，一期不动。
+
+### 32.1 集中管理
+
+- `components/shortcut/ShortcutProvider.tsx` 是**全站唯一 keydown 监听点**（Context 注册表 + 统一分发）；
+  业务页面禁止自监听键盘（scanner.md §3.1 冻结约束的 PC 落地；扫码输入组件焦点内承接除外，见 §22）。
+- `components/shortcut/shortcuts.ts` 集中注册表：每条 `{combo, scope, description, handler, enabled}`；
+  帮助面板由注册表驱动渲染，零手写文档；新增快捷键必须入注册表，禁止组件内散写。
+
+### 32.2 一期键位表
+
+```text
+Ctrl/Cmd+K       全局搜索命令面板（§15.2）
+Ctrl+F           当前列表搜索聚焦（列表页作用域）
+Ctrl+R           刷新（preventDefault → invalidate active queries）
+Esc              关闭自有浮层（全局搜索/帮助面板）；antd Modal/Drawer 的 Esc 归组件自身，不双抢
+Enter            确认
+Alt+→ / Alt+←    下一条 / 上一条（经 useNextTask 注册，仅任务作业页 enabled）
+G+I / G+P / G+S / G+T   跳转 实时库存 / 采购 / 销售 / 我的任务（G 系 chord，800ms 序列窗口）
+?                快捷键帮助面板（ShortcutHelpDrawer）
+```
+
+G 系跳转前经 canAccess 校验，无权限 message 提示不跳转。
+
+### 32.3 输入态抑制与冲突规则
+
+- target 为 INPUT / TEXTAREA / SELECT / isContentEditable，或焦点元素带 `[data-sf-scan-input]`（扫码输入框）
+  时，**页面级快捷键全部禁用**——快捷键不与人工输入、扫码枪 HID 连续输入冲突。
+- Esc 仅处理自有层浮层，不拦截 antd Modal/Drawer 自身的关闭行为；其余键位不占用 antd/浏览器既有交互。
+- 快捷键不代替业务确认：扣减/确认类动作必须显式按键或点击（与 §22 智能下一步 `autoAdvance:'safe'` 同口径），
+  高风险操作不设单键直达。
+
+### 32.4 帮助面板
+
+`ShortcutHelpDrawer` 按 ? 打开：分组展示全部已启用快捷键（combo + description + 作用域），
+数据源=注册表；未注册或被禁用（enabled=false）的键位不展示，保证面板与实际行为一致。

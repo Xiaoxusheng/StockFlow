@@ -76,11 +76,22 @@ pallets（托盘）, pallet_items（托盘-箱/SKU 绑定）
 
 —— 设备管理（多终端，见 devices.md §6–7） ——
 device_logs（设备日志）, device_configs（配置下发）, app_versions（App 版本/升级）
+
+—— 用户态（2026-10-06 效率层一期，见下方注） ——
+user_saved_views（用户保存视图：page_key/name/filters_json/sort_json/columns_json/page_size/is_default）
+user_preferences（用户偏好 kv：pref_key/pref_value jsonb）
 ```
 
 > **注（M2 落地口径，backend-m2-plan §13 / 迁移 000006–000010）**：
 > - `defective_inventory` **不建表**——不良品量以 inventory 行的 defective_qty 状态列承载（六状态同表，恒等式见 inventory-rules §2），质检处理结果经 inventory 流水追溯；
 > - `doc_number_counters`（单号计数表：PK(prefix, period)，docnum 引擎发放）与 `document_approvals`（审批记录 append-only，仅 INSERT 权限）随 000006 共享单据表交付，已补录实体清单（见上"共享单据平台"组）。
+
+> **注（2026-10-06 作业效率提升层一期，迁移 000020–000023，计划 docs/plans/2026-10-06-efficiency-layer-phase1.md）**：
+> - `user_saved_views`（000020）：用户隔离由应用层强制 `user_id=当前用户`；唯一索引 `uk_user_saved_views_name (user_id, page_key, name)` + 部分唯一索引 `uk_user_saved_views_default (user_id, page_key) WHERE is_default`（每页至多一个默认视图，服务层「设为默认」仍在单事务内清除旧默认）；`page_key` CHECK `^[a-z0-9._-]{1,64}$`、`page_size` CHECK 1–100；jsonb 三列应用层各限 ≤8KB；无跨域 FK（000011 起冻结口径）。
+> - `user_preferences`（000021）：复合主键 (user_id, pref_key) 即全量索引、无冗余索引；`pref_key` CHECK `^[a-z0-9_.]{1,64}$`；无 created_by（个人高频态，不挂审计——api.md §9 同日节口径）。
+> - **幂等键不建新表**：沿用 `inventory_ledgers.idempotency_key` 唯一索引兜底 + receipts/packing/shipments 既有幂等键列；新增「行级幂等键 × Idempotency-Key 头合成规则」（api.md §7）；通用幂等结果缓存表明确不做（重放=唯一索引命中回读既有结果，沿用 inventory 模式）。
+> - **最近活动零新表**：最近操作读 `operation_logs` 尾 N 条（写入仍仅 middleware.Audit 既有链路）；最近访问属导航态，存 `user_preferences.pref_value`（key=recent_visits，服务端裁剪至 20 条），不建新审计表。
+> - **复用既有表扩展**：000023 为 `putaway_tasks`/`pick_tasks`/`check_tasks` 各加 `priority smallint NOT NULL DEFAULT 0`（CHECK 0–9）+ 部分索引 `idx_*_tasks_next (status, priority DESC, created_at) WHERE 活动态`（inbound_orders/exceptions 不扩列——/api/tasks/next 两分支无 priority 排序层，api.md §9 同日节披露）；000022 为全局搜索建 pg_trgm GIN 索引批（见 §6 补录）。000020/000021 已落盘，000022/000023 为 B2/B3 波次预留编号（以 db/migrations 实际为准）。
 
 ---
 
@@ -151,6 +162,10 @@ deleted_at
    - **000015 收紧（2026-10-04 清偿项 F12）**：inventory_ledgers.zone_id/shelf_id 由可空收紧为 NOT NULL（写入侧 insertLedger 恒填，与 inventory 主表 000005 对齐；PostgreSQL SET NOT NULL 全表扫描遇 NULL 即失败回滚，生产首启前执行安全）。
 3. 流水表只增不改，按时间分区或归档策略在设计中预留。
 4. 禁止无条件 `SELECT *`，禁止在循环中查询数据库（见 architecture.md §7）。
+5. **效率层一期补录（2026-10-06，迁移 000020–000023，计划 docs/plans/2026-10-06-efficiency-layer-phase1.md）**：
+   - 000022：全局搜索中缀匹配 pg_trgm GIN 索引批（`idx_*_trgm`，覆盖商品/SKU 名称与编码、条码、批次号、序列号、库位编码、仓库名称、往来单位名称、七类单据号与物流单号共 18 列，清单以迁移文件为准）；pg_trgm 扩展需安装权限，生产由超级用户执行迁移（deployment.md grants 流程），目标库拒绝扩展时回退=去索引保 ILIKE（功能等价、性能降级）。
+   - 000023：三任务表部分索引 `idx_putaway_tasks_next` / `idx_pick_tasks_next` / `idx_check_tasks_next`（`(status, priority DESC, created_at)` WHERE 活动态）支撑 `/api/tasks/next` 真实 SQL 排序。
+   - 000020/000021：user_saved_views 两条唯一索引（含 is_default 部分唯一）与 user_preferences 复合主键即全量索引，见 §2 效率层注记。
 
 ---
 

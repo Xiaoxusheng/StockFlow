@@ -106,6 +106,8 @@ API 按业务领域划分：
 —— 数据中心 ——
 /api/imports            导入（含 /api/imports/templates/{type} 模板下载、
                         /api/imports/{id}/error-file 错误明细）
+/api/imports/{id}/retry-failed  导入失败行重试（以源任务 INVALID/FAILED 行创建新导入
+                        任务，走正常校验+确认流程；2026-10-06 效率层一期，见 §9 同日节）
 /api/exports            导出
 /api/files              文件中心（上传/下载/预览/列表/删除；异常图片等附件挂接的数据源）
 /api/data-tasks         数据任务详情/任务卡刷新（GET /api/data-tasks/{kind}/{id}，
@@ -126,6 +128,15 @@ API 按业务领域划分：
 /api/tasks              我的任务列表（上架/拣货/复核 UNION 分页明细化，reports 实现、
                         inventory:inventory:list 同上；assignee 恒=当前用户；
                         2026-10-05 平台批）
+/api/tasks/next         自动下一条候选任务（reports 实现、inventory:inventory:list 同上；
+                        候选池=(本人进行中)∪(PENDING 未领取)；2026-10-06 效率层一期，
+                        契约见 §9 同日节）
+/api/workbench/recent-operations 最近操作（本人 operation_logs 尾 N 条，reports 实现、
+                        权限同上；2026-10-06 效率层一期）
+/api/search         全局业务搜索（Ctrl/Cmd+K 命令面板数据源；internal/search 实现、
+                        仅认证+逐 type 权限过滤；2026-10-06 效率层一期）
+/api/user/views     保存视图 CRUD（internal/userpref 实现、认证即可无权限点；同上）
+/api/user/preferences 用户偏好 GET/PUT（key 服务端白名单；同上）
 /api/notifications 通知
 /api/logs          日志
 /api/system        系统配置/监控/定时任务
@@ -273,6 +284,7 @@ release:{exception_no}:{lock_id}                             异常解冻
 ```
 
 - 请求显式幂等键（`Idempotency-Key` 头）优先；未提供时按上表构成在服务端确定性生成——同一单据同一动作重试必然命中重放（返回既有结果，不再扣减），部分行重放视为矛盾请求整体回滚。
+- **行级幂等键 × 头键合成规则（2026-10-06 效率层一期冻结）**：stockops 产生库存流水的写路径（调拨 approve/execute、移库、盘点完成产生的调整）中，`Idempotency-Key` 头**不得直接**灌给每行原语——同请求 N 行同键会撞 `uk_inventory_ledgers_idempotency_key` 唯一索引、批量中断。合成规则：头键存在且非空 → 行级键 = `{头键}:{原行级通式}`（新命名空间：同头键重试=同行键，命中部分唯一索引即原语重放既有结果，不重复扣加库存/流水）；头键缺省 → 行级键与上表存量通式形态完全一致（零行为变化）。头键 ≤32 字符、超长 400 invalidParam（落笔前核验拼接结果 ≤ inventory_ledgers.idempotency_key 列宽 varchar(128)，超限下调头键上限）。适用边界：仅产生 ledger 流水的写路径引入头键透传；单据创建类端点（POST /transfers、POST /counts）一期不引入（无单据级幂等键存储列）。服务端实际消费头键的端点以各域契约为准（收货、打包/发货既有，stockops 流水路径随本规则新增）；对不消费头键的提交点（上架 execute/拣货确认/复核/批量领取/盘点登记），前端附头仅得按钮防双击，服务端防重按既有派生键通式或状态机原子抢占执行。
 
 ---
 
@@ -694,4 +706,159 @@ GET /api/inventory/{id}/distribution   库存层级分布树（frontend.md §10.
                              函数,单测 distribution_test.go) / repository.go
                              stockDistribution(单查询 LEFT JOIN warehouses/zones/bins 只
                              读取编码)}；routes_test 冻结端点集同步；swag 已重生成。
+```
+
+### 2026-10-06 作业效率提升层一期（契约先行——依据定稿计划 docs/plans/2026-10-06-efficiency-layer-phase1.md 冻结，实现波次按本节验收）
+
+> 文档先行契约增量（AGENTS.md 硬性规则 2）：登记计划冻结的端点/契约形状，后端实现波次
+> 交付时不得擅改本节形状，口径差异以新日期小节披露。数据库迁移 000020–000023 与新表见
+> database.md §2 效率层注记；需求口径见 requirements.md §2.10。
+
+全局业务搜索（internal/search 新包，只读零写语句）：
+
+```text
+GET /api/search    全局业务搜索（Ctrl/Cmd+K 命令面板数据源）。端点级只挂认证（auth
+                   保护组），组内按用户权限集逐 type 过滤——无对应 list 码的 type 不查询
+                   不出组（需 auth 包导出 HasPermission helper，语义与 RequirePermission
+                   同构：uc.IsSuper || 权限快照含 code，遗漏则超管看不到任何分组）。
+                   query：q（上限 64 字符；空查询/长度<2 直接返回 {groups:[]} 不做任何
+                   SQL；超长 400 invalidParam）、types（可选，逗号分隔）、warehouse_id
+                   （可选，收窄过滤器——与数据权限 scopeOf 求交，越界仓库按该 type 无
+                   结果处理不 403，防范围探测）、limit（每组条数缺省 5、上限 20）。
+                   响应 data={groups:[{type,title,count,items:[{id,type,title,code,
+                   status,summary,updated_at}]}]}；跳转 path 由前端映射（后端不编码前端
+                   路由）。type→权限映射：sku/product/barcode→masterdata:sku:list、
+                   batch→inventory:batch:list、serial→inventory:serial:list、bin→
+                   warehouse:bin:list、warehouse→warehouse:warehouse:list、customer→
+                   masterdata:customer:list、supplier→masterdata:supplier:list、doc→
+                   采购/入库/销售/出库/调拨/盘点/异常各单据号（各自域 list 码）、
+                   logistics→shipments 既有码（物流单号列名以 DDL 为准，实现者核验）。
+```
+
+保存视图（internal/userpref 包，迁移 000020 user_saved_views，权限=认证即可、无权限
+点——notifications 个人收件箱先例口径）：
+
+```text
+GET    /api/user/views          视图列表（?page_key= 必填，正则 ^[a-z0-9._-]{1,64}$）
+POST   /api/user/views          新建（name ≤64 字符且 (user_id,page_key,name) 唯一，重复
+                                409；filters_json/sort_json/columns_json 合法 JSON 且各
+                                ≤8KB；page_size 1–100）
+PUT    /api/user/views/{id}     修改（改名/改内容/is_default；先按 (id,user_id) 查归属，
+                                非本人一律 404 防探测）
+DELETE /api/user/views/{id}     删除（非本人 404）
+```
+
+严格按用户隔离：全部查询强制 user_id=当前用户。is_default 每 (user_id,page_key) 至多
+一个（部分唯一索引 uk_user_saved_views_default），「设为默认」服务层单事务内清除旧默认，
+「恢复默认」= PUT is_default=false。字段披露：filters_json=筛选条件（SfSearchForm
+cleanValues 产物）、sort_json 恒 '{}'（排序通道预留，一期不采集）、columns_json=隐藏
+列键数组（列序拖拽不做）；视图应用以 URL/页面参数展开还原，view=<id> 仅作当前视图名
+标记（用户改动任一筛选即清除标记）。
+
+用户偏好（internal/userpref 包，迁移 000021 user_preferences，权限同上）：
+
+```text
+GET /api/user/preferences        读偏好（?keys= 逗号分隔可选，缺省全部）
+PUT /api/user/preferences/{key}  写偏好。key 服务端白名单（冻结）：default_warehouse_id、
+                                 last_warehouse_id、last_business_type、last_printer_id、
+                                 last_print_template_id、recent_visits、recent_filters；
+                                 白名单外 400 invalidParam。value 为 jsonb 单值 ≤16KB
+                                 （超限 400）；recent_visits 由服务端裁剪至 20 条
+                                 {path,title,visited_at}。不挂 Audit 中间件（高频写会
+                                 刷屏 operation_logs——审计只记业务动作，口径披露）。
+```
+
+自动下一条（internal/reports workbench 扩展，纯 SELECT，权限 inventory:inventory:list
+与 /api/tasks 同码）：
+
+```text
+GET /api/tasks/next   自动下一条候选任务。query：task_type 必填，白名单五值
+                      putaway|picking|checking|receipt|exception（前三者复用 /api/tasks
+                      三分支字段映射与五值映射；receipt→inbound_orders 状态 RECEIVING
+                      候选池、exception→exceptions 状态 OPEN/处理中候选池；其余 400
+                      invalidParam 沿 validTaskType 裁决注释扩展）；warehouse_id 可选
+                      （与 scopeOf 求交收窄）；current_task_id 可选（结果恒排除）。
+                      候选池=(本人已领取且进行中) OR (PENDING 未领取)——putaway：
+                      claimed_by=me AND status IN ('IN_PROGRESS','PAUSED')，或
+                      claimed_by=0 AND status='PENDING'；picking：assignee_id=me AND
+                      status IN ('CLAIMED','PICKING')，或 assignee_id=0 AND
+                      status='PENDING'；checking：(assignee_id=me OR assignee_id=0) AND
+                      status='PENDING'（check_tasks 无 CLAIMED 态）。照抄 /api/tasks 原
+                      WHERE（硬过滤 assignee=me）会致未领取 PENDING 永不可达，禁止。
+                      排序为真实 SQL ORDER BY（严禁前端推算）：本人已领取(进行中) DESC
+                      > priority DESC > 超时 > created_at ASC。口径差异披露：① 超时层
+                      仅 putaway/picking（不新增 task.timeout.check_hours，避免连带超时
+                      通知扫描与收件人规则扩展——checking 分支排序为 mine > priority >
+                      created_at，无超时层）；② receipt/exception 分支无 priority 列
+                      （000023 不扩此二表，不引入无处取数的排序层），排序仅
+                      created_at ASC（先来先办），exception 分支另加 assignee=me 处理中
+                      > OPEN 前置层；③ exceptions 表无仓库列，warehouse_id 过滤对
+                      exception 分支不生效（验收不得当 bug）；④ receipt 无领取语义。
+                      响应 {has_next: boolean, task: myTaskItemDTO|null}（task 行形复用
+                      GET /api/tasks 明细行；receipt/exception 分支 task_no=新单号）。
+```
+
+任务优先级写入（internal/purchase / internal/sales——上条 priority 排序层的数据来源，
+不写即假能力；状态守卫：完成/取消态拒绝 409；middleware.Audit 审计）：
+
+```text
+PUT /api/putaway/{id}/priority  上架任务优先级（值域 0–9；新权限码 purchase:putaway:assign）
+PUT /api/picks/{id}/priority    拣货任务优先级（新码 sales:pick:assign）
+PUT /api/checks/{id}/priority   复核任务优先级（新码 sales:check:assign）
+```
+
+权限码增量仅此三枚（动词 assign 在 M2 冻结枚举内；permissions.go/seed/seed_test/swag
+四处同源同步，不新增域码、不触发 DOMAIN_BOUND_RESOURCES fail-closed 面）。
+
+最近操作（internal/reports 扩展，只读零新表，权限 inventory:inventory:list）：
+
+```text
+GET /api/workbench/recent-operations  本人最近操作（query limit 可选缺省 10；SELECT
+                                      operation_logs WHERE user_id=当前 ORDER BY id
+                                      DESC LIMIT n；行形 {time,action,module,
+                                      object_type,object_id,success,error_code,
+                                      request_id}）。写入链路零新增——仍仅 middleware
+                                      .Audit 既有业务写入；顶部「最近访问」属导航态，
+                                      走用户偏好 recent_visits（前节），不入审计（避免
+                                      污染 append-only 业务审计，口径披露）。
+```
+
+批量操作统一结果契约（冻结——新增批量端点与打印语义演进共用；前端统一 BatchResultDrawer
+消费，禁各页面自写结果弹窗）：
+
+```text
+{total, success_count, failed_count, skipped_count,
+ results:[{id, status: 'success'|'failed'|'skipped', reason}]}
+
+语义冻结：skipped=幂等命中/已处目标态；failed.reason 用既有错误码字符串；批量不整体
+回滚。新增端点：POST /api/putaway/batch-claim（权限 PermPutawayClaim 既有）、
+POST /api/picks/batch-claim、POST /api/checks/batch-claim（权限既有，零新码）——逐条
+调用既有 claim 服务函数：PENDING→success；已被本人领取→skipped；被他人领取/状态非法
+→failed(reason=既有冲突码)；逐条审计。
+语义演进：POST /api/prints/tasks 响应改为批量结果形态（200 + BatchResult；全部参数
+合法但部分对象不可打印时逐条 failed，reason=PRINT_SKU_DISABLED 等；整请求参数错误仍
+400）——2026-10-05 二维码闭环轮「409 + details.disabled_ids 整体拒绝」语义废止，旧节
+不改写、以本节为准。
+```
+
+Excel 失败行修复（internal/datax 扩展，权限 PermImportCreate 既有）：
+
+```text
+GET  /api/imports/{id}/error-file    错误 Excel 下载（既有端点零改动——「原数据+错误
+                                     原因列」既有口径）
+POST /api/imports/{id}/retry-failed  失败行重试：读源任务 status IN ('INVALID','FAILED')
+                                     的行 → 以同一 ImportWriter 管线创建新导入任务（走
+                                     正常校验+确认流程，复用导入向导六步语义）；仅重导
+                                     上次失败行，上次成功行不入集、不重复成功数据。
+                                     前置核验：FAILED 行须保证无部分落库（分批事务边界），
+                                     不满足则仅限 INVALID 行并在实现交付时披露。
+```
+
+工作台汇总增量（additive，既有消费方零破坏）：
+
+```text
+GET /api/workbench/summary   增量字段 timeout_count / mine_count / today_completed_count
+                             （键名对齐 workbench_summary.go 既有命名；四计数既有形状
+                             不变）。既有列表端点按需补 source_no/inbound_no 等过滤
+                             query 参数（上下文导航核验后最小追加，禁新建聚合端点）。
 ```
