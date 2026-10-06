@@ -14,6 +14,14 @@
 
 ## 文档记录
 
+## [2026-10-06] 测试：前端测试加固——纯逻辑抽取 + node:test 零依赖最小测试设施（40 用例全绿）
+
+- **背景**：docs/testing.md §12.2 基线为「web 无自动化测试设施、不新增测试框架（vitest 裁决先例不做）」，门禁 = typecheck+lint+build。本次为三个高风险纯逻辑面补自动化，折中采用 **Node 22 内置 `node:test` + `--experimental-strip-types`**——零 npm 依赖、不引入测试框架、门禁语义不变（在原三门禁前加 `npm test` 全绿），被测对象限纯逻辑抽取层，组件/页面交互仍走 §12.2 人工验收矩阵。
+- **纯逻辑抽取（行为保持，组件只留 React 壳）**：① `web/src/components/shortcut/shortcutMatcher.ts`（自 ShortcutProvider 抽出）——输入态冲突矩阵 isEditableTarget/isEditableElement（INPUT/TEXTAREA/SELECT/isContentEditable/[data-sf-scan-input]）、combo 解析与匹配、G 系 chord 800ms 序列窗口、一次 keydown 的完整分发规划 dispatchShortcut；ShortcutProvider.tsx 重导出 ShortcutScope/ShortcutDeps/ShortcutItem/isShortcutEnabled，既有引用面（ShortcutHelpDrawer/shortcuts.ts/useShortcut/PcLayout）零改动。② `web/src/components/table/viewPayload.ts`（自 SfViewBar 抽出）——cleanFilters 空值剔除唯一规则、stableFiltersJson 对账键序列化、toApplyValues 恢复展开（副本语义），SfViewBar 保存/应用/标记对账接线不变。③ `web/src/components/batch/batchRetry.ts`——pickFailedIds 仅重试失败项（成功项/skipped 绝不重跑），BatchResultDrawer 接线不变。
+- **测试（3 文件 40 用例）**：快捷键冲突矩阵（输入态 page 全禁用/global 生效/chord 不启动不续、Esc 无注册条目不双抢、修饰键与方向键别名归一、enabled 开关）、视图序列化恢复闭环（保存→恢复→标记对账不变量、筛选漂移清标记、数字 20↔"20" URL 归一可比）、批量重试（验收场景 4：100 张 96/3/1 仅重试 3 张且与 failed_count 对账）。
+- **门禁（本会话实测）**：`cd web && npm test` tests 40 / pass 40 / fail 0 ✓；`npm run typecheck` ✓；`npm run lint` 0 error（3 条存量 warning 均在未改动文件 usePagedList/ShipmentPage/PadReceivePage）；`npm run build` ✓ built in 33.52s。
+- **遗留挂账**：组件级交互（真实 keydown→handler 链、Drawer 重试按钮渲染、URL 双形态应用）仍属人工验收矩阵，未做 DOM 级自动化——不为此引入 jsdom/testing-library，守「不新增测试框架」裁决。
+
 ## [2026-10-06] 功能：工作台『我现在该做什么』改版收口——优先处理端点挂路由 + 超时阈值运行时可调 + 文档补录
 
 - **背景**：工作台从 KPI 卡片改为『我现在该做什么』四块（我的工作区四计数 / 优先处理 / 最近操作 / 快捷入口，`WorkbenchPage.tsx` 改版 + `workbench_priority.go` 统计端点已由实现波次交付），本波次为集成收口：后端路由接线、运行时配置、docs 补录（api.md / frontend.md / changelog 归集成波次，计划 §6 Wave I 口径）。

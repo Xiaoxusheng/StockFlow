@@ -14,7 +14,7 @@ import {
   Spin,
   Typography,
 } from 'antd'
-import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
+import { MoreOutlined, PlusOutlined, PrinterOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
@@ -176,6 +176,8 @@ export default function BinListPage() {
   /** 库位标签打印（BIN_LABEL）：打印对象=当前行库位，所属仓库名作副标题便于多仓区分 */
   const [printTargets, setPrintTargets] = useState<SfQrPrintSku[]>([])
   const [printOpen, setPrintOpen] = useState(false)
+  /** 批量打印选中行（多选） */
+  const [selectedBinKeys, setSelectedBinKeys] = useState<Array<string | number>>([])
   const user = useAuthStore((s) => s.user)
   /** 打印入口门禁（后端 printing:task:create 同码校验，前端仅隐藏入口） */
   const canPrintLabel = canAccess(user, 'printing:task:create')
@@ -415,6 +417,38 @@ export default function BinListPage() {
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}
           removingRowKeys={fb.removingRowKeys}
+          /* 批量打印库位标签：勾选多行 → 一次带入全部选中库位（后端逐条装配、
+             不可打印对象逐条 failed，结果经 BatchResultDrawer 呈现） */
+          rowSelection={{
+            selectedRowKeys: selectedBinKeys,
+            onChange: (keys) => setSelectedBinKeys(keys as Array<string | number>),
+          }}
+          bulkActions={
+            canPrintLabel ? (
+              <Button
+                type="primary"
+                size="small"
+                icon={<PrinterOutlined />}
+                onClick={() => {
+                  setPrintTargets(
+                    list.items
+                      .filter((item) => selectedBinKeys.some((key) => String(key) === String(item.id)))
+                      .map((item) => ({
+                        id: item.id,
+                        code: item.code,
+                        productName: warehouseOptions.find(
+                          (o) => String(o.value) === String(item.warehouse_id),
+                        )?.label,
+                        enabled: item.status?.toUpperCase() === 'ENABLED',
+                      })),
+                  )
+                  setPrintOpen(true)
+                }}
+              >
+                批量打印标签（{selectedBinKeys.length}）
+              </Button>
+            ) : undefined
+          }
           emptyText="当前筛选条件下没有库位"
           scrollX={920}
         />

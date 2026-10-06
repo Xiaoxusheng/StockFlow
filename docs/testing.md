@@ -213,10 +213,15 @@ App 版本检查与升级链路（预留架构）
 | T14 | 路由冻结端点集 | search/userpref/next/recent-ops/batch-claim×3/priority×3/retry-failed 全部进入各包 routes_test 冻结清单（漏注册即测试红） |
 | T15 | 迁移双向 | 000020–000023 本地 up + down 往返验证（database.md 迁移硬要求；无 PG 环境时如实挂账，不入「已验证」） |
 
-### 12.2 前端测试策略（维持既有现状）
+### 12.2 前端测试策略（零依赖最小设施 + 人工验收矩阵，2026-10-06 测试加固更新）
 
-web 无自动化测试设施（实测 package.json scripts 仅 dev/build/lint/typecheck/preview；引入 vitest 已有裁决先例不做），
-一期门禁 = `npm run typecheck`（tsc -b）+ `npm run lint` + `npm run build`，**不新增测试框架**。
+web 基线无测试框架（引入 vitest 已有裁决先例不做，**不新增测试框架、不加 npm 依赖**维持不变）；
+2026-10-06 起新增**零依赖最小自动化设施**：Node 22 内置 `node:test` + `--experimental-strip-types`
+（`cd web && npm test`，glob `src/**/*.test.ts`，无需安装任何包）。被测对象仅限纯逻辑抽取层——
+`src/components/shortcut/shortcutMatcher.ts`（输入态冲突矩阵/combo 匹配/G 系 chord 分发规划）、
+`src/components/table/viewPayload.ts`（保存视图序列化/恢复）、`src/components/batch/batchRetry.ts`
+（批量失败项筛选）；组件/页面交互与视觉仍走下方人工验收矩阵。
+一期门禁 = `npm test` 全绿 + `npm run typecheck`（tsc -b）+ `npm run lint` + `npm run build`。
 
 **人工验收矩阵**（交付时逐项执行并记录结果）：
 
@@ -231,3 +236,6 @@ web 无自动化测试设施（实测 package.json scripts 仅 dev/build/lint/ty
 状态与主题：Light/Dark 两主题 × 1440/1024/768 三宽度；Loading/Empty/Error 状态真实接口形态
 动效核验：reduced-motion 下新增动效（搜索结果/批量结果/任务切换/反馈）归零
 ```
+
+> 注：矩阵中「快捷键与输入框冲突」「保存视图还原」「批量打印仅重试失败」的**纯逻辑判定面**
+> 已由 `npm test` 自动化（见上文零依赖最小设施）；矩阵保留用于真实 DOM 交互/视觉/权限全量走查。

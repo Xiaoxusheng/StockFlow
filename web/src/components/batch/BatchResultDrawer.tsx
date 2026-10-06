@@ -3,6 +3,7 @@ import { RedoOutlined } from '@ant-design/icons'
 import type { TableProps } from 'antd'
 import type { BatchResult, BatchResultItemStatus } from '@/api/printing'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { pickFailedIds } from './batchRetry'
 
 const { Text } = Typography
 
@@ -63,9 +64,8 @@ type BatchResultItemShape = BatchResult['results'][number]
  * 批量领取（putaway/picks/checks batch-claim）接线复用同一组件。
  */
 export function BatchResultDrawer({ open, result, onRetry, retrying, onClose }: BatchResultDrawerProps) {
-  const failedIds = (result?.results ?? [])
-    .filter((item) => item.status === 'failed')
-    .map((item) => item.id)
+  // 仅重试失败项（成功项绝不重跑；skipped 不重跑）——纯逻辑 batchRetry.pickFailedIds（node:test 直测）
+  const failedIds = pickFailedIds(result)
 
   return (
     <Drawer

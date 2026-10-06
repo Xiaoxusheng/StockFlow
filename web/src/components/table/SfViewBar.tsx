@@ -5,6 +5,7 @@ import { resolveErrorMessage } from '@/api/client'
 import type { SavedView } from '@/api/savedViews'
 import { useSavedViews } from '@/hooks/useSavedViews'
 import { SfConfirm } from '@/components/common/SfConfirm'
+import { cleanFilters, stableFiltersJson, toApplyValues } from './viewPayload'
 
 /**
  * 保存视图工具条（计划 §2.2 B5 裁决，docs/plans/2026-10-06-efficiency-layer-phase1.md；
@@ -49,21 +50,6 @@ export interface SfViewBarProps {
   currentHiddenColumns?: string[]
   /** 列应用出口：视图 columns_json 经 SfTable 受控 props 生效 */
   onHiddenColumnsChange?: (hidden: string[]) => void
-}
-
-/** filters_json 序列化（对账键；空值剔除后 stringify 保证同形可比） */
-function stableFiltersJson(filters: Record<string, unknown>): string {
-  const clean: Record<string, string> = {}
-  for (const [key, value] of Object.entries(filters)) {
-    if (value === undefined || value === null || value === '') continue
-    clean[key] = String(value)
-  }
-  return JSON.stringify(clean)
-}
-
-/** 视图 filters_json → applyFilters 入参（SavedView.filters_json 已是 string 值对象） */
-function toApplyValues(view: SavedView): Record<string, unknown> {
-  return { ...(view.filters_json ?? {}) }
 }
 
 export function SfViewBar({
@@ -171,9 +157,7 @@ export function SfViewBar({
         const created = await createAsync({
           page_key: pageKey,
           name,
-          filters_json: Object.fromEntries(
-            Object.entries(currentFilters).filter(([, v]) => v !== undefined && v !== null && v !== ''),
-          ) as Record<string, string>,
+          filters_json: cleanFilters(currentFilters) as Record<string, string>,
           columns_json: currentHiddenColumns ?? [],
           page_size: currentPageSize,
         })

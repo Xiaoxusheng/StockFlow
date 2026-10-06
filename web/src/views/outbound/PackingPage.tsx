@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Alert, Button, Card, Input, InputNumber, Modal, Select, Tag, Typography, message } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, PrinterOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
@@ -18,6 +18,7 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
+import { SfQrPrintModal, type SfQrPrintSku } from '@/components/print/SfQrPrintModal'
 import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -56,6 +57,15 @@ export default function PackingPage() {
 
   /** 打包弹窗开关 */
   const [packOpen, setPackOpen] = useState(false)
+  /**
+   * 箱码标签打印（CARTON_CODE）：data_ids 传**包裹编号原文**——箱码由 printing 包
+   * 内置 builtinReader 承接（ports.go:27：托盘/箱码业务域未建，data_ids 即码值原文），
+   * 不需要业务对象 ID，故与 SKU/BIN 的"数字 ID"通道不同。
+   */
+  const [printTargets, setPrintTargets] = useState<SfQrPrintSku[]>([])
+  const [printOpen, setPrintOpen] = useState(false)
+  const [selectedPackKeys, setSelectedPackKeys] = useState<Array<string | number>>([])
+  const canPrintLabel = canAccess(user, 'printing:task:create')
   /** 打包弹窗：选中的出库单号（undefined=未选） */
   const [packNo, setPackNo] = useState<string>()
   /** 逐行本包打包量（line_no → qty；详情到位时初始化为剩余量） */
@@ -281,6 +291,35 @@ export default function PackingPage() {
               </Button>
             ) : undefined
           }
+          /* 批量打印箱码：勾选多行 → 包裹编号原文作为 data_ids（builtinReader 直吃码值） */
+          rowSelection={{
+            selectedRowKeys: selectedPackKeys,
+            onChange: (keys) => setSelectedPackKeys(keys as Array<string | number>),
+          }}
+          bulkActions={
+            canPrintLabel ? (
+              <Button
+                type="primary"
+                size="small"
+                icon={<PrinterOutlined />}
+                onClick={() => {
+                  setPrintTargets(
+                    list.items
+                      .filter((item) => selectedPackKeys.some((key) => String(key) === String(item.id)))
+                      .map((item) => ({
+                        id: item.package_no,
+                        code: item.package_no,
+                        productName: item.carrier || item.outbound_no,
+                        enabled: true,
+                      })),
+                  )
+                  setPrintOpen(true)
+                }}
+              >
+                批量打印箱码（{selectedPackKeys.length}）
+              </Button>
+            ) : undefined
+          }
           scrollX={1470}
         />
       </Card>
@@ -423,6 +462,16 @@ export default function PackingPage() {
           </>
         )}
       </Modal>
+
+      {/* 箱码标签打印（CARTON_CODE）：复用标签打印弹窗（按 objectType 参数化），
+          打印对象为勾选行的包裹编号原文（builtinReader 直接承接码值） */}
+      <SfQrPrintModal
+        open={printOpen}
+        skus={printTargets}
+        objectType="CARTON_CODE"
+        noun="箱码"
+        onClose={() => setPrintOpen(false)}
+      />
     </div>
   )
 }
