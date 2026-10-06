@@ -37,6 +37,7 @@ const (
 	PermPutawayList    = auth.PermPutawayList
 	PermPutawayRead    = auth.PermPutawayRead
 	PermPutawayClaim   = auth.PermPutawayClaim
+	PermPutawayAssign  = auth.PermPutawayAssign
 	PermPutawayExecute = auth.PermPutawayExecute
 
 	// —— purchase:quality（质检单，execute=质检结果提交）——

@@ -159,6 +159,7 @@ const (
 	PermPutawayRead    = "purchase:putaway:read"
 	PermPutawayClaim   = "purchase:putaway:claim"
 	PermPutawayExecute = "purchase:putaway:execute"
+	PermPutawayAssign  = "purchase:putaway:assign" // 任务优先级设置（效率层一期）
 
 	// —— purchase:quality（质检单，execute=质检结果提交）——
 	PermQualityList    = "purchase:quality:list"
@@ -194,12 +195,14 @@ const (
 	PermPickRead    = "sales:pick:read"
 	PermPickClaim   = "sales:pick:claim"
 	PermPickExecute = "sales:pick:execute"
+	PermPickAssign  = "sales:pick:assign" // 任务优先级设置（效率层一期）
 
 	// —— sales:check（复核任务）——
 	PermCheckList    = "sales:check:list"
 	PermCheckRead    = "sales:check:read"
 	PermCheckClaim   = "sales:check:claim"
 	PermCheckExecute = "sales:check:execute"
+	PermCheckAssign  = "sales:check:assign" // 任务优先级设置（效率层一期）
 
 	// —— sales:packing（打包）——
 	PermPackingList    = "sales:packing:list"

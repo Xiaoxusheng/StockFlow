@@ -79,7 +79,7 @@ var permActionNames = map[string]string{
 	"close":   "关闭",
 	"execute": "作业执行",
 	"claim":   "任务领取",
-	"assign":  "异常分派",
+	"assign":  "分派/优先级",
 }
 
 // permResource 权限资源及其动作全集（backend-m1-plan §5.4.1 全量冻结清单，auth 种子同源）。
@@ -113,13 +113,13 @@ var permResources = []permResource{
 	{"purchase:purchase", "采购订单", []string{"list", "read", "create", "update", "submit", "approve", "cancel", "close"}},
 	{"purchase:inbound", "入库单", []string{"list", "read", "create", "update", "cancel", "close"}},
 	{"purchase:receipt", "收货单", []string{"list", "read", "execute"}},
-	{"purchase:putaway", "上架任务", []string{"list", "read", "claim", "execute"}},
+	{"purchase:putaway", "上架任务", []string{"list", "read", "claim", "execute", "assign"}},
 	{"purchase:quality", "质检单", []string{"list", "read", "create", "execute"}},
 	{"sales:sales", "销售订单", []string{"list", "read", "create", "update", "submit", "approve", "cancel", "close"}},
 	{"sales:outbound", "出库单", []string{"list", "read", "create", "cancel", "close"}},
 	{"sales:allocation", "库存分配", []string{"list", "read", "create", "execute"}},
-	{"sales:pick", "拣货任务", []string{"list", "read", "claim", "execute"}},
-	{"sales:check", "复核任务", []string{"list", "read", "claim", "execute"}},
+	{"sales:pick", "拣货任务", []string{"list", "read", "claim", "execute", "assign"}},
+	{"sales:check", "复核任务", []string{"list", "read", "claim", "execute", "assign"}},
 	{"sales:packing", "打包记录", []string{"list", "read", "execute"}},
 	{"sales:shipment", "发货单", []string{"list", "read", "execute"}},
 	{"stockops:transfer", "调拨单", []string{"list", "read", "create", "update", "submit", "approve", "execute", "cancel", "close"}},

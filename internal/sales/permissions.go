@@ -36,12 +36,14 @@ const (
 	PermPickList    = auth.PermPickList
 	PermPickRead    = auth.PermPickRead
 	PermPickClaim   = auth.PermPickClaim
+	PermPickAssign  = auth.PermPickAssign
 	PermPickExecute = auth.PermPickExecute
 
 	// sales:check 复核任务（list/read/claim/execute）。
 	PermCheckList    = auth.PermCheckList
 	PermCheckRead    = auth.PermCheckRead
 	PermCheckClaim   = auth.PermCheckClaim
+	PermCheckAssign  = auth.PermCheckAssign
 	PermCheckExecute = auth.PermCheckExecute
 
 	// sales:packing 打包（list/read/execute）。

@@ -86,15 +86,16 @@ func TestPermissionSeedsMatchFrozenPlan(t *testing.T) {
 		"purchase:inbound:update": true, "purchase:inbound:cancel": true, "purchase:inbound:close": true,
 		"purchase:receipt:list": true, "purchase:receipt:read": true, "purchase:receipt:execute": true,
 		"purchase:putaway:list": true, "purchase:putaway:read": true, "purchase:putaway:claim": true, "purchase:putaway:execute": true,
-		"purchase:quality:list": true, "purchase:quality:read": true, "purchase:quality:create": true, "purchase:quality:execute": true,
+		"purchase:putaway:assign": true,
+		"purchase:quality:list":   true, "purchase:quality:read": true, "purchase:quality:create": true, "purchase:quality:execute": true,
 		// —— M2 销售出库 ——
 		"sales:sales:list": true, "sales:sales:read": true, "sales:sales:create": true, "sales:sales:update": true,
 		"sales:sales:submit": true, "sales:sales:approve": true, "sales:sales:cancel": true, "sales:sales:close": true,
 		"sales:outbound:list": true, "sales:outbound:read": true, "sales:outbound:create": true,
 		"sales:outbound:cancel": true, "sales:outbound:close": true,
 		"sales:allocation:list": true, "sales:allocation:read": true, "sales:allocation:create": true, "sales:allocation:execute": true,
-		"sales:pick:list": true, "sales:pick:read": true, "sales:pick:claim": true, "sales:pick:execute": true,
-		"sales:check:list": true, "sales:check:read": true, "sales:check:claim": true, "sales:check:execute": true,
+		"sales:pick:list": true, "sales:pick:read": true, "sales:pick:claim": true, "sales:pick:execute": true, "sales:pick:assign": true,
+		"sales:check:list": true, "sales:check:read": true, "sales:check:claim": true, "sales:check:execute": true, "sales:check:assign": true,
 		"sales:packing:list": true, "sales:packing:read": true, "sales:packing:execute": true,
 		"sales:shipment:list": true, "sales:shipment:read": true, "sales:shipment:execute": true,
 		// —— M2 库存作业 ——
@@ -200,9 +201,9 @@ func TestPermissionSeedsMatchFrozenPlan(t *testing.T) {
 		t.Fatalf("菜单权限点数量 %d 与默认菜单清单 %d 不符", len(gotMenu), len(wantMenuCodes))
 	}
 	// 三级分布（MENU=页面，BUTTON=写动作，API=list/read）：M1 32 API/50 BUTTON +
-	// M2 39 API/67 BUTTON + M3 25 API/16 BUTTON = 96/133。
-	if countByType["MENU"] != len(wantMenuCodes) || countByType["API"] != 96 || countByType["BUTTON"] != 133 {
-		t.Fatalf("权限点三级分布异常: %v（应 MENU=%d API=96 BUTTON=133）", countByType, len(wantMenuCodes))
+	// M2 39 API/67 BUTTON + M3 25 API/16 BUTTON = 96/133；效率层一期 +3 assign（BUTTON）。
+	if countByType["MENU"] != len(wantMenuCodes) || countByType["API"] != 96 || countByType["BUTTON"] != 136 {
+		t.Fatalf("权限点三级分布异常: %v（应 MENU=%d API=96 BUTTON=136）", countByType, len(wantMenuCodes))
 	}
 
 	// 动作点名称必须有中文映射（permActionNames 完备性）
