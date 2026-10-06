@@ -156,6 +156,25 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ===== 表格分页（frontend.md §6.1）：紧凑靠右一行 =====
+   antd 默认「total 贴左 + 页码/条每页贴右」靠 margin-inline-end:auto 分离，
+   宽表格下中间会空出上千像素（2026-10-06 用户反馈松散）。改为整组紧凑靠右：
+   共 N 条 → ‹ 1 › → 20 条/页 依次相邻，中间仅固定间距。作用于 .sf-table
+   作用域（全站表格统一，含嵌套表；不含 antd 独立 Pagination 用法）。 */
+.sf-table .ant-pagination {
+  justify-content: flex-end;
+}
+
+.sf-table .ant-pagination-total-text {
+  margin-inline-end: var(--sf-space-3);
+  color: var(--sf-text-secondary);
+}
+
+/* 条/页选择器与页码按钮同风格（同圆角），整组观感统一 */
+.sf-table .ant-pagination-options .ant-select-selector {
+  border-radius: var(--sf-radius-sm);
+}
+
 /* ===== 表格动效体系（frontend.md §31；任务书 8 类核心动画） =====
    作用域锚点：.sf-table（SfTable 根）/ .sf-table-toolbar / .sf-search-form__applied——
    Pad 卡片流不经这些选择器，零影响。时长/缓动一律 var(--sf-motion-*)；

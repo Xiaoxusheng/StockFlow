@@ -238,6 +238,8 @@ Dashboard
 - `page`（默认）：独立列表页，含工具栏/三档密度（默认紧凑）/列显示隐藏/全屏/刷新/统一分页（`共 x 条` + 条/页 + 快跳）。
 - `nested`：详情页/抽屉内嵌表——无工具栏无分页（除非显式传 pagination），仍统一密度、空态、错误态与首载骨架（loading 且无数据时以骨架条占位保持表头结构；dataSource 传入时首载与刷新不再叠加 Spin 蒙层，统一走 data-loading 压暗/淡入，见 §31）。
 
+**分页条规范（2026-10-06，全站统一）**：SfTable 内嵌分页（`共 x 条` + 页码 ‹ 1 › + 条/页 + 快跳）为**紧凑靠右单行**布局——antd 默认「total 贴左、页码/条每页贴右」靠 `margin-inline-end: auto` 分离两端，宽表格下中间会空出上千像素（实测 1170px），观感松散。global.css 以 `.sf-table .ant-pagination { justify-content: flex-end }` 收敛为**整组紧凑靠右**：「共 x 条」与页码之间固定 `--sf-space-3` 间距、「共 x 条」用 `--sf-text-secondary` 降权、「条/页」选择器圆角统一 `--sf-radius-sm`（与页码按钮同风格）。作用于 `.sf-table` 作用域（全站表格统一，含 nested 显式分页），**禁止各页面自行覆盖分页样式**。
+
 **受控列 API（作业效率提升层一期，2026-10-06）**：SfTable 新增 `hiddenColumns?: string[]` + `onHiddenColumnsChange?: (hidden: string[]) => void`——受控优先/非受控回退：不传新 props 的既有消费页零行为变化（storageKey 照旧持久化）；保存视图应用=页面将视图 hidden 列集经受控 prop 生效（不写 localStorage，避免覆盖用户手动列偏好）；用户手动改列=onChange 回传 + storageKey 照旧持久化。
 
 **保存视图（SfViewBar）范围披露（一期）**：视图保存 filters_json（SfSearchForm cleanValues 产物）+ columns_json（hidden 列键数组）+ page_size；`sort_json` 仅为服务端排序通道预留（一期恒空、不采集——SfTable 排序为 antd 非受控，服务端排序超一期范围）；列拖拽排序维持既有裁定不做。视图应用一律经 usePagedList 公开 API（urlSync 页展开写入 URL query、旧形态页置 params，SfViewBar 以 `mode: 'url' | 'state'` 声明形态），禁止绕过 hook 直改 URL 或页面 state——URL 参数为最终事实源，`view=<id>` 仅作当前视图名标记，用户改动任一筛选即清除。
