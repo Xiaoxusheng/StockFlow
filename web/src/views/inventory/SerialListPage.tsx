@@ -1,6 +1,6 @@
-import { useState } from 'react'
 import { Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type SerialItem, type SerialQuery, type SerialStatus } from '@/api/inventory'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -8,7 +8,6 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime } from '@/utils/format'
 
 
 const SERIAL_STATUS_OPTIONS: Array<{ label: string; value: SerialStatus }> = [
@@ -59,13 +58,13 @@ const COLUMNS: ColumnsType<SerialItem> = [
     title: '最近事件时间',
     dataIndex: 'last_event_at',
     width: 160,
-    render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string | null) => <DateCell value={v} />,
   },
   {
     title: '创建时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
 ]
 
@@ -75,17 +74,12 @@ const COLUMNS: ColumnsType<SerialItem> = [
  * 字段对齐 SerialView（internal/inventory/handler.go:131-144，一物一行，inventory-rules.md §8）。
  */
 export default function SerialListPage() {
-  const [params, setParams] = useState<SerialQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<SerialItem, SerialQuery>({
     queryKey: ['inventory', 'serials'],
     fetch: (q) => inventoryApi.serials(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as SerialQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -101,7 +95,8 @@ export default function SerialListPage() {
             { name: 'warehouse_id', label: '仓库 ID', control: 'input', placeholder: '仓库 ID（0=不在库）' },
             { name: 'status', label: '状态', control: 'select', options: SERIAL_STATUS_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<SerialItem>
           storageKey="inventory-serials"

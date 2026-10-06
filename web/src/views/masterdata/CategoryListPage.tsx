@@ -28,6 +28,7 @@ import {
 } from '@/api/masterdata'
 import { fetchCategoryOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -72,19 +73,22 @@ function toPayload(values: CategoryFormValues, isEdit: boolean): CategorySavePay
 /** 商品分类（/categories，后端端点 /api/product-categories，backend-m1-plan §5.4；
  * 无删除接口——停用即生命周期终点，masterdata.go:22/66） */
 export default function CategoryListPage() {
-  const [params, setParams] = useState<CategoryQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<CategoryItem | null>(null)
   const [form] = Form.useForm<CategoryFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）；
+  // 后端 category 域未冻结 delete 码，canDelete 恒 false，本页本就无删除入口
+  const { canCreate, canUpdate, canStatus } = useCrudPermissions('category')
   // 动效 #7（frontend.md §31）：启停成功/失败行淡色反馈——仅在 API 回调后触发
   const fb = useTableRowFeedback()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<CategoryItem, CategoryQuery>({
     queryKey: ['masterdata', 'categories'],
     fetch: (q) => masterdataApi.categories.list(q),
-    params,
+    urlSync: true,
   })
 
   // 上级分类下拉：分页取全（fetchCategoryOptions，超一页不截断），编辑时排除自身；
@@ -162,6 +166,45 @@ export default function CategoryListPage() {
       })
   }
 
+  /** 操作列按权限装配：无编辑权限不出「编辑」，无状态权限不出「停用/启用」 */
+  const actionColumn: ColumnsType<CategoryItem>[number] = {
+    title: '操作',
+    key: 'actions',
+    fixed: 'right',
+    width: 120,
+    render: (_: unknown, record: CategoryItem) => {
+      const disabling = record.status === 'ENABLED'
+      return (
+        <span style={{ whiteSpace: 'nowrap' }}>
+          {canUpdate && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
+          {canStatus && (
+            <SfConfirm
+              title={disabling ? '确认停用该分类？' : '确认启用该分类？'}
+              description={
+                disabling
+                  ? '存在启用中的子分类或商品引用时后端将拒绝停用；建议先处理引用。'
+                  : '启用后分类可重新被商品引用。'
+              }
+              okText={disabling ? '停用' : '启用'}
+              confirming={statusMutation.isPending}
+              onConfirm={() =>
+                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
+              }
+            >
+              <Button type="link" size="small" danger={disabling}>
+                {disabling ? '停用' : '启用'}
+              </Button>
+            </SfConfirm>
+          )}
+        </span>
+      )
+    },
+  }
+
   const columns: ColumnsType<CategoryItem> = [
     {
       title: '分类编码',
@@ -213,39 +256,7 @@ export default function CategoryListPage() {
       width: 160,
       render: (v?: string) => <DateCell value={v} />,
     },
-    {
-      title: '操作',
-      key: 'actions',
-      fixed: 'right',
-      width: 120,
-      render: (_: unknown, record: CategoryItem) => {
-        const disabling = record.status === 'ENABLED'
-        return (
-          <span style={{ whiteSpace: 'nowrap' }}>
-            <Button type="link" size="small" onClick={() => openEdit(record)}>
-              编辑
-            </Button>
-            <SfConfirm
-              title={disabling ? '确认停用该分类？' : '确认启用该分类？'}
-              description={
-                disabling
-                  ? '存在启用中的子分类或商品引用时后端将拒绝停用；建议先处理引用。'
-                  : '启用后分类可重新被商品引用。'
-              }
-              okText={disabling ? '停用' : '启用'}
-              confirming={statusMutation.isPending}
-              onConfirm={() =>
-                statusMutation.mutate({ id: record.id, status: disabling ? 'DISABLED' : 'ENABLED' })
-              }
-            >
-              <Button type="link" size="small" danger={disabling}>
-                {disabling ? '停用' : '启用'}
-              </Button>
-            </SfConfirm>
-          </span>
-        )
-      },
-    },
+    ...(canUpdate || canStatus ? [actionColumn] : []),
   ]
 
   return (
@@ -255,9 +266,11 @@ export default function CategoryListPage() {
         title="商品分类"
         subtitle="分类编码 / 名称 / 层级（parent_id）维护；分类无删除，停用即终点"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建分类
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建分类
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">
@@ -266,10 +279,8 @@ export default function CategoryListPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '分类编码 / 名称' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams(values as CategoryQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<CategoryItem>
           storageKey="masterdata-categories"
@@ -283,11 +294,13 @@ export default function CategoryListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="暂无商品分类，点击右上角「新建分类」创建"
+          emptyText={canCreate ? '暂无商品分类，点击右上角「新建分类」创建' : '暂无商品分类'}
           emptyAction={
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
-              新建分类
-            </Button>
+            canCreate ? (
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+                新建分类
+              </Button>
+            ) : undefined
           }
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}

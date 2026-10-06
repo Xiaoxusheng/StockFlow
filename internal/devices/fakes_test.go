@@ -471,9 +471,15 @@ func (r *fakeRepo) InsertScanLog(tx *gorm.DB, l *ScanLog) error {
 	return nil
 }
 
+// ListScanLogs 过滤语义对齐 GORM 实现（repository.go ListScanLogs）：device_id/user_id/
+// warehouse_id/success 精确匹配、keyword 对 raw_code/page/device_code 三列、数据权限
+// 仓库范围 fail-closed（非 ALL 且空集 = 不可见任何行）、分页截断（total 为截断前计数）。
 func (r *fakeRepo) ListScanLogs(_ context.Context, f ScanLogFilter) ([]*ScanLog, int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if !f.AllWarehouses && len(f.WarehouseIDs) == 0 {
+		return nil, 0, nil // 指定仓库范围但无绑定 → 不可见任何行（fail-closed，permission.md §4）
+	}
 	var out []*ScanLog
 	for _, l := range r.scanLogs {
 		if f.DeviceID > 0 && (l.DeviceID == nil || *l.DeviceID != f.DeviceID) {
@@ -488,10 +494,52 @@ func (r *fakeRepo) ListScanLogs(_ context.Context, f ScanLogFilter) ([]*ScanLog,
 		if f.Success != nil && l.Success != *f.Success {
 			continue
 		}
+		if f.Keyword != "" && !scanLogKeywordHit(l, f.Keyword) {
+			continue
+		}
+		if !f.AllWarehouses {
+			found := false
+			for _, wid := range f.WarehouseIDs {
+				if l.WarehouseID == wid {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
 		out = append(out, l)
 	}
-	total := int64(len(out))
-	return out, total, nil
+	return paginate(out, f.Page, f.PageSize)
+}
+
+// scanLogKeywordHit keyword 三列模糊匹配（raw_code/page/device_code，GORM ILIKE 同口径）。
+func scanLogKeywordHit(l *ScanLog, kw string) bool {
+	if strings.Contains(l.RawCode, kw) || strings.Contains(l.Page, kw) {
+		return true
+	}
+	if l.DeviceCode != nil {
+		return strings.Contains(*l.DeviceCode, kw)
+	}
+	return false
+}
+
+// paginate 内存分页截断（total 返回截断前计数；lo 越界返回空页——对齐 LIMIT/OFFSET）。
+func paginate[T any](rows []T, page, pageSize int) ([]T, int64, error) {
+	total := int64(len(rows))
+	if pageSize > 0 && page > 0 {
+		lo := (page - 1) * pageSize
+		if lo >= len(rows) {
+			return nil, total, nil
+		}
+		hi := lo + pageSize
+		if hi > len(rows) {
+			hi = len(rows)
+		}
+		rows = rows[lo:hi]
+	}
+	return rows, total, nil
 }
 
 func (r *fakeRepo) CountScanLogs(_ context.Context, deviceID int64, since time.Time) (total, today int64, err error) {
@@ -522,6 +570,8 @@ func (r *fakeRepo) InsertDeviceLogs(tx *gorm.DB, logs []*DeviceLog) error {
 	return nil
 }
 
+// ListDeviceLogs 过滤语义对齐 GORM 实现（repository.go ListDeviceLogs）：level 精确匹配
+// + 分页截断。
 func (r *fakeRepo) ListDeviceLogs(_ context.Context, f DeviceLogFilter) ([]*DeviceLog, int64, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -532,8 +582,7 @@ func (r *fakeRepo) ListDeviceLogs(_ context.Context, f DeviceLogFilter) ([]*Devi
 		}
 		out = append(out, l)
 	}
-	total := int64(len(out))
-	return out, total, nil
+	return paginate(out, f.Page, f.PageSize)
 }
 
 func (r *fakeRepo) FindLatestAppVersion(_ context.Context, platform string) (*AppVersion, error) {

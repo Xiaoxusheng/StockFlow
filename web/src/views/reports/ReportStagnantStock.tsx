@@ -1,9 +1,10 @@
 import { Card, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { reportsApi, type StagnantRow } from '@/api/reports'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -28,7 +29,7 @@ const COLUMNS: ColumnsType<StagnantRow> = [
     title: '末次移动',
     dataIndex: 'last_moved_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '未动天数',

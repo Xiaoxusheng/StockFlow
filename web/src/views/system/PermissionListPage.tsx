@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { rbacApi, type PermissionItem, type PermissionQuery, type PermissionType } from '@/api/rbac'
@@ -30,17 +29,12 @@ function statusTagKey(status: OnOffStatus): string {
 
 /** 权限列表（frontend.md 系统管理：权限）——权限点由后端种子冻结维护，页面只读 */
 export default function PermissionListPage() {
-  const [params, setParams] = useState<PermissionQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<PermissionItem, PermissionQuery>({
     queryKey: ['system', 'permissions'],
     fetch: (q) => rbacApi.permissions(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as PermissionQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<PermissionItem> = [
     { title: '权限编码', dataIndex: 'code', width: 220, fixed: 'left' },
@@ -78,7 +72,8 @@ export default function PermissionListPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '权限编码 / 名称' },
             { name: 'type', label: '类型', control: 'select', options: TYPE_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<PermissionItem>
           storageKey="system-permissions"

@@ -1,14 +1,14 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { purchaseApi, type Receipt, type ReceiptQuery } from '@/api/purchase'
 import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDate, formatDateTime } from '@/utils/format'
 
 /** 收货列表（/purchases/receipts；GET /api/receipts，出参为 Receipt 裸模型 snake_case，
  * internal/purchase/models.go:207-221——收货为事件型一次性生效（幂等键防重），
@@ -16,8 +16,6 @@ import { formatDate, formatDateTime } from '@/utils/format'
  * 供应商/应收已收数量字段，相应列不展示。warehouse_id 为裸 ID，经仓库 options
  * 本地映射补充，映射失败降级为 ID，不造假数据） */
 export default function ReceiptListPage() {
-  const [params, setParams] = useState<ReceiptQuery>({})
-
   // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
   const warehouseOptionsQuery = useQuery({
     queryKey: ['purchase', 'options', 'warehouses'],
@@ -28,10 +26,11 @@ export default function ReceiptListPage() {
     [warehouseOptionsQuery.data],
   )
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<Receipt, ReceiptQuery>({
     queryKey: ['purchase', 'receipts'],
     fetch: (q) => purchaseApi.receipts.list(q),
-    params,
+    urlSync: true,
   })
 
   const columns: ColumnsType<Receipt> = [
@@ -50,14 +49,14 @@ export default function ReceiptListPage() {
       title: '效期',
       dataIndex: 'expiry_date',
       width: 110,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDate(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} withTime={false} />,
     },
     { title: '操作人', dataIndex: 'operator_name', width: 100, render: (v: string) => v || '-' },
     {
       title: '收货时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -77,11 +76,6 @@ export default function ReceiptListPage() {
     },
   ]
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as ReceiptQuery)
-    list.resetToFirstPage()
-  }
-
   return (
     <div className="sf-page">
       <SfPageHeader
@@ -89,7 +83,7 @@ export default function ReceiptListPage() {
         subtitle="到货 → 收货 → 质检 → 上架 → 入库完成"
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfSearchForm fields={searchFields} initialValues={list.params} onSearch={list.applyFilters} />
         <SfTable<Receipt>
           storageKey="purchase-receipts"
           rowKey="id"

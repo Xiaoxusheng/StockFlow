@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
@@ -20,13 +20,14 @@ import {
   fetchWarehouseOptions,
   idKey,
 } from '@/api/options'
+import { DateCell } from '@/components/table/cells'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -153,13 +154,13 @@ function buildColumns(maps: AdjustmentNameMaps): ColumnsType<InventoryAdjustment
       title: '申请时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '执行时间',
       dataIndex: 'executed_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
   ]
 }
@@ -169,11 +170,11 @@ function buildColumns(maps: AdjustmentNameMaps): ColumnsType<InventoryAdjustment
  * 出参 AdjustmentView snake_case 仅裸 ID，经 api/options.ts 本地映射补充编码/名称，
  * 失败降级 ID；后端无 approved_at，执行信息仅 executed_at/executed_by） */
 export default function AdjustmentsPage() {
-  const [params, setParams] = useState<InventoryAdjustmentQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<InventoryAdjustmentItem, InventoryAdjustmentQuery>({
     queryKey: ['inventory', 'adjustments'],
     fetch: (q) => inventoryApi.adjustments(q),
-    params,
+    urlSync: true,
   })
 
   // AdjustmentView 无联表编码/名称（warehouse_id/sku_id/bin_id/batch_id 裸 ID），options 一次取全本地映射
@@ -218,10 +219,8 @@ export default function AdjustmentsPage() {
             { name: 'adjust_type', label: '调整类型', control: 'select', options: ADJUST_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: ADJUST_STATUS_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams(values as InventoryAdjustmentQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<InventoryAdjustmentItem>
           storageKey="inventory-adjustments"

@@ -10,6 +10,7 @@ import {
   type SalesReturnQuery,
   type SalesReturnStatus,
 } from '@/api/sales'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -21,7 +22,6 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SalesReturnCreateDrawer } from './SalesReturnCreateDrawer'
 import { SALES_RETURN_STATUS_TAG } from './salesStatusMeta'
-import { formatDateTime } from '@/utils/format'
 
 /** 状态筛选选项与列内标签同源（值为后端大写枚举，returns/handler.go 直接入参） */
 const STATUS_OPTIONS = (
@@ -44,15 +44,15 @@ function SalesReturnStatusTag({ status }: { status: SalesReturnStatus }) {
  * 创建入口为 SalesReturnCreateDrawer（POST /api/returns，仅持 returns:salesreturn:create
  * 权限可见）。 */
 export default function SalesReturnListPage() {
-  const [params, setParams] = useState<SalesReturnQuery>({})
   const [createOpen, setCreateOpen] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, SALES_RETURN_CREATE_PERMISSION)
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<SalesReturnOrder, SalesReturnQuery>({
     queryKey: ['sales', 'returns'],
     fetch: (q) => salesApi.returns.list(q),
-    params,
+    urlSync: true,
   })
 
   // 仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
@@ -64,11 +64,6 @@ export default function SalesReturnListPage() {
     () => buildWarehouseMaps(warehousesQuery.data ?? []).name,
     [warehousesQuery.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as SalesReturnQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<SalesReturnOrder> = [
     { title: '退货单号', dataIndex: 'return_no', width: 170, fixed: 'left' },
@@ -95,7 +90,7 @@ export default function SalesReturnListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -132,7 +127,8 @@ export default function SalesReturnListPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<SalesReturnOrder>
           storageKey="sales-returns"

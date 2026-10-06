@@ -26,6 +26,7 @@ import {
   type LedgerItem,
   type LedgerQuery,
 } from '@/api/inventory'
+import { DateCell } from '@/components/table/cells'
 import { masterdataApi, OPTIONS_PAGE_SIZE } from '@/api/masterdata'
 import { binApi, type BinItem } from '@/api/warehouse'
 import {
@@ -41,7 +42,7 @@ import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -87,7 +88,7 @@ const COLUMNS: ColumnsType<LedgerItem> = [
     title: '时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   { title: '流水号', dataIndex: 'ledger_no', width: 150 },
   {
@@ -148,7 +149,6 @@ function toMoveKey(bin: BinItem, skuId: number, batchId: number): MoveKeyInput {
  * MoveBin 原语同仓同 SKU 同批次跨库位移动可用库存，源/目标两行各落一条 MOVE 流水。
  */
 export default function TransferPage() {
-  const [params, setParams] = useState<LedgerQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [form] = Form.useForm<MoveFormValues>()
   const [messageApi, messageContext] = message.useMessage()
@@ -157,11 +157,12 @@ export default function TransferPage() {
   const user = useAuthStore((state) => state.user)
   const canMove = canAccess(user, MOVE_EXECUTE_PERMISSION)
 
-  // 移库流水列表：固定 change_type=MOVE，其余筛选透传（后端 handler.go:295-323 校验）
+  // 移库流水列表：固定 change_type=MOVE，其余筛选透传（后端 handler.go:295-323 校验）；
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<LedgerItem, LedgerQuery>({
     queryKey: ['inventory', 'move-ledger'],
     fetch: (q) => inventoryApi.ledger({ ...q, change_type: 'MOVE' }),
-    params,
+    urlSync: true,
   })
 
   // 发起移库表单选项：库位（GET /api/bins，行含 warehouse_id/zone_id/shelf_id 可解析
@@ -261,11 +262,6 @@ export default function TransferPage() {
       })
   }
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as LedgerQuery)
-    list.resetToFirstPage()
-  }
-
   return (
     <div className="sf-page">
       {messageContext}
@@ -281,7 +277,8 @@ export default function TransferPage() {
             { name: 'bin_id', label: '库位 ID', control: 'input', placeholder: '库位 ID（正整数）' },
             { name: 'batch_id', label: '批次 ID', control: 'input', placeholder: '批次 ID（0=非批次）' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
           extraActions={
             canMove ? (
               <Button type="primary" icon={<SwapOutlined />} onClick={openCreate}>

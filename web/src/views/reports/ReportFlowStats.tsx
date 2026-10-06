@@ -9,11 +9,12 @@ import {
   type FlowValuationBasis,
   type ReportRangeQuery,
 } from '@/api/reports'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfLineChart } from '@/components/charts'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDate, formatMoney, formatNumber, formatQty } from '@/utils/format'
+import { formatMoney, formatNumber, formatQty } from '@/utils/format'
 import { rangeToParams, ReportRangePicker } from './ReportRangePicker'
 
 const { Text } = Typography
@@ -30,7 +31,7 @@ const COLUMNS: ColumnsType<FlowStatRow> = [
     dataIndex: 'stat_date',
     width: 120,
     fixed: 'left',
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDate(v)}</span>,
+    render: (v: string) => <DateCell value={v} withTime={false} />,
   },
   { title: '单据数', dataIndex: 'order_count', width: 110, align: 'right', render: count },
   { title: '数量', dataIndex: 'qty', width: 120, align: 'right', render: qty },

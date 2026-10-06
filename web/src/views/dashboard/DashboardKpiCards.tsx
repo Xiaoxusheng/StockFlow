@@ -12,8 +12,11 @@
 import { Button, Col, Row } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
-import type { ReactNode } from 'react'
-import { SfSparkline } from '@/components/charts'
+import { memo, type ReactNode } from 'react'
+// 直连模块、绕过 components/charts 桶：桶内 SfLineChart 等在模块顶层调用 echarts.use()，
+// 属静态不可判定的副作用，从桶导入会把 echarts 拽进首屏 chunk。SfSparkline 已改纯 SVG，
+// 单独引用后 Dashboard 首屏不再加载 echarts（vite.config.ts manualChunks 同批改动）。
+import { SfSparkline } from '@/components/charts/SfSparkline'
 import { formatNumber } from '@/utils/format'
 import './dashboard.css'
 
@@ -37,7 +40,9 @@ export interface DashboardKpiItem {
   onRetry?: () => void
 }
 
-function KpiCard({ item }: { item: DashboardKpiItem }) {
+/** memo 化：DashboardPage 侧 L2/L3 区块状态变化（图表 metric 切换、抽屉等）触发重渲染时，
+ *  item 引用由父级 useMemo 稳定（DashboardPage kpis），此处跳过 4 张卡的 reconcile 重画。 */
+const KpiCard = memo(function KpiCard({ item }: { item: DashboardKpiItem }) {
   const navigate = useNavigate()
   const link = item.link
   const clickable = Boolean(link)
@@ -82,7 +87,7 @@ function KpiCard({ item }: { item: DashboardKpiItem }) {
       )}
     </div>
   )
-}
+})
 
 /** KPI 卡排（§27 顶部 4 KPI；响应式 xs=1 sm=2 lg=4 列，任务书 §60） */
 export function DashboardKpiCards({ items }: { items: DashboardKpiItem[] }) {

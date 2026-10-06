@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
@@ -9,6 +9,7 @@ import {
   type OutboundOrderQuery,
   type OutboundOrderStatus,
 } from '@/api/outbound'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -17,7 +18,6 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { OUTBOUND_STATUS_TAG } from './salesStatusMeta'
-import { formatDateTime } from '@/utils/format'
 
 const { Link } = Typography
 
@@ -42,14 +42,12 @@ function OutboundStatusTag({ status }: { status: OutboundOrderStatus }) {
  * 页面不提供手工新建入口。详情跳转与出库域 OutboundPage 同径：/outbound/{outbound_no}
  * （后端 GET /api/outbounds/:no 按单号查询）；本页仍在销售菜单组，菜单归属不动。 */
 export default function SalesOutboundListPage() {
-  const [params, setParams] = useState<OutboundOrderQuery>({})
   const navigate = useNavigate()
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<OutboundOrder, OutboundOrderQuery>({
     queryKey: ['outbound', 'orders'],
     fetch: (q) => outboundApi.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'sales-outbounds',
+    urlSync: true,
   })
 
   // 仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
@@ -61,11 +59,6 @@ export default function SalesOutboundListPage() {
     () => buildWarehouseMaps(warehousesQuery.data ?? []).name,
     [warehousesQuery.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as OutboundOrderQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<OutboundOrder> = [
     {
@@ -106,7 +99,7 @@ export default function SalesOutboundListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -144,7 +137,8 @@ export default function SalesOutboundListPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<OutboundOrder>
           storageKey="sales-outbounds"

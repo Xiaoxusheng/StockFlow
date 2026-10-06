@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -14,12 +13,12 @@ import {
   type QualityRecordType,
   RECORD_TYPE_LABEL,
 } from '@/api/quality'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -39,7 +38,7 @@ const COLUMNS: ColumnsType<QualityTraceItem> = [
     dataIndex: 'occurred_at',
     width: 160,
     fixed: 'left',
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '记录类型',
@@ -102,17 +101,12 @@ const COLUMNS: ColumnsType<QualityTraceItem> = [
  * 按 SKU / 批次号 / 序列号 / 单据号 四维检索质量记录链（检验 → 处置），走既有列表模式。
  */
 export default function QualityTracePage() {
-  const [params, setParams] = useState<QualityTraceQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<QualityTraceItem, QualityTraceQuery>({
     queryKey: ['quality', 'trace'],
     fetch: (q) => qualityApi.trace(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as QualityTraceQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -128,7 +122,8 @@ export default function QualityTracePage() {
             { name: 'serial_no', label: '序列号 SN', control: 'input', placeholder: '序列号' },
             { name: 'biz_no', label: '单据号', control: 'input', placeholder: '质检单号 / 业务单据号' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<QualityTraceItem>
           storageKey="quality-trace"

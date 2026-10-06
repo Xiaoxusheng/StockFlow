@@ -26,6 +26,7 @@ import {
   type StockDistributionNode,
   type TraceLedgerItem,
 } from '@/api/inventory'
+import { DateCell } from '@/components/table/cells'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
@@ -267,7 +268,7 @@ const BATCH_COLUMNS: ColumnsType<BatchItem> = [
     title: '更新时间',
     dataIndex: 'updated_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
 ]
 
@@ -317,13 +318,13 @@ const SERIAL_COLUMNS: ColumnsType<SerialItem> = [
     title: '最近事件时间',
     dataIndex: 'last_event_at',
     width: 160,
-    render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string | null) => <DateCell value={v} />,
   },
   {
     title: '创建时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
 ]
 
@@ -360,7 +361,7 @@ const LEDGER_COLUMNS: ColumnsType<LedgerItem> = [
     dataIndex: 'created_at',
     width: 160,
     fixed: 'left',
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   { title: '单据号', dataIndex: 'business_no', width: 150, render: (v: string) => v || '-' },
   { title: '业务类型', dataIndex: 'business_type', width: 100, render: (v: string) => v || '-' },
@@ -466,13 +467,13 @@ const LOCK_COLUMNS: ColumnsType<InventoryLockItem> = [
     title: '锁定时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '释放时间',
     dataIndex: 'released_at',
     width: 160,
-    render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string | null) => <DateCell value={v} />,
   },
 ]
 
@@ -511,7 +512,7 @@ const TRACE_COLUMNS: ColumnsType<TraceLedgerItem> = [
     dataIndex: 'created_at',
     width: 160,
     fixed: 'left',
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '变更类型',

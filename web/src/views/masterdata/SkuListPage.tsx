@@ -26,8 +26,10 @@ import {
   type SkuQuery,
   type SkuSavePayload,
 } from '@/api/masterdata'
+import { DateCell } from '@/components/table/cells'
 import { fetchProductOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -39,7 +41,7 @@ import { SfQrPrintModal } from '@/components/print/SfQrPrintModal'
 import { buildSfqrSku } from '@/utils/qrPayload'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
-import { formatDateTime, formatMoney, formatNumber } from '@/utils/format'
+import { formatMoney, formatNumber } from '@/utils/format'
 
 const { Text, Paragraph } = Typography
 
@@ -121,9 +123,21 @@ function toPayload(values: SkuFormValues): SkuSavePayload {
 const QTY = { min: 0, precision: 0, style: { width: '100%' } } as const
 const MONEY = { min: 0, precision: 2, style: { width: '100%' } } as const
 
+/**
+ * 查询表单值 → SkuQuery：SfSearchForm 下拉产出的是字符串，enabled 需转布尔
+ * （后端 strconv.ParseBool）。同时供 usePagedList 的 urlSync 解码——URL 里存的也是字符串。
+ */
+function toSkuQuery(raw: Record<string, unknown>): SkuQuery {
+  const enabledRaw = raw['enabled']
+  return {
+    keyword: typeof raw['keyword'] === 'string' ? raw['keyword'] : undefined,
+    product_id: typeof raw['product_id'] === 'string' ? raw['product_id'] : undefined,
+    enabled: enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined,
+  }
+}
+
 /** SKU 管理（/skus，backend-m1-plan §5.4 masterdata 契约域；三开关决定 M2 入库/出库业务分支） */
 export default function SkuListPage() {
-  const [params, setParams] = useState<SkuQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<SkuItem | null>(null)
   const [form] = Form.useForm<SkuFormValues>()
@@ -132,10 +146,12 @@ export default function SkuListPage() {
   // 动效 #7/删除行（frontend.md §31）：行淡色反馈 / 删除行 fade→收缩——仅在 API 成败回调后触发
   const fb = useTableRowFeedback()
 
+  // 筛选与分页同步到 URL：decodeParams 复用 toSkuQuery 把 enabled 还原为布尔
   const list = usePagedList<SkuItem, SkuQuery>({
     queryKey: ['masterdata', 'skus'],
     fetch: (q) => masterdataApi.skus.list(q),
-    params,
+    urlSync: true,
+    decodeParams: toSkuQuery,
   })
 
   // 表单依赖下拉：所属商品分页取全（fetchProductOptions，超一页不截断）；接口失败时降级为空数组，不阻塞其余字段填写
@@ -199,6 +215,8 @@ export default function SkuListPage() {
   const user = useAuthStore((s) => s.user)
   // 「打印二维码」fail-closed（约束 7）：无 printing:task:create 权限时菜单项不渲染
   const canCreatePrintTask = canAccess(user, 'printing:task:create')
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）
+  const { canCreate, canUpdate, canDelete, canStatus } = useCrudPermissions('sku')
   const [qrOpen, setQrOpen] = useState(false)
   const [qrSku, setQrSku] = useState<SfQrSkuInfo | null>(null)
   const [printOpen, setPrintOpen] = useState(false)
@@ -238,14 +256,23 @@ export default function SkuListPage() {
   /** 行内「更多」菜单（UserListPage buildRowMenu 同构；打印项经权限 fail-closed 收敛） */
   const buildRowMenu = (record: SkuItem): MenuProps => {
     const disabling = record.is_enabled
+    // 打印/复制为无权限门槛的便捷项；停用/删除按权限点收敛（无 sku:status 不出停用、无 sku:delete 不出删除）
+    const items: NonNullable<MenuProps['items']> = []
+    if (canCreatePrintTask) items.push({ key: 'print', label: '打印二维码' })
+    items.push({ key: 'copy', label: '复制二维码内容' })
+    const manageItems: NonNullable<MenuProps['items']> = []
+    if (canStatus) {
+      manageItems.push({ key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling })
+    }
+    if (canDelete) {
+      manageItems.push({ key: 'remove', label: '删除', danger: true })
+    }
+    if (manageItems.length > 0) {
+      items.push({ type: 'divider' })
+      items.push(...manageItems)
+    }
     return {
-      items: [
-        ...(canCreatePrintTask ? [{ key: 'print', label: '打印二维码' }] : []),
-        { key: 'copy', label: '复制二维码内容' },
-        { type: 'divider' },
-        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
-        { key: 'remove', label: '删除', danger: true },
-      ],
+      items,
       onClick: ({ key }) => {
         if (key === 'print') {
           setPrintTarget(toQrSku(record))
@@ -392,7 +419,7 @@ export default function SkuListPage() {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -401,9 +428,11 @@ export default function SkuListPage() {
       width: 170,
       render: (_: unknown, record: SkuItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
+          {canUpdate && (
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
+            </Button>
+          )}
           {/* 二维码 = 详情快捷入口（qr-code.md §7.2：打开 SfQrPreviewDrawer，
               内含 QR 预览 + SKU 编码/商品名/主条码/状态 + 复制载荷 + 打印标签） */}
           <Button
@@ -433,9 +462,11 @@ export default function SkuListPage() {
         title="SKU 管理"
         subtitle="SKU 档案：条码 / 价格 / 库存阈值 / 批次·效期·序列号开关"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建 SKU
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建 SKU
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">
@@ -445,17 +476,8 @@ export default function SkuListPage() {
             { name: 'product_id', label: '所属商品', control: 'select', options: productOptions },
             { name: 'enabled', label: '启停', control: 'select', options: ENABLED_FILTER_OPTIONS },
           ]}
-          onSearch={(values) => {
-            // SfSearchForm 下拉值为字符串，enabled 转布尔（后端 strconv.ParseBool）
-            const raw = values as Record<string, unknown>
-            const enabledRaw = raw['enabled']
-            setParams({
-              keyword: typeof raw['keyword'] === 'string' ? raw['keyword'] : undefined,
-              product_id: typeof raw['product_id'] === 'string' ? raw['product_id'] : undefined,
-              enabled: enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined,
-            })
-            list.resetToFirstPage()
-          }}
+          initialValues={list.formValues}
+          onSearch={list.applyFilters}
         />
         <SfTable<SkuItem>
           storageKey="masterdata-skus"
@@ -469,11 +491,13 @@ export default function SkuListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="暂无 SKU，点击右上角「新建 SKU」创建"
+          emptyText={canCreate ? '暂无 SKU，点击右上角「新建 SKU」创建' : '暂无 SKU'}
           emptyAction={
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
-              新建 SKU
-            </Button>
+            canCreate ? (
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+                新建 SKU
+              </Button>
+            ) : undefined
           }
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}

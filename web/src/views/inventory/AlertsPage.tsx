@@ -1,13 +1,13 @@
-import { useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type StockAlertItem, type StockAlertLevel, type StockAlertQuery } from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -83,7 +83,7 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
     dataIndex: 'last_moved_at',
     width: 160,
     render: (v?: string | null) =>
-      v ? <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span> : '-',
+      v ? <DateCell value={v} /> : '-',
   },
   {
     title: '提示',
@@ -108,19 +108,12 @@ function alertRowKey(record: StockAlertItem): string {
  * AlertItem（repository.go:407-421）；筛选参数 level/keyword（handler.go:191-204）。
  */
 export default function AlertsPage() {
-  const [params, setParams] = useState<StockAlertQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<StockAlertItem, StockAlertQuery>({
     queryKey: ['inventory', 'alerts'],
     fetch: (q) => inventoryApi.alerts(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'inventory-alerts',
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as StockAlertQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -134,7 +127,8 @@ export default function AlertsPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU 编码 / 商品名称' },
             { name: 'level', label: '预警类型', control: 'select', options: LEVEL_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<StockAlertItem>
           storageKey="inventory-alerts"

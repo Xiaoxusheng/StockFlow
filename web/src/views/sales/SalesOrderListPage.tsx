@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -11,6 +11,7 @@ import {
   type SalesOrderQuery,
   type SalesOrderStatus,
 } from '@/api/sales'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildCustomerMaps, buildWarehouseMaps, fetchCustomerOptions, fetchWarehouseOptions, idKey } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
@@ -21,7 +22,7 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
-import { formatDateTime, formatMoney } from '@/utils/format'
+import { formatMoney } from '@/utils/format'
 
 const { Link, Text } = Typography
 
@@ -41,16 +42,14 @@ function SalesOrderStatusTag({ status }: { status: SalesOrderStatus }) {
  * so_no 精确匹配）；客户/仓库出参为裸 ID（SalesOrder 无联表名称），
  * 经基础资料 options 端点本地映射补充，映射失败降级为 ID，不造假数据。 */
 export default function SalesOrderListPage() {
-  const [params, setParams] = useState<SalesOrderQuery>({})
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, SALES_ORDER_CREATE_PERMISSION)
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<SalesOrder, SalesOrderQuery>({
     queryKey: ['sales', 'orders'],
     fetch: (q) => salesApi.orders.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'sales-orders',
+    urlSync: true,
   })
 
   // 客户/仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
@@ -70,11 +69,6 @@ export default function SalesOrderListPage() {
     () => buildWarehouseMaps(warehousesQuery.data ?? []).name,
     [warehousesQuery.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as SalesOrderQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<SalesOrder> = [
     {
@@ -120,7 +114,7 @@ export default function SalesOrderListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -178,7 +172,8 @@ export default function SalesOrderListPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<SalesOrder>
           storageKey="sales-orders"

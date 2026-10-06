@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
@@ -11,6 +11,7 @@ import {
   type PurchaseQuery,
   type PurchaseStatus,
 } from '@/api/purchase'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import {
   buildSupplierMaps,
@@ -26,7 +27,7 @@ import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime, formatMoney } from '@/utils/format'
+import { formatMoney } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -63,7 +64,6 @@ function renderStatus(status: PurchaseStatus) {
  * 新建入口跳 /purchases/new（PurchaseOrderFormPage，路由见 sharedChanges），
  * 仅持 purchase:purchase:create 权限可见。 */
 export default function PurchaseListPage() {
-  const [params, setParams] = useState<PurchaseQuery>({})
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, PURCHASE_CREATE_PERMISSION)
@@ -86,12 +86,11 @@ export default function PurchaseListPage() {
     [warehouseOptionsQuery.data],
   )
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<PurchaseOrder, PurchaseQuery>({
     queryKey: ['purchase', 'orders'],
     fetch: (q) => purchaseApi.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'purchase-orders',
+    urlSync: true,
   })
 
   const columns: ColumnsType<PurchaseOrder> = [
@@ -135,7 +134,7 @@ export default function PurchaseListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -175,11 +174,6 @@ export default function PurchaseListPage() {
     },
   ]
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as PurchaseQuery)
-    list.resetToFirstPage()
-  }
-
   return (
     <div className="sf-page">
       <SfPageHeader
@@ -198,7 +192,7 @@ export default function PurchaseListPage() {
         }
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfSearchForm fields={searchFields} initialValues={list.params} onSearch={list.applyFilters} />
         <SfTable<PurchaseOrder>
           storageKey="purchase-orders"
           rowKey="id"

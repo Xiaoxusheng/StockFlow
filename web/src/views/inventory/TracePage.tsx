@@ -21,6 +21,7 @@ import {
   fetchWarehouseOptions,
   idKey,
 } from '@/api/options'
+import { DateCell } from '@/components/table/cells'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -111,7 +112,7 @@ function StockRowsTable({ rows, maps }: { rows: TraceStockRow[]; maps: TraceName
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
   return (
@@ -138,7 +139,7 @@ function ChainTable({ chain, maps }: { chain: TraceLedgerItem[]; maps: TraceName
       dataIndex: 'created_at',
       width: 160,
       fixed: 'left',
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '变更类型',
@@ -421,7 +422,7 @@ export default function TracePage() {
                     title: '时间',
                     dataIndex: 'created_at',
                     width: 160,
-                    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+                    render: (v: string) => <DateCell value={v} />,
                   },
                   { title: '模块', dataIndex: 'module', width: 110 },
                   { title: '对象类型', dataIndex: 'object_type', width: 130 },

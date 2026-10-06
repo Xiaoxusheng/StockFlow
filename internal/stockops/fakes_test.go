@@ -388,6 +388,11 @@ func (g *fakeGateway) MoveBin(_ context.Context, _ *gorm.DB, op inventory.MoveBi
 	if op.From.WarehouseID != op.To.WarehouseID || op.From.SKUID != op.To.SKUID || op.From.BatchID != op.To.BatchID {
 		return inventory.MutationResult{}, response.NewError(inventory.ErrMoveCrossWarehouse, nil)
 	}
+	// 同库位拒绝（对齐 inventory/service.go MoveBin 的 ErrMoveSameLocation 守卫——
+	// 源/目标同位属于 no-op，原语层一律拒绝，替身必须同口径）。
+	if op.From.BinID == op.To.BinID {
+		return inventory.MutationResult{}, response.NewError(inventory.ErrMoveSameLocation, nil)
+	}
 	from := g.w.rowByKey(op.From.WarehouseID, op.From.BinID, op.From.SKUID, op.From.BatchID)
 	if from == nil {
 		return inventory.MutationResult{}, response.NewError(inventory.ErrRecordNotFound, nil)
@@ -499,6 +504,10 @@ func transferFilterMatch(f TransferFilter, o TransferOrder) bool {
 		}
 	}
 	if f.WarehouseID > 0 && f.WarehouseID != o.FromWarehouseID && f.WarehouseID != o.ToWarehouseID {
+		return false
+	}
+	// 精确目标仓过滤（对齐 repo_gorm.go transferFilterWhere 的 ToWarehouseID 分支）。
+	if f.ToWarehouseID > 0 && f.ToWarehouseID != o.ToWarehouseID {
 		return false
 	}
 	if f.Status != "" && f.Status != o.Status {

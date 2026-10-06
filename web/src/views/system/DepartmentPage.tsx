@@ -3,6 +3,7 @@ import { Button, Card, Dropdown, Form, Input, Modal, TreeSelect, Typography, mes
 import { MoreOutlined, PlusOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import type { ColumnsType } from 'antd/es/table'
 import { resolveErrorMessage } from '@/api/client'
 import { rbacApi, type DepartmentNode } from '@/api/rbac'
@@ -137,6 +138,10 @@ export default function DepartmentPage() {
   const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const [pagination, setPagination] = useState({ current: 1, pageSize: 20 })
   const queryClient = useQueryClient()
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）；
+  // department:create 经 RESOURCE_ALIASES 归一（department → ['department','dept']）命中
+  // 后端冻结码 auth:dept:{create|update|status}（types/permission.ts:41-44 / permissions.go:36-40）
+  const { canCreate, canUpdate, canStatus } = useCrudPermissions('department')
 
   // 全量组树一次加载（api 层循环拉取分页信封后按 parent_id 组树），表格内做树形展示
   const treeQuery = useQuery({ queryKey: ['system', 'departments'], queryFn: rbacApi.departmentTree })
@@ -231,17 +236,23 @@ export default function DepartmentPage() {
         }
         return (
           <>
-            <Button type="link" size="small" onClick={() => setModal({ kind: 'create', parent: record })}>
-              新增子部门
-            </Button>
-            <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', dept: record })}>
-              编辑
-            </Button>
-            <Dropdown menu={rowMenu} trigger={['click']}>
-              <Button type="link" size="small" aria-label="更多操作">
-                更多<MoreOutlined style={{ marginLeft: 2 }} />
+            {canCreate && (
+              <Button type="link" size="small" onClick={() => setModal({ kind: 'create', parent: record })}>
+                新增子部门
               </Button>
-            </Dropdown>
+            )}
+            {canUpdate && (
+              <Button type="link" size="small" onClick={() => setModal({ kind: 'edit', dept: record })}>
+                编辑
+              </Button>
+            )}
+            {canStatus && (
+              <Dropdown menu={rowMenu} trigger={['click']}>
+                <Button type="link" size="small" aria-label="更多操作">
+                  更多<MoreOutlined style={{ marginLeft: 2 }} />
+                </Button>
+              </Dropdown>
+            )}
           </>
         )
       },
@@ -254,9 +265,11 @@ export default function DepartmentPage() {
         title="部门"
         subtitle="组织架构（树形）"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal({ kind: 'create', parent: null })}>
-            新增部门
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModal({ kind: 'create', parent: null })}>
+              新增部门
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">

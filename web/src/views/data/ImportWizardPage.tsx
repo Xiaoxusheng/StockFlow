@@ -35,6 +35,7 @@ import {
   type ImportValidationError,
   type ImportValidateResult,
 } from '@/api/data'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
@@ -72,7 +73,7 @@ function renderTaskStatus(status?: string): ReactNode {
 }
 
 function renderDateTime(value?: string): ReactNode {
-  return <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(value)}</span>
+  return <DateCell value={value} />
 }
 
 function renderCount(value?: number): ReactNode {

@@ -26,6 +26,7 @@ import {
   type SupplierSavePayload,
 } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -78,19 +79,21 @@ function toPayload(values: SupplierFormValues): SupplierSavePayload {
 
 /** 供应商管理（/suppliers，backend-m1-plan §5.4：已产生业务记录不可删只停用，business-flow §1.4） */
 export default function SupplierListPage() {
-  const [params, setParams] = useState<SupplierQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<SupplierItem | null>(null)
   const [form] = Form.useForm<SupplierFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）
+  const { canCreate, canUpdate, canDelete, canStatus } = useCrudPermissions('supplier')
   // 动效 #7/删除行（frontend.md §31）：行淡色反馈 / 删除行 fade→收缩——仅在 API 成败回调后触发
   const fb = useTableRowFeedback()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<SupplierItem, SupplierQuery>({
     queryKey: ['masterdata', 'suppliers'],
     fetch: (q) => masterdataApi.suppliers.list(q),
-    params,
+    urlSync: true,
   })
 
   const invalidate = () => {
@@ -140,15 +143,21 @@ export default function SupplierListPage() {
   // 即关闭的 Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading）
   const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: SupplierItem } | null>(null)
 
-  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多 */
+  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多。
+   *  菜单项按权限点过滤：无 supplier:status 不出「停用/启用」、无 supplier:delete 不出「删除」；
+   *  两项皆无权限时调用方不渲染「更多」按钮（见操作列 canMore 判定）。 */
   const buildRowMenu = (record: SupplierItem): MenuProps => {
     const disabling = record.status === 'ENABLED'
+    const items: NonNullable<MenuProps['items']> = []
+    if (canStatus) {
+      items.push({ key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling })
+    }
+    if (canDelete) {
+      if (items.length > 0) items.push({ type: 'divider' })
+      items.push({ key: 'remove', label: '删除', danger: true })
+    }
     return {
-      items: [
-        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
-        { type: 'divider' },
-        { key: 'remove', label: '删除', danger: true },
-      ],
+      items,
       onClick: ({ key }) => {
         if (key === 'toggle') setRowConfirm({ kind: 'toggle', record })
         if (key === 'remove') setRowConfirm({ kind: 'remove', record })
@@ -190,6 +199,33 @@ export default function SupplierListPage() {
       .catch(() => {
         // 表单校验失败：Form.Item 已内联提示
       })
+  }
+
+  /** 「更多」是否可出（停用/启用 或 删除 至少一项有权限） */
+  const canMore = canStatus || canDelete
+
+  /** 操作列按权限装配：无编辑权限不出「编辑」，无状态/删除权限不出「更多」 */
+  const actionColumn: ColumnsType<SupplierItem>[number] = {
+    title: '操作',
+    key: 'actions',
+    fixed: 'right',
+    width: 150,
+    render: (_: unknown, record: SupplierItem) => (
+      <span style={{ whiteSpace: 'nowrap' }}>
+        {canUpdate && (
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+        )}
+        {canMore && (
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
+            </Button>
+          </Dropdown>
+        )}
+      </span>
+    ),
   }
 
   const columns: ColumnsType<SupplierItem> = [
@@ -243,24 +279,7 @@ export default function SupplierListPage() {
       width: 160,
       render: (v?: string) => <DateCell value={v} />,
     },
-    {
-      title: '操作',
-      key: 'actions',
-      fixed: 'right',
-      width: 150,
-      render: (_: unknown, record: SupplierItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
-            <Button type="link" size="small" aria-label="更多操作">
-              更多<MoreOutlined style={{ marginLeft: 2 }} />
-            </Button>
-          </Dropdown>
-        </span>
-      ),
-    },
+    ...(canUpdate || canMore ? [actionColumn] : []),
   ]
 
   return (
@@ -270,9 +289,11 @@ export default function SupplierListPage() {
         title="供应商管理"
         subtitle="供应商档案与联系信息（business-flow §1.4）"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建供应商
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建供应商
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">
@@ -281,10 +302,8 @@ export default function SupplierListPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '供应商编码 / 名称' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams(values as SupplierQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<SupplierItem>
           storageKey="masterdata-suppliers"
@@ -298,11 +317,13 @@ export default function SupplierListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="暂无供应商，点击右上角「新建供应商」创建"
+          emptyText={canCreate ? '暂无供应商，点击右上角「新建供应商」创建' : '暂无供应商'}
           emptyAction={
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
-              新建供应商
-            </Button>
+            canCreate ? (
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+                新建供应商
+              </Button>
+            ) : undefined
           }
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}

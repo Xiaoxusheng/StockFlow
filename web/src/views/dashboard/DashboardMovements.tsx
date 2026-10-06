@@ -9,10 +9,11 @@
 import { Typography } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type InventoryChangeType, type LedgerItem, type LedgerQuery } from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -58,7 +59,7 @@ const COLUMNS: ColumnsType<LedgerItem> = [
     title: '时间',
     dataIndex: 'created_at',
     width: 150,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '单据编号',

@@ -32,6 +32,7 @@ import {
   type ResourceStatus,
   type WarehouseSpaceId,
 } from '@/api/warehouse'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
@@ -39,7 +40,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const BIN_TYPE_OPTIONS = Object.entries(BIN_TYPE_LABEL).map(([value, label]) => ({ label, value }))
 
@@ -118,7 +119,7 @@ const COLUMNS: ColumnsType<BinItem> = [
     title: '更新时间',
     dataIndex: 'updated_at',
     width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string) => <DateCell value={v} />,
   },
 ]
 

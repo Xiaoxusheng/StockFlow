@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router'
@@ -14,6 +14,7 @@ import {
   type CountScope,
   type CountStatus,
 } from '@/api/count'
+import { DateCell } from '@/components/table/cells'
 import { masterdataApi, OPTIONS_PAGE_SIZE } from '@/api/masterdata'
 import { binApi, shelfApi, warehouseApi, zoneApi } from '@/api/warehouse'
 import { useAuthStore } from '@/stores/auth'
@@ -24,7 +25,6 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime } from '@/utils/format'
 
 const { Link, Text } = Typography
 
@@ -96,12 +96,12 @@ export default function CountTaskListPage() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, COUNT_CREATE_PERMISSION)
-  const [params, setParams] = useState<CountQuery>({})
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<CountOrder, CountQuery>({
     queryKey: ['counts', 'tasks'],
     fetch: (q) => countApi.list(q),
-    params,
+    urlSync: true,
   })
 
   // 仓库 / 库区 / 货架 / 库位 / SKU options 一次取全，用于 warehouse_id 与 scope ID 本地映射
@@ -197,19 +197,19 @@ export default function CountTaskListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '冻结时间',
       dataIndex: 'frozen_at',
       width: 160,
-      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string | null) => <DateCell value={v} />,
     },
     {
       title: '完成时间',
       dataIndex: 'completed_at',
       width: 160,
-      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string | null) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -244,10 +244,8 @@ export default function CountTaskListPage() {
             { name: 'warehouse_id', label: '仓库', control: 'select', options: warehouseOptions },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams(values as CountQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<CountOrder>
           storageKey="count-tasks"

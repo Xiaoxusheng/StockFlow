@@ -17,6 +17,7 @@ import {
   type TransferStatus,
   type TransferType,
 } from '@/api/transfer'
+import { DateCell } from '@/components/table/cells'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -28,7 +29,6 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfToolbar } from '@/components/table/SfToolbar'
-import { formatDateTime } from '@/utils/format'
 import TransferFormModal from './TransferFormModal'
 import TransferInTransitDrawer from './TransferInTransitDrawer'
 
@@ -97,7 +97,6 @@ interface CancelFormValues {
  * 源仓减少、目标仓增加，两端均生成库存流水。
  */
 export default function TransferListPage() {
-  const [params, setParams] = useState<TransferQuery>({})
   const [formOpen, setFormOpen] = useState(false)
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create')
   const [editId, setEditId] = useState<TransferOrder['id'] | undefined>(undefined)
@@ -118,10 +117,11 @@ export default function TransferListPage() {
   const [approveForm] = Form.useForm<ApproveFormValues>()
   const [cancelForm] = Form.useForm<CancelFormValues>()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<TransferOrder, TransferQuery>({
     queryKey: ['transfer', 'orders'],
     fetch: (q) => transferApi.list(q),
-    params,
+    urlSync: true,
   })
 
   // 行反馈动效（frontend.md §31 #7）：提交/审核/取消先 API 后反馈，对应行淡色底 480ms 自动回落
@@ -189,11 +189,6 @@ export default function TransferListPage() {
     },
   })
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as TransferQuery)
-    list.resetToFirstPage()
-  }
-
   const openCreate = () => {
     setFormMode('create')
     setEditId(undefined)
@@ -237,19 +232,19 @@ export default function TransferListPage() {
       title: '出库时间',
       dataIndex: 'outbound_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '入库时间',
       dataIndex: 'received_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -319,7 +314,8 @@ export default function TransferListPage() {
             { name: 'type', label: '调拨维度', control: 'select', options: TRANSFER_TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<TransferOrder>
           storageKey="transfer-orders"

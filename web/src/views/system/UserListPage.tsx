@@ -380,14 +380,14 @@ type ModalState =
 
 /** 用户管理（frontend.md 系统管理：用户）：列表 + 新建/编辑/启停/分配角色/重置密码/解锁 */
 export default function UserListPage() {
-  const [params, setParams] = useState<UserQuery>({})
   const [modal, setModal] = useState<ModalState>(null)
   const queryClient = useQueryClient()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<UserItem, UserQuery>({
     queryKey: ['system', 'users'],
     fetch: (q) => userApi.users(q),
-    params,
+    urlSync: true,
   })
 
   // 行反馈动效（frontend.md §31 #7）：启停/解锁先 API 后反馈，对应行淡色底 480ms 自动回落
@@ -475,11 +475,6 @@ export default function UserListPage() {
     },
     onError: (error) => message.error(resolveErrorMessage(error)),
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as UserQuery)
-    list.resetToFirstPage()
-  }
 
   const handleUserFormSubmit = (values: UserFormValues) => {
     if (modal?.kind === 'edit') {
@@ -651,7 +646,8 @@ export default function UserListPage() {
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
             { name: 'department_id', label: '部门', control: 'select', options: departmentOptions },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<UserItem>
           storageKey="system-users"

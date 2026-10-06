@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
@@ -9,6 +9,7 @@ import {
   type ShipmentQuery,
   type ShipmentStatus,
 } from '@/api/outbound'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -17,7 +18,7 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Link, Text } = Typography
 
@@ -52,14 +53,12 @@ const STATUS_OPTIONS: Array<{ label: string; value: ShipmentStatus }> = [
  * 已注册，交互设计不在本轮范围，列表只读。
  */
 export default function ShipmentPage() {
-  const [params, setParams] = useState<ShipmentQuery>({})
   const navigate = useNavigate()
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<Shipment, ShipmentQuery>({
     queryKey: ['outbound', 'shipments'],
     fetch: (q) => outboundTaskApi.shipments.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'outbound-shipments',
+    urlSync: true,
   })
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，失败降级为 ID）
@@ -71,11 +70,6 @@ export default function ShipmentPage() {
     () => buildWarehouseMaps(warehouseOptions.data ?? []).name,
     [warehouseOptions.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as ShipmentQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<Shipment> = [
     { title: '发货单号', dataIndex: 'shipment_no', width: 160, fixed: 'left' },
@@ -114,7 +108,7 @@ export default function ShipmentPage() {
       title: '发货时间',
       dataIndex: 'shipped_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '状态',
@@ -126,7 +120,7 @@ export default function ShipmentPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -151,7 +145,8 @@ export default function ShipmentPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<Shipment>
           storageKey="outbound-shipments"

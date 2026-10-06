@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { Button } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
@@ -20,6 +20,7 @@ import {
   fetchWarehouseOptions,
   idKey,
 } from '@/api/options'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDeviceStatus } from '@/components/device/SfDeviceStatus'
 import { ScanDirectCard } from '@/components/device/ScanDirectCard'
@@ -27,7 +28,6 @@ import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime } from '@/utils/format'
 
 /** 在线筛选选项（字符串形态，提交前经 toDeviceQuery 转回契约的 boolean——handler.go:290-293） */
 const ONLINE_OPTIONS = [
@@ -56,7 +56,7 @@ function renderText(value?: string | null): string {
 }
 
 function renderDateTime(value?: string | null): ReactNode {
-  return <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(value)}</span>
+  return <DateCell value={value} />
 }
 
 /**
@@ -81,15 +81,17 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
   const location = useLocation()
   const navigate = useNavigate()
   const deviceType = deviceTypeProp ?? DEVICE_TYPE_BY_PATH[location.pathname]
-  const [params, setParams] = useState<DeviceQuery>({})
 
   const typeLabel = deviceType ? DEVICE_TYPE_LABEL[deviceType] : ''
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）。
+  // decodeParams 复用 onSearch 用的 toDeviceQuery（online 字符串转布尔、warehouse_id 转数字）——
+  // 否则 URL 读回的 'true' / '123' 会以字符串形态直接发给后端。
   const list = usePagedList<DeviceItem, DeviceQuery>({
     queryKey: ['devices', 'list', deviceType],
     fetch: (query) => deviceApi.list({ ...query, type: deviceType }),
-    params,
-    persistKey: deviceType ? `devices-${deviceType}` : undefined,
+    urlSync: true,
+    decodeParams: toDeviceQuery,
     enabled: Boolean(deviceType),
   })
 
@@ -176,10 +178,8 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
           { name: 'status', label: '启停状态', control: 'select', options: STATUS_OPTIONS },
           { name: 'online', label: '在线状态', control: 'select', options: ONLINE_OPTIONS },
         ]}
-        onSearch={(values) => {
-          setParams(toDeviceQuery(values))
-          list.resetToFirstPage()
-        }}
+        initialValues={list.formValues}
+        onSearch={list.applyFilters}
         loading={list.isFetching}
       />
       <SfTable<DeviceItem>

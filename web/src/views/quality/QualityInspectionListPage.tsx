@@ -16,6 +16,7 @@ import {
   type QualityResult,
   type QualitySourceType,
 } from '@/api/quality'
+import { DateCell } from '@/components/table/cells'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -26,7 +27,7 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfToolbar } from '@/components/table/SfToolbar'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 import QualityCreateModal from './QualityCreateModal'
 
 const { Text } = Typography
@@ -100,16 +101,16 @@ function warehouseNameOf(names: Map<string, string>, id: QualityInspectionItem['
  * NonconformingListPage/QualityTracePage 端点未立项，保持各自现状（错误态），不在本页范围。
  */
 export default function QualityInspectionListPage() {
-  const [params, setParams] = useState<QualityInspectionQuery>({})
   const [createOpen, setCreateOpen] = useState(false)
   const user = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const [messageApi, contextHolder] = message.useMessage()
   const canCreate = canAccess(user, QUALITY_CREATE_PERMISSION)
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<QualityInspectionItem, QualityInspectionQuery>({
     queryKey: ['quality', 'orders'],
     fetch: (q) => qualityApi.inspections(q),
-    params,
+    urlSync: true,
   })
 
   const handleCreated = (order: QualityInspectionItem) => {
@@ -131,11 +132,6 @@ export default function QualityInspectionListPage() {
       (warehousesQuery.data ?? []).map((w) => ({ label: `${w.code} ${w.name}`, value: String(w.id) })),
     [warehousesQuery.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as QualityInspectionQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<QualityInspectionItem> = [
     { title: '质检单号', dataIndex: 'qc_no', width: 160, fixed: 'left' },
@@ -193,13 +189,13 @@ export default function QualityInspectionListPage() {
       title: '检验时间',
       dataIndex: 'inspected_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -226,7 +222,8 @@ export default function QualityInspectionListPage() {
             { name: 'source_no', label: '来源单号', control: 'input', placeholder: '来源单号（精确匹配）' },
             { name: 'warehouse_id', label: '仓库', control: 'select', options: warehouseOptions },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<QualityInspectionItem>
           storageKey="quality-orders"

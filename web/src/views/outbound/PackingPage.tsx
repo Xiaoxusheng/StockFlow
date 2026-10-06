@@ -1,15 +1,16 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { outboundTaskApi, type PackingRecord, type PackingRecordQuery } from '@/api/outbound'
 import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Link, Text } = Typography
 
@@ -21,14 +22,12 @@ const { Link, Text } = Typography
  * 打包写端点（POST /api/packing）已注册，交互设计不在本轮范围，列表只读。
  */
 export default function PackingPage() {
-  const [params, setParams] = useState<PackingRecordQuery>({})
   const navigate = useNavigate()
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<PackingRecord, PackingRecordQuery>({
     queryKey: ['outbound', 'packing'],
     fetch: (q) => outboundTaskApi.packing.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'outbound-packing',
+    urlSync: true,
   })
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，失败降级为 ID）
@@ -40,11 +39,6 @@ export default function PackingPage() {
     () => buildWarehouseMaps(warehouseOptions.data ?? []).name,
     [warehouseOptions.data],
   )
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as PackingRecordQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<PackingRecord> = [
     { title: '包裹编号', dataIndex: 'package_no', width: 160, fixed: 'left' },
@@ -108,7 +102,7 @@ export default function PackingPage() {
       title: '打包时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     { title: '备注', dataIndex: 'remark', width: 140, ellipsis: true, render: (v: string) => v || '-' },
   ]
@@ -133,7 +127,8 @@ export default function PackingPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<PackingRecord>
           storageKey="outbound-packing"

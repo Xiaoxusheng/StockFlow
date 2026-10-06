@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { Card, Typography } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons'
@@ -9,11 +8,12 @@ import {
   type LedgerItem,
   type LedgerQuery,
 } from '@/api/inventory'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -97,7 +97,7 @@ const COLUMNS: ColumnsType<LedgerItem> = [
     title: '时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   { title: '流水号', dataIndex: 'ledger_no', width: 150 },
   { title: '单据编号', dataIndex: 'business_no', width: 150, fixed: 'left', render: (v: string) => v || '-' },
@@ -141,19 +141,12 @@ function renderIdOrDash(value: LedgerItem['batch_id']): string {
  * （inventory-rules.md §5 字段清单，append-only 禁止前端拼装数据）。
  */
 export default function LedgerPage() {
-  const [params, setParams] = useState<LedgerQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<LedgerItem, LedgerQuery>({
     queryKey: ['inventory', 'ledger'],
     fetch: (q) => inventoryApi.ledger(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'inventory-ledger',
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as LedgerQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -166,7 +159,8 @@ export default function LedgerPage() {
             { name: 'serial_no', label: '序列号', control: 'input', placeholder: '序列号' },
             { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<LedgerItem>
           storageKey="inventory-ledger"

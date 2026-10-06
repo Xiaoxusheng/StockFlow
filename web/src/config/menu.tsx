@@ -231,3 +231,29 @@ export function resolveMenuTrail(pathname: string): MenuTrail {
 export function findMenuItem(pathname: string): MenuItem | undefined {
   return resolveMenuTrail(pathname).page
 }
+
+/**
+ * 路由级权限点解析（最长前缀匹配）——供 PcLayout 的路由守卫使用。
+ *
+ * 与 resolveMenuTrail 的分工：后者是**精确**匹配，服务面包屑/占位页标题；
+ * 路由守卫还要覆盖菜单外的衍生路径，故这里按最长前缀继承父级菜单码：
+ *   /inbound/123           → 继承 /inbound            （inbound:view）
+ *   /counts/new            → 继承 /counts             （count:view）
+ *   /inventory/stock/S001  → 继承 /inventory/stock    （inventory:stock:view）
+ * 匹配到的菜单项本身不带码（Dashboard / 我的工作台等）返回 undefined = 放行；
+ * 完全无菜单前缀的路径（如 /devices/new）同样返回 undefined，由后端接口鉴权兜底。
+ */
+export function resolveRoutePermission(pathname: string): string | undefined {
+  let bestPath = ''
+  let bestPermission: string | undefined
+  const visit = (item: MenuItem): void => {
+    const hit = pathname === item.path || pathname.startsWith(`${item.path}/`)
+    if (hit && item.path.length > bestPath.length) {
+      bestPath = item.path
+      bestPermission = item.permission
+    }
+    item.children?.forEach(visit)
+  }
+  MENU_TREE.forEach(visit)
+  return bestPermission
+}

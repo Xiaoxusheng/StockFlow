@@ -29,15 +29,17 @@ import {
   type WarehouseQuery,
   type WarehouseSpaceId,
 } from '@/api/warehouse'
+import { DateCell } from '@/components/table/cells'
 import { buildUserNameMap, fetchUserOptions, idKey } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const WAREHOUSE_TYPE_OPTIONS = Object.entries(WAREHOUSE_TYPE_LABEL).map(([value, label]) => ({
   label,
@@ -90,7 +92,7 @@ const TAIL_COLUMNS: ColumnsType<WarehouseItem> = [
     title: '更新时间',
     dataIndex: 'updated_at',
     width: 140,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string) => <DateCell value={v} />,
   },
 ]
 
@@ -117,11 +119,14 @@ interface WarehouseFormValues {
 
 /** 仓库管理（frontend.md §27 仓库；M1 契约：/api/warehouses CRUD + 启停/删除/详情） */
 export default function WarehouseListPage() {
-  const [params, setParams] = useState<WarehouseQuery>({})
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）；
+  // warehouse:create 等两段码经归一命中后端 warehouse:warehouse:*（internal/auth/permissions.go:91-96）
+  const { canCreate, canUpdate, canDelete, canStatus } = useCrudPermissions('warehouse')
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<WarehouseItem, WarehouseQuery>({
     queryKey: ['warehouse', 'warehouses'],
     fetch: (q) => warehouseApi.list(q),
-    params,
+    urlSync: true,
   })
 
   // 仓管员 options（GET /api/users，后端权限点 auth:user:list）：拉取失败降级
@@ -151,11 +156,6 @@ export default function WarehouseListPage() {
   const [actionError, setActionError] = useState<unknown>(null)
   const [togglingId, setTogglingId] = useState<number | string | null>(null)
   const [removingId, setRemovingId] = useState<number | string | null>(null)
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as WarehouseQuery)
-    list.resetToFirstPage()
-  }
 
   const openCreate = () => {
     setEditing(null)
@@ -293,26 +293,34 @@ export default function WarehouseListPage() {
       fixed: 'right',
       render: (_, record) => {
         const enabled = record.status?.toUpperCase() === 'ENABLED'
+        // 「更多」菜单按权限点装配：无 warehouse:status 不出停用/启用、无 warehouse:delete 不出删除
+        const manageItems: NonNullable<MenuProps['items']> = []
+        if (canStatus) {
+          manageItems.push({ key: 'toggle', label: enabled ? '停用' : '启用', danger: enabled })
+        }
+        if (canDelete) {
+          manageItems.push({ key: 'remove', label: '删除', danger: true })
+        }
         const rowMenu: MenuProps = {
-          items: [
-            { key: 'toggle', label: enabled ? '停用' : '启用', danger: enabled },
-            { type: 'divider' },
-            { key: 'remove', label: '删除', danger: true },
-          ],
+          items: manageItems,
           onClick: ({ key }) => {
             if (key === 'toggle' || key === 'remove') setRowConfirm({ kind: key, record })
           },
         }
         return (
           <Space size={0}>
-            <Button type="link" size="small" style={{ paddingInline: 4 }} onClick={() => openEdit(record)}>
-              编辑
-            </Button>
-            <Dropdown menu={rowMenu} trigger={['click']}>
-              <Button type="link" size="small" style={{ paddingInline: 4 }} aria-label="更多操作">
-                更多<MoreOutlined style={{ marginLeft: 2 }} />
+            {canUpdate && (
+              <Button type="link" size="small" style={{ paddingInline: 4 }} onClick={() => openEdit(record)}>
+                编辑
               </Button>
-            </Dropdown>
+            )}
+            {manageItems.length > 0 && (
+              <Dropdown menu={rowMenu} trigger={['click']}>
+                <Button type="link" size="small" style={{ paddingInline: 4 }} aria-label="更多操作">
+                  更多<MoreOutlined style={{ marginLeft: 2 }} />
+                </Button>
+              </Dropdown>
+            )}
           </Space>
         )
       },
@@ -325,13 +333,15 @@ export default function WarehouseListPage() {
         title="仓库管理"
         subtitle="仓库 → 库区 → 货架 → 库位 四级结构的第一级"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建仓库
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建仓库
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">
-        <SfSearchForm fields={SEARCH_FIELDS} onSearch={handleSearch} />
+        <SfSearchForm fields={SEARCH_FIELDS} initialValues={list.params} onSearch={list.applyFilters} />
         {actionError !== null && (
           <Alert
             type="error"

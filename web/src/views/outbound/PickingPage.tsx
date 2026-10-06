@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react'
-import { Card, Typography } from 'antd'
-import { useQuery } from '@tanstack/react-query'
+import { Button, Card, Form, Input, InputNumber, Modal, Typography, message } from 'antd'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  PICK_CLAIM_PERMISSION,
+  PICK_EXECUTE_PERMISSION,
   outboundTaskApi,
   type PickTask,
   type PickTaskQuery,
   type PickTaskStatus,
 } from '@/api/outbound'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import {
   buildBinCodeMap,
@@ -21,11 +24,15 @@ import {
 } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
+import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { resolveErrorMessage } from '@/api/client'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Link, Text } = Typography
 
@@ -64,18 +71,69 @@ function renderIdOrDash(value: number): string {
  * 拣货管理（GET /api/picks，后端 M2 已交付）：列表列回对 PickTask 裸模型——
  * 任务内容按 business-flow.md §8.2：SKU → 来源库位 → 数量 → 操作人 → 完成时间；
  * SKU/库位/仓库 ID 经基础资料 options 本地映射，映射失败降级为 ID。
- * 领取/确认写端点（PUT /api/picks/{id}/claim|confirm）已注册，交互设计不在本轮范围，列表只读。
+ * 领取/确认写端点（PUT /api/picks/{id}/claim|confirm）：
+ * PENDING →(claim 原子抢占)→ CLAIMED →(confirm)→ PICKED；CLAIMED →(exception)→ EXCEPTION。
+ * 领取无表单走 SfConfirm；确认/异常为受控弹窗表单（后端校验：picked_qty>0 且 ≤ 任务量、
+ * 序列号 SKU 逐件 serials、异常 reason 必填——service_outbound.go ConfirmPick/ReportPickException）。
  */
 export default function PickingPage() {
-  const [params, setParams] = useState<PickTaskQuery>({})
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  const [form] = Form.useForm()
+  /** 拣货确认弹窗当前任务（null=关闭） */
+  const [confirmTarget, setConfirmTarget] = useState<PickTask | null>(null)
+  /** 异常上报弹窗当前任务（null=关闭） */
+  const [exceptionTarget, setExceptionTarget] = useState<PickTask | null>(null)
+
+  // 按钮级权限（后端 RequirePerm 独立校验，前端只隐藏入口）
+  const canClaim = canAccess(user, PICK_CLAIM_PERMISSION)
+  const canExecute = canAccess(user, PICK_EXECUTE_PERMISSION)
+
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<PickTask, PickTaskQuery>({
     queryKey: ['outbound', 'picks'],
     fetch: (q) => outboundTaskApi.picks.list(q),
-    params,
-    // §26.3：分页经 persistKey 持久化，进详情返回后恢复离开前分页
-    persistKey: 'outbound-picks',
+    urlSync: true,
   })
+
+  /** 任务落定后刷新列表（状态机由后端守卫，前端无条件 refetch 对齐） */
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['outbound', 'picks'] })
+
+  const claimMutation = useMutation({
+    mutationFn: (id: PickTask['id']) => outboundTaskApi.picks.claim(id),
+    onSuccess: (t) => {
+      message.success(`已领取任务 ${t.pick_no}`)
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+  const confirmMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: PickTask['id']; payload: { picked_qty: number; serials?: string[] } }) =>
+      outboundTaskApi.picks.confirm(id, payload),
+    onSuccess: (t) => {
+      message.success(`任务 ${t.pick_no} 拣货确认完成`)
+      setConfirmTarget(null)
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+  const exceptionMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: PickTask['id']; reason: string }) =>
+      outboundTaskApi.picks.reportException(id, { reason }),
+    onSuccess: (t) => {
+      message.success(`任务 ${t.pick_no} 已上报异常`)
+      setExceptionTarget(null)
+      invalidate()
+    },
+    onError: (e) => message.error(resolveErrorMessage(e)),
+  })
+
+  const openConfirm = (record: PickTask) => {
+    setConfirmTarget(record)
+    form.resetFields()
+    form.setFieldsValue({ picked_qty: record.qty })
+  }
 
   // SKU / 仓库 / 库位 ID → 编码/名称（options.ts：一次取全基础资料，失败降级为 ID）
   const skuOptions = useQuery({
@@ -97,10 +155,13 @@ export default function PickingPage() {
   )
   const binCodes = useMemo(() => buildBinCodeMap(binOptions.data ?? []), [binOptions.data])
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as PickTaskQuery)
-    list.resetToFirstPage()
-  }
+  /** 序列号 SKU 集合（确认时逐件采集 serials，inventory-rules.md §8.2） */
+  const serialManagedIds = useMemo(
+    () => new Set((skuOptions.data ?? []).filter((s) => s.is_serial_managed).map((s) => idKey(s.id))),
+    [skuOptions.data],
+  )
+
+  /** 任务落定后刷新列表（状态机由后端守卫，前端无条件 refetch 对齐） */
 
   const columns: ColumnsType<PickTask> = [
     { title: '拣货任务号', dataIndex: 'pick_no', width: 160, fixed: 'left' },
@@ -167,7 +228,7 @@ export default function PickingPage() {
       title: '拣货时间',
       dataIndex: 'picked_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '仓库',
@@ -186,8 +247,54 @@ export default function PickingPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
+    // 操作列按状态机装配（仅持有对应权限时渲染）：
+    // PENDING → 领取（原子抢占）；CLAIMED → 拣货确认 + 异常上报
+    ...(canClaim || canExecute
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            fixed: 'right' as const,
+            width: 190,
+            render: (_: unknown, record: PickTask) => (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                {record.status === 'PENDING' && canClaim && (
+                  <SfConfirm
+                    okText="领取"
+                    confirming={claimMutation.isPending}
+                    title={`领取任务 ${record.pick_no}？领取后由您执行拣货确认。`}
+                    onConfirm={() => claimMutation.mutate(record.id)}
+                  >
+                    <Button type="link" size="small">
+                      领取
+                    </Button>
+                  </SfConfirm>
+                )}
+                {record.status === 'CLAIMED' && canExecute && (
+                  <>
+                    <Button type="link" size="small" onClick={() => openConfirm(record)}>
+                      拣货确认
+                    </Button>
+                    <Button
+                      type="link"
+                      size="small"
+                      danger
+                      onClick={() => {
+                        setExceptionTarget(record)
+                        form.resetFields()
+                      }}
+                    >
+                      异常上报
+                    </Button>
+                  </>
+                )}
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -211,7 +318,8 @@ export default function PickingPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<PickTask>
           storageKey="outbound-picks"
@@ -226,9 +334,115 @@ export default function PickingPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有拣货任务"
-          scrollX={1700}
+          scrollX={1900}
         />
       </Card>
+
+      {/* 拣货确认弹窗（CLAIMED→PICKED）：实拣数量 ≤ 任务量（后端 ErrPickExceed 守卫）；
+          序列号 SKU 逐件采集，行数须与实拣数量一致（service_outbound.go validateSerialsForPick） */}
+      <Modal
+        open={!!confirmTarget}
+        title={`拣货确认 · ${confirmTarget?.pick_no ?? ''}`}
+        okText="确认拣货"
+        confirmLoading={confirmMutation.isPending}
+        onCancel={() => setConfirmTarget(null)}
+        onOk={() => {
+          form
+            .validateFields()
+            .then((v) => {
+              const lines =
+                typeof v.serials === 'string'
+                  ? v.serials
+                      .split('\n')
+                      .map((s: string) => s.trim())
+                      .filter(Boolean)
+                  : []
+              confirmMutation.mutate({
+                id: confirmTarget!.id,
+                payload: {
+                  picked_qty: v.picked_qty,
+                  ...(lines.length > 0 ? { serials: lines } : {}),
+                },
+              })
+            })
+            .catch(() => {
+              // 表单校验失败：Form.Item 已内联提示
+            })
+        }}
+      >
+        {confirmTarget && (
+          <Form form={form} layout="vertical">
+            <Form.Item
+              label={`实拣数量（应拣 ${formatNumber(confirmTarget.qty)}）`}
+              name="picked_qty"
+              rules={[
+                { required: true, message: '实拣数量必填' },
+                {
+                  validator: (_, v) =>
+                    v > 0 && v <= confirmTarget.qty
+                      ? Promise.resolve()
+                      : Promise.reject(new Error(`实拣数量须大于 0 且不超过应拣数量 ${formatNumber(confirmTarget.qty)}`)),
+                },
+              ]}
+            >
+              <InputNumber min={0.01} max={confirmTarget.qty} style={{ width: 160 }} />
+            </Form.Item>
+            {serialManagedIds.has(idKey(confirmTarget.sku_id)) && (
+              <Form.Item
+                label="序列号采集"
+                name="serials"
+                extra={`该 SKU 为序列号管理：每行一个序列号，数量须与实拣数量一致`}
+                rules={[
+                  {
+                    required: true,
+                    validator: (_, v) => {
+                      const lines = String(v ?? '')
+                        .split('\n')
+                        .map((s: string) => s.trim())
+                        .filter(Boolean)
+                      if (lines.length === 0) return Promise.reject(new Error('序列号必填（每行一个）'))
+                      const qty = Number(form.getFieldValue('picked_qty'))
+                      if (qty && lines.length !== qty) {
+                        return Promise.reject(new Error(`序列号数量（${lines.length}）须与实拣数量一致（${qty}）`))
+                      }
+                      return Promise.resolve()
+                    },
+                  },
+                ]}
+              >
+                <Input.TextArea rows={4} placeholder={'每行一个序列号，例如：\nSN0001\nSN0002'} />
+              </Form.Item>
+            )}
+          </Form>
+        )}
+      </Modal>
+
+      {/* 拣货异常上报弹窗（CLAIMED→EXCEPTION）：reason 必填，登记异常中心 */}
+      <Modal
+        open={!!exceptionTarget}
+        title={`拣货异常上报 · ${exceptionTarget?.pick_no ?? ''}`}
+        okText="上报异常"
+        okButtonProps={{ danger: true, loading: exceptionMutation.isPending }}
+        onCancel={() => setExceptionTarget(null)}
+        onOk={() => {
+          form
+            .validateFields()
+            .then((v) => exceptionMutation.mutate({ id: exceptionTarget!.id, reason: v.reason.trim() }))
+            .catch(() => {
+              // 表单校验失败：Form.Item 已内联提示
+            })
+        }}
+      >
+        <Form form={form} layout="vertical">
+          <Form.Item
+            label="异常原因"
+            name="reason"
+            rules={[{ required: true, whitespace: true, message: '异常原因必填' }]}
+          >
+            <Input.TextArea rows={3} placeholder="如：库位实物缺失 / 数量不足" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

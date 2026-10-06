@@ -32,6 +32,7 @@ import {
   type FileItem,
   type FileQuery,
 } from '@/api/file'
+import { DateCell } from '@/components/table/cells'
 import { downloadFile, resolveModuleLabel } from '@/api/data'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -45,7 +46,7 @@ import {
   type AttachmentItem,
 } from '@/components/common/SfAttachment'
 import { SfError } from '@/components/common/SfError'
-import { formatDateTime, formatFileSize } from '@/utils/format'
+import { formatFileSize } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -225,7 +226,7 @@ export default function FileCenterPage() {
       title: '上传时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string) => <DateCell value={v} />,
     },
     {
       title: '业务模块',

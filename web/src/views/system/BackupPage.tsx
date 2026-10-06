@@ -107,7 +107,6 @@ function PgDumpTemplateModal({ open, onClose }: { open: boolean; onClose: () => 
  * pg_dump 由部署侧执行器拾取 REQUESTED 执行并回写（deployment.md §4）。
  */
 export default function BackupPage() {
-  const [params, setParams] = useState<SystemBackupQuery>({})
   const [templateOpen, setTemplateOpen] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
@@ -115,10 +114,11 @@ export default function BackupPage() {
   const canCreate = canAccess(user, SYSTEM_BACKUP_CREATE_PERMISSION)
   const canRead = canAccess(user, SYSTEM_BACKUP_READ_PERMISSION)
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<SystemBackupItem, SystemBackupQuery>({
     queryKey: ['system', 'backups'],
     fetch: (q) => systemApi.backups.list(q),
-    params,
+    urlSync: true,
   })
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['system', 'backups'] })
@@ -257,10 +257,8 @@ export default function BackupPage() {
       <Card size="small">
         <SfSearchForm
           fields={[{ name: 'status', label: '状态', control: 'select', options: STATUS_FILTER_OPTIONS }]}
-          onSearch={(values) => {
-            setParams({ status: values.status as SystemBackupStatus | undefined })
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
           onReset={() => list.resetToFirstPage()}
         />
         <SfTable<SystemBackupItem>

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
@@ -20,13 +20,14 @@ import {
   fetchWarehouseOptions,
   idKey,
 } from '@/api/options'
+import { DateCell } from '@/components/table/cells'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -162,13 +163,13 @@ function buildColumns(maps: LockNameMaps): ColumnsType<InventoryLockItem> {
       title: '锁定时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '释放时间',
       dataIndex: 'released_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
   ]
 }
@@ -177,11 +178,11 @@ function buildColumns(maps: LockNameMaps): ColumnsType<InventoryLockItem> {
  * 出参 LockView snake_case 仅裸 ID，经 api/options.ts 一次取全基础资料后本地映射补充编码/名称，
  * 失败降级 ID；锁定规则见 inventory-rules.md §4：释放须由明确业务动作触发并生成流水） */
 export default function LocksPage() {
-  const [params, setParams] = useState<InventoryLockQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<InventoryLockItem, InventoryLockQuery>({
     queryKey: ['inventory', 'locks'],
     fetch: (q) => inventoryApi.locks(q),
-    params,
+    urlSync: true,
   })
 
   // LockView 无联表编码/名称（warehouse_id/sku_id/bin_id/batch_id 裸 ID），options 一次取全本地映射
@@ -227,10 +228,8 @@ export default function LocksPage() {
             { name: 'status', label: '状态', control: 'select', options: LOCK_STATUS_OPTIONS },
             { name: 'source_no', label: '来源单号', control: 'input', placeholder: '来源单号' },
           ]}
-          onSearch={(values) => {
-            setParams(values as InventoryLockQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<InventoryLockItem>
           storageKey="inventory-locks"

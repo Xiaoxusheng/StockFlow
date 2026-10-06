@@ -48,6 +48,7 @@ import {
   type PrintTemplateSavePayload,
   type PrintTemplateStatus,
 } from '@/api/printing'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
@@ -58,7 +59,7 @@ import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -81,7 +82,7 @@ function renderPrintResult(result?: string, errorMessage?: string): ReactNode {
 }
 
 function renderDateTime(value?: string): ReactNode {
-  return <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(value)}</span>
+  return <DateCell value={value} />
 }
 
 function renderCount(value?: number): ReactNode {

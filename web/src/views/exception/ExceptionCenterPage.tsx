@@ -3,6 +3,7 @@ import { Button, Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { DateCell } from '@/components/table/cells'
 import type { ExceptionItem, ExceptionQuery, ExceptionStatus, ExceptionType } from '@/api/exception'
 import {
   EXCEPTION_CREATE_PERMISSION,
@@ -19,7 +20,6 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfToolbar } from '@/components/table/SfToolbar'
-import { formatDateTime } from '@/utils/format'
 import ExceptionCreateModal from './ExceptionCreateModal'
 import ExceptionDetailDrawer from './ExceptionDetailDrawer'
 
@@ -61,7 +61,6 @@ function ExceptionStatusTag({ status }: { status: ExceptionStatus }) {
  * POST /api/exceptions/{id}/images，权限 returns:exception:execute）。
  */
 export default function ExceptionCenterPage() {
-  const [params, setParams] = useState<ExceptionQuery>({})
   const [createOpen, setCreateOpen] = useState(false)
   const [detailId, setDetailId] = useState<ExceptionItem['id'] | null>(null)
 
@@ -69,10 +68,11 @@ export default function ExceptionCenterPage() {
   const user = useAuthStore((state) => state.user)
   const canCreate = canAccess(user, EXCEPTION_CREATE_PERMISSION)
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<ExceptionItem, ExceptionQuery>({
     queryKey: ['exception', 'center'],
     fetch: (q) => exceptionApi.list(q),
-    params,
+    urlSync: true,
   })
 
   // SKU 编码映射（出参仅 sku_id 裸 ID，基础资料 options 本地映射，失败降级为 #id）
@@ -80,11 +80,6 @@ export default function ExceptionCenterPage() {
   const skuMaps = buildSkuMaps(skuOptions.data ?? [])
   const skuCodeOf = (id: number) =>
     String(id) === '0' ? '-' : (skuMaps.code.get(String(id)) ?? `#${String(id)}`)
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as ExceptionQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<ExceptionItem> = [
     { title: '异常单号', dataIndex: 'exception_no', width: 160, fixed: 'left' },
@@ -118,13 +113,13 @@ export default function ExceptionCenterPage() {
       title: '登记时间',
       dataIndex: 'created_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '解决时间',
       dataIndex: 'resolved_at',
       width: 160,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -166,7 +161,8 @@ export default function ExceptionCenterPage() {
             { name: 'type', label: '异常类型', control: 'select', options: TYPE_OPTIONS },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<ExceptionItem>
           storageKey="exception-center"

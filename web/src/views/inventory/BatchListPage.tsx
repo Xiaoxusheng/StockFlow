@@ -1,12 +1,12 @@
-import { useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type BatchItem, type BatchQuery } from '@/api/inventory'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDate, formatDateTime, formatMoney } from '@/utils/format'
+import { formatDate, formatMoney } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -35,13 +35,13 @@ const COLUMNS: ColumnsType<BatchItem> = [
     title: '创建时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '更新时间',
     dataIndex: 'updated_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
 ]
 
@@ -52,17 +52,12 @@ const COLUMNS: ColumnsType<BatchItem> = [
  * 到货后随入库域冻结回补（backend-m1-plan.md §13）。
  */
 export default function BatchListPage() {
-  const [params, setParams] = useState<BatchQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<BatchItem, BatchQuery>({
     queryKey: ['inventory', 'batches'],
     fetch: (q) => inventoryApi.batches(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as BatchQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -77,7 +72,8 @@ export default function BatchListPage() {
             { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
             { name: 'supplier_id', label: '供应商 ID', control: 'input', placeholder: '供应商 ID（0=未指定）' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<BatchItem>
           storageKey="inventory-batches"

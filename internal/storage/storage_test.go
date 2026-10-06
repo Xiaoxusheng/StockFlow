@@ -233,3 +233,26 @@ func TestFileModelMatchesDDLColumns(t *testing.T) {
 		t.Fatal("File 模型表名应为 files")
 	}
 }
+
+// TestSaveNormalizesExtensionName 扩展名归一边界（whitelist.go normalizeExtension）：
+// 大写扩展名小写归一后按白名单放行、file_type 归一小写；分号注入名（"a.xlsx;type=x"，
+// 伪造 Content-Type 形态）与无扩展名一律拒绝——白名单校验只认归一后的精确值。
+func TestSaveNormalizesExtensionName(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.Save(bytes.NewReader(pngContent), "IMG.PNG", 1<<20)
+	if err != nil {
+		t.Fatalf("大写扩展名应归一为小写后放行: %v", err)
+	}
+	if got.FileType != ".png" || got.MimeType != "image/png" {
+		t.Fatalf("归一结果不符: %+v", got)
+	}
+	cases := []struct{ name, ext string }{
+		{"分号注入名", "a.xlsx;type=x"},
+		{"无扩展名", "noext"},
+	}
+	for _, c := range cases {
+		if _, err := s.Save(bytes.NewReader(zipContent), c.name, 1<<20); err == nil {
+			t.Fatalf("%s %q 应拒绝", c.name, c.name)
+		}
+	}
+}

@@ -6,7 +6,18 @@
 
 **后端主线（M1–M3）全量交付完毕，后端收尾轮已完成（2026-10-04：遗留债务清偿 + 000015/000016 迁移修复 + 阶段 20 CI 关卡 + swag 汇总 + 服务器部署升级与真库回归）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余量均为**待环境项**：阶段 16 真机验收（PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收场景 9）与阶段 21 性能优化（索引/缓存/慢查询治理）待环境后启动；阶段 22 生产部署的环境配置/发布流程已随本轮推进（里程碑 M4 的 7 验收场景走通待现场）；CI 的 go test -race 关卡待 push 后首次 Actions 运行验证（main 领先 origin/main 9 提交未推送）。汇总见 docs/changelog.md 同日「后端收尾轮」条目与下文同日节。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
 
-## 2026-10-06 演示数据补全轮（已交付，待提交）
+## 2026-10-06 作业效率提升层一期（进行中，计划见 docs/plans/2026-10-06-efficiency-layer-phase1.md）
+
+| 波次 | 内容 | 状态 |
+|---|---|---|
+| 前端波次 | `usePagedList` 新增 `urlSync`（筛选/分页同步到 URL，刷新/分享/前进后退可还原）并全站列表页接入；路由级权限守卫（menu `resolveRoutePermission` 最长前缀匹配 + PcLayout 接入 + `useCrudPermissions.ts`）；Vite 生产拆包（vendor-react / vendor-charts，antd 不拆保 tree-shaking，见 vite.config.ts 注释） | ✅ 已提交 |
+| 后端契约测试 | internal/{auth,datax,devices,health,inventory,masterdata,printing,purchase,reports,returns,sales,stockops,sysops,warehouse} 各模块 handler/路由 HTTP 契约测试补全 | ✅ 已提交 |
+| 后端能力波次 | 计划 §2 各能力（任务 priority、/api/tasks 扩值域、迁移 000020 等） | ⬜ 未开始 |
+
+**门禁记录**：go build/vet/test 全绿；web typecheck 0 错、lint 0 错误 2 警告（usePagedList.ts:156、PadReceivePage.tsx:349 exhaustive-deps，既有）。
+**本地垃圾处置**：`web/.tmp-*`、`web/public/__urlsync-check.html`、`.workbuddy-ai/` 已入 .gitignore（含注入 token 的检查页，严禁入库），勿 `git add -f`。
+
+## 2026-10-06 演示数据补全轮（已交付，已随 8f23946 提交）
 
 **目标**：每个前端页面都有可展示数据、每个业务状态机都有样例。
 
@@ -20,7 +31,7 @@
 | S6 | 修复真库暴露的 4 处硬伤（`ON CONFLICT (id)` 中断事务、allocation_records 重复追加、FR-01-11 静默丢行、§17.7/§17.9 列名与值域） | ✅ |
 | S7 | 应用到本地开发库 stockflow + 回写 changelog/current | ✅ |
 
-**遗留**：开发库 `stockflow` 因运行期已占用 `PO-20261006-000001` 等同号单据，有 1 个演示状态行（采购 APPROVED）被跳过，`make seed-demo-verify` 在该库会报该缺口；要 100% 完整演示集需重建演示库。改动未提交。
+**遗留**：开发库 `stockflow` 因运行期已占用 `PO-20261006-000001` 等同号单据，有 1 个演示状态行（采购 APPROVED）被跳过，`make seed-demo-verify` 在该库会报该缺口；要 100% 完整演示集需重建演示库。
 
 ### 历史任务：前端基础平台（2026-10-02，已交付）
 

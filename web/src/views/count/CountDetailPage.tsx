@@ -35,6 +35,7 @@ import {
   type CountScope,
   type CountStatus,
 } from '@/api/count'
+import { DateCell } from '@/components/table/cells'
 import { masterdataApi, OPTIONS_PAGE_SIZE, type SkuItem } from '@/api/masterdata'
 import { binApi, shelfApi, warehouseApi, zoneApi } from '@/api/warehouse'
 import { resolveErrorMessage } from '@/api/client'
@@ -618,7 +619,7 @@ export default function CountDetailPage() {
         title: '实盘时间',
         dataIndex: 'counted_at',
         width: 160,
-        render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+        render: (v?: string | null) => <DateCell value={v} />,
       },
       {
         title: '操作',

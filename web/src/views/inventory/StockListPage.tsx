@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Card } from 'antd'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
@@ -13,13 +12,12 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 /** 实时库存（frontend.md §10.2）：统计 → 筛选 → 库存表格；点击行进入库存行详情（§10.3） */
 export default function StockListPage() {
   const navigate = useNavigate()
-  const [params, setParams] = useState<StockQuery>({})
-  // §26.3：分页经 persistKey 持久化，进入详情再返回时恢复离开前分页
+  // 筛选与分页同步到 URL（?sku_id=..&warehouse_id=..&page=2）：刷新 / 分享链接 / 前进后退均可还原，
+  // 故不再自持 useState，也不再需要 persistKey——URL 已完整承载状态
   const list = usePagedList<StockItem, StockQuery>({
     queryKey: ['inventory', 'stock'],
     fetch: (q) => inventoryApi.stock(q),
-    params,
-    persistKey: 'inventory-stock',
+    urlSync: true,
   })
   // 汇总条：GET /api/inventory/summary 为 reports 实现、inventory 前缀挂载
   // （router.go:211 + internal/reports/routes.go:47；权限点 reports:report:read），
@@ -28,11 +26,6 @@ export default function StockListPage() {
     queryKey: ['inventory', 'stock', 'summary'],
     queryFn: inventoryApi.stockSummary,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as StockQuery)
-    list.resetToFirstPage()
-  }
 
   // 键名取 snake_case 汇总字段（StockSummary；口径见 api/inventory.ts 注释：
   // abnormal = 冻结+残次、near_expiry 含已过期）。
@@ -60,12 +53,12 @@ export default function StockListPage() {
                （internal/auth/permissions.go:307）——持列表权限而无导出权限者不渲染该按钮 */
             permission="datax:export:create"
             scopeParams={{
-              warehouse_id: params.warehouse_id,
-              zone_id: params.zone_id,
-              shelf_id: params.shelf_id,
-              bin_id: params.bin_id,
-              sku_id: params.sku_id,
-              batch_id: params.batch_id,
+              warehouse_id: list.params.warehouse_id,
+              zone_id: list.params.zone_id,
+              shelf_id: list.params.shelf_id,
+              bin_id: list.params.bin_id,
+              sku_id: list.params.sku_id,
+              batch_id: list.params.batch_id,
             }}
           />
         }
@@ -87,7 +80,8 @@ export default function StockListPage() {
             { name: 'bin_id', label: '库位 ID', control: 'input', placeholder: '库位 ID（正整数）' },
             { name: 'batch_id', label: '批次 ID', control: 'input', placeholder: '批次 ID（0=非批次）' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfInventoryTable
           storageKey="inventory-stock"

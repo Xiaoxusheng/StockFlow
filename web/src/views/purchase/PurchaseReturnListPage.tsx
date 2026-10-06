@@ -10,6 +10,7 @@ import {
   type PurchaseReturnQuery,
   type PurchaseReturnStatus,
 } from '@/api/purchase'
+import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
 import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -21,7 +22,6 @@ import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { PurchaseReturnCreateDrawer } from './PurchaseReturnCreateDrawer'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime } from '@/utils/format'
 
 /**
  * 采购退货单状态 → SfStatusTag（internal/returns/models.go:27-36 八态，经
@@ -58,7 +58,6 @@ function renderStatus(status: PurchaseReturnStatus) {
  * 创建入口为 PurchaseReturnCreateDrawer（POST /api/purchase-returns，
  * 仅持 returns:purchasereturn:create 权限可见）。 */
 export default function PurchaseReturnListPage() {
-  const [params, setParams] = useState<PurchaseReturnQuery>({})
   const [createOpen, setCreateOpen] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
@@ -74,10 +73,11 @@ export default function PurchaseReturnListPage() {
     [warehouseOptionsQuery.data],
   )
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<PurchaseReturnOrder, PurchaseReturnQuery>({
     queryKey: ['purchase', 'returns'],
     fetch: (q) => purchaseApi.returns.list(q),
-    params,
+    urlSync: true,
   })
 
   const columns: ColumnsType<PurchaseReturnOrder> = [
@@ -101,7 +101,7 @@ export default function PurchaseReturnListPage() {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -121,11 +121,6 @@ export default function PurchaseReturnListPage() {
     },
   ]
 
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as PurchaseReturnQuery)
-    list.resetToFirstPage()
-  }
-
   return (
     <div className="sf-page">
       <SfPageHeader
@@ -144,7 +139,7 @@ export default function PurchaseReturnListPage() {
         }
       />
       <Card size="small">
-        <SfSearchForm fields={searchFields} onSearch={handleSearch} />
+        <SfSearchForm fields={searchFields} initialValues={list.params} onSearch={list.applyFilters} />
         <SfTable<PurchaseReturnOrder>
           storageKey="purchase-returns"
           rowKey="id"

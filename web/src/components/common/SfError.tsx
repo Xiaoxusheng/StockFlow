@@ -22,7 +22,9 @@ export function SfError({ error, onRetry, description }: SfErrorProps) {
       action={
         onRetry ? (
           <Space direction="vertical">
-            <Button size="small" danger ghost icon={<ReloadOutlined />} onClick={onRetry}>
+            {/* 默认尺寸（32px）：原 small≈28px 在 Pad 上远小于 44px 触摸目标（frontend.md §31），
+                错误重试是关键恢复动作，用默认尺寸提升可点性 */}
+            <Button danger ghost icon={<ReloadOutlined />} onClick={onRetry}>
               重试
             </Button>
           </Space>

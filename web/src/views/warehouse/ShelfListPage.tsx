@@ -17,6 +17,7 @@ import {
 } from '@/api/warehouse'
 // 全量取数走 OPTIONS_PAGE_SIZE=100——后端 ParsePage 上限 MaxPageSize=100（response.go:47），
 // 超 100 直接 400 COMMON_INVALID_PARAM（2026-10-05 货架页 pageSize=500 实测 400）
+import { DateCell } from '@/components/table/cells'
 import { OPTIONS_PAGE_SIZE } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -25,7 +26,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -68,7 +69,7 @@ const COLUMNS: ColumnsType<ShelfItem> = [
     title: '更新时间',
     dataIndex: 'updated_at',
     width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string) => <DateCell value={v} />,
   },
 ]
 

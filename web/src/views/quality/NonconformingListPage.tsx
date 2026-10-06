@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
@@ -10,12 +9,13 @@ import {
   type NonconformingQuery,
   type QualityDisposition,
 } from '@/api/quality'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -91,13 +91,13 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
     title: '处理时间',
     dataIndex: 'handled_at',
     width: 160,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string) => <DateCell value={v} />,
   },
   {
     title: '记录时间',
     dataIndex: 'created_at',
     width: 160,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
 ]
 
@@ -111,17 +111,12 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
  * 单据锚点为关联质检单号 QC-（§13.1），转不良品仓须产生库存变动与流水（inventory-rules）。
  */
 export default function NonconformingListPage() {
-  const [params, setParams] = useState<NonconformingQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<NonconformingItem, NonconformingQuery>({
     queryKey: ['quality', 'nonconforming'],
     fetch: (q) => qualityApi.nonconforming(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as NonconformingQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -136,7 +131,8 @@ export default function NonconformingListPage() {
             { name: 'disposition', label: '处理结果', control: 'select', options: DISPOSITION_OPTIONS },
             { name: 'destination', label: '去向', control: 'select', options: DESTINATION_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<NonconformingItem>
           storageKey="quality-nonconforming"

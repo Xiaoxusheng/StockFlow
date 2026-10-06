@@ -9,6 +9,7 @@ import {
   type OperationLogItem,
   type OperationLogQuery,
 } from '@/api/system'
+import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -170,7 +171,7 @@ function OperationLogPane() {
       dataIndex: 'created_at',
       width: 160,
       fixed: 'left',
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     { title: '用户', dataIndex: 'username', width: 110, ellipsis: true },
     { title: '模块', dataIndex: 'module', width: 110, ellipsis: true },
@@ -282,7 +283,7 @@ function LoginLogPane() {
       dataIndex: 'created_at',
       width: 160,
       fixed: 'left',
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     { title: '用户', dataIndex: 'username', width: 130, ellipsis: true },
     {

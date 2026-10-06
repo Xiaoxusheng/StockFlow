@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { Button, Col, DatePicker, Flex, Row, Segmented, Tag, Tooltip, Typography } from 'antd'
+import { lazy, Suspense, useMemo, useState } from 'react'
+import { Button, Col, DatePicker, Flex, Row, Segmented, Skeleton, Tag, Tooltip, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
@@ -11,22 +11,54 @@ import { useAuthStore } from '@/stores/auth'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
-import { SfChartCard } from '@/components/charts'
+// SfChartCard 直连模块、绕过 charts 桶：桶内 SfLineChart 等在模块顶层调用 echarts.use()，
+// 属静态不可判定的副作用，从桶导入会把 echarts 拽回首屏（与 SfSparkline 同款处理）
+import { SfChartCard } from '@/components/charts/SfChartCard'
 import { formatMoney, formatQty } from '@/utils/format'
 import { resolveDashboardView } from './dashboardView'
 import { DashboardKpiCards, type DashboardKpiItem } from './DashboardKpiCards'
-import {
-  BinUtilizationList,
-  FlowTrendChart,
-  StockStatusDonut,
-  StockTrendChart,
-  WarehouseRankChart,
-  type StockTrendMetric,
-} from './DashboardCharts'
-import { AlertList, TaskList } from './DashboardLists'
+// 仅类型导入（编译后消失，不进运行时依赖图；图表组件本体见下方 React.lazy）
+import type { StockTrendMetric } from './DashboardCharts'
+import { AlertList, BinUtilizationList, TaskList } from './DashboardLists'
 import { DashboardMovements } from './DashboardMovements'
 
 const { Text } = Typography
+
+/**
+ * 图表块懒加载（2026-10-06）：echarts 约 556KB（gzip 190KB），此前随 Dashboard 首屏静态加载
+ * ——Dashboard 是登录后首屏，等于每个用户都要先下完 echarts 才看到内容。
+ * 改为 React.lazy 后 KPI 卡与列表先渲染，图表 chunk 异步补齐，首屏不再下载 echarts。
+ *
+ * 注意：DASHBOARD_CHART_HEIGHT 不可从 './DashboardCharts' 静态导入——那是**值**导入，
+ * 会把模块重新拉回静态依赖图、懒加载就白做了，故此处用等值局部常量。
+ */
+const CHART_PLACEHOLDER_HEIGHT = 280
+
+const StockTrendChart = lazy(() =>
+  import('./DashboardCharts').then((m) => ({ default: m.StockTrendChart })),
+)
+const StockStatusDonut = lazy(() =>
+  import('./DashboardCharts').then((m) => ({ default: m.StockStatusDonut })),
+)
+const FlowTrendChart = lazy(() =>
+  import('./DashboardCharts').then((m) => ({ default: m.FlowTrendChart })),
+)
+const WarehouseRankChart = lazy(() =>
+  import('./DashboardCharts').then((m) => ({ default: m.WarehouseRankChart })),
+)
+
+/** 懒加载占位：与图表等高（SfChartCard 骨架同款），chunk 到位后无布局抖动 */
+function ChartPlaceholder() {
+  return (
+    <div
+      className="sf-chart__state sf-chart__state--skeleton"
+      style={{ height: CHART_PLACEHOLDER_HEIGHT }}
+      aria-busy
+    >
+      <Skeleton active title={false} paragraph={{ rows: 3 }} style={{ width: '100%' }} />
+    </div>
+  )
+}
 
 const RANGE_OPTIONS: Array<{ label: string; value: TrendRange }> = [
   { label: '近7天', value: '7d' },
@@ -142,13 +174,21 @@ export default function DashboardPage() {
     enabled: view === 'management',
   })
 
-  const stockSpark = (analytics.data?.trend ?? []).map((p) => p.total_qty)
-  const inboundSpark = flowSparkSeries(inboundStats.data)
-  const outboundSpark = flowSparkSeries(outboundStats.data)
+  // spark 数组 useMemo 化：KpiCard 已 memo（DashboardKpiCards.tsx），item 引用必须稳定，
+  // 否则 memo 失效——DashboardPage 任何状态变化（图表 metric 切换等）都会重画 4 张卡
+  const stockSpark = useMemo(
+    () => (analytics.data?.trend ?? []).map((p) => p.total_qty),
+    [analytics.data],
+  )
+  const inboundSpark = useMemo(() => flowSparkSeries(inboundStats.data), [inboundStats.data])
+  const outboundSpark = useMemo(() => flowSparkSeries(outboundStats.data), [outboundStats.data])
 
   // —— L1 KPI（§27 顶部 4 卡；值/趋势均为真实端点字段，无同比 delta 不伪造 §54）——
-  const kpis: DashboardKpiItem[] =
-    view === 'management'
+  // useMemo 化同理：item 字面量每次重建会让 KpiCard 的 memo 空转（浅比较恒不等）。
+  // 依赖为各 query 的 data/isPending/error 与 refetch（v5 refetch 引用稳定）、view 与 spark。
+  const kpis: DashboardKpiItem[] = useMemo(
+    () =>
+      view === 'management'
       ? [
           {
             key: 'sku-count',
@@ -230,7 +270,23 @@ export default function DashboardPage() {
             danger: true,
             link: '/inventory/alerts',
           },
-        ]
+        ],
+    [
+      view,
+      summary.data,
+      summary.isPending,
+      summary.error,
+      summary.refetch,
+      analytics.data,
+      today.data,
+      today.isPending,
+      today.error,
+      today.refetch,
+      stockSpark,
+      inboundSpark,
+      outboundSpark,
+    ],
+  )
 
   // 视图徽标强调色走 Token（管理层=主色 / 仓库人员=成功色）：非业务状态不经 SfStatusTag
   // 语义集（其无 primary 语义），但禁 antd 预设色（geekblue≠--sf-primary、green≠--sf-success），
@@ -284,23 +340,27 @@ export default function DashboardPage() {
                 </Flex>
               }
             >
-              <StockTrendChart
-                points={analytics.data?.trend ?? []}
-                metric={metric}
-                loading={analytics.isPending}
-                error={analytics.error}
-                onRetry={() => void analytics.refetch()}
-              />
+              <Suspense fallback={<ChartPlaceholder />}>
+                <StockTrendChart
+                  points={analytics.data?.trend ?? []}
+                  metric={metric}
+                  loading={analytics.isPending}
+                  error={analytics.error}
+                  onRetry={() => void analytics.refetch()}
+                />
+              </Suspense>
             </SfChartCard>
           </Col>
           <Col xs={24} lg={8}>
             <SfChartCard title="库存状态" subtitle="可用 / 锁定 / 冻结 / 待检·残次（余量）">
-              <StockStatusDonut
-                summary={summary.data}
-                loading={summary.isPending}
-                error={summary.error}
-                onRetry={() => void summary.refetch()}
-              />
+              <Suspense fallback={<ChartPlaceholder />}>
+                <StockStatusDonut
+                  summary={summary.data}
+                  loading={summary.isPending}
+                  error={summary.error}
+                  onRetry={() => void summary.refetch()}
+                />
+              </Suspense>
             </SfChartCard>
           </Col>
         </Row>
@@ -337,23 +397,27 @@ export default function DashboardPage() {
               {!trendReady ? (
                 <Text type="secondary">请选择自定义时间段后查看趋势</Text>
               ) : (
-                <FlowTrendChart
-                  points={trend.data ?? []}
-                  loading={trend.isPending}
-                  error={trend.error}
-                  onRetry={() => void trend.refetch()}
-                />
+                <Suspense fallback={<ChartPlaceholder />}>
+                  <FlowTrendChart
+                    points={trend.data ?? []}
+                    loading={trend.isPending}
+                    error={trend.error}
+                    onRetry={() => void trend.refetch()}
+                  />
+                </Suspense>
               )}
             </SfChartCard>
           </Col>
           <Col xs={24} lg={8}>
             <SfChartCard title="仓库库存排行" subtitle="按现存量 TOP 10">
-              <WarehouseRankChart
-                items={warehouseStock.data ?? []}
-                loading={warehouseStock.isPending}
-                error={warehouseStock.error}
-                onRetry={() => void warehouseStock.refetch()}
-              />
+              <Suspense fallback={<ChartPlaceholder />}>
+                <WarehouseRankChart
+                  items={warehouseStock.data ?? []}
+                  loading={warehouseStock.isPending}
+                  error={warehouseStock.error}
+                  onRetry={() => void warehouseStock.refetch()}
+                />
+              </Suspense>
             </SfChartCard>
           </Col>
         </Row>

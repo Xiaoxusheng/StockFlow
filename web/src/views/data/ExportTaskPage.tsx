@@ -38,6 +38,7 @@ import {
   type ExportCreatePayload,
   type ExportScope,
 } from '@/api/data'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { OPTIONS_FETCH_PAGE_SIZE } from '@/api/options'
 import { shelfApi, zoneApi, type ShelfItem, type ZoneItem } from '@/api/warehouse'
@@ -48,7 +49,7 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SfTable } from '@/components/table/SfTable'
 import { SfError } from '@/components/common/SfError'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 /** 轮询间隔：任务在途时每 5 秒刷新进度（excel.md §3「处理中 35%」） */
 const POLL_INTERVAL_MS = 5000
@@ -66,7 +67,7 @@ function renderTaskStatus(status?: string): ReactNode {
 }
 
 function renderDateTime(value?: string): ReactNode {
-  return <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(value)}</span>
+  return <DateCell value={value} />
 }
 
 function renderCount(value?: number): ReactNode {

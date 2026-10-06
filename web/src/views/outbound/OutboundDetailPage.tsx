@@ -20,6 +20,7 @@ import {
   type Shipment,
   type ShipmentStatus,
 } from '@/api/outbound'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import { toStatusKey } from '@/api/masterdata'
 import {
@@ -279,7 +280,7 @@ export default function OutboundDetailPage() {
       title: '拣货时间',
       dataIndex: 'picked_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
   ]
 
@@ -367,7 +368,7 @@ export default function OutboundDetailPage() {
       title: '分配时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -397,7 +398,7 @@ export default function OutboundDetailPage() {
       title: '完成时间',
       dataIndex: 'done_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
   ]
 
@@ -417,7 +418,7 @@ export default function OutboundDetailPage() {
       title: '打包时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 
@@ -437,7 +438,7 @@ export default function OutboundDetailPage() {
       title: '发货时间',
       dataIndex: 'shipped_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
   ]
 

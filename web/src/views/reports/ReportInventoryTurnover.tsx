@@ -2,10 +2,11 @@ import { useState } from 'react'
 import { Card, Flex, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { Dayjs } from 'dayjs'
+import { DateCell } from '@/components/table/cells'
 import { reportsApi, type ReportRangeQuery, type TurnoverRow } from '@/api/reports'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfTable } from '@/components/table/SfTable'
-import { formatDateTime, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 import { rangeToParams, ReportRangePicker } from './ReportRangePicker'
 
 const { Text } = Typography
@@ -43,7 +44,7 @@ const COLUMNS: ColumnsType<TurnoverRow> = [
     dataIndex: 'last_moved_at',
     width: 160,
     render: (v?: string | null) =>
-      v ? <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span> : '-',
+      v ? <DateCell value={v} /> : '-',
   },
 ]
 

@@ -184,14 +184,14 @@ type ModalState = { kind: 'create' } | { kind: 'edit'; role: RoleItem } | { kind
 
 /** 角色管理（frontend.md 系统管理：角色）：列表 + 新建/编辑/启停/绑定权限 */
 export default function RoleListPage() {
-  const [params, setParams] = useState<RoleQuery>({})
   const [modal, setModal] = useState<ModalState>(null)
   const queryClient = useQueryClient()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<RoleItem, RoleQuery>({
     queryKey: ['system', 'roles'],
     fetch: (q) => rbacApi.roles(q),
-    params,
+    urlSync: true,
   })
 
   // 行反馈动效（frontend.md §31 #7）：启停先 API 后反馈，对应行淡色底 480ms 自动回落
@@ -253,11 +253,6 @@ export default function RoleListPage() {
     },
     onError: (error) => message.error(resolveErrorMessage(error)),
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as RoleQuery)
-    list.resetToFirstPage()
-  }
 
   const columns: ColumnsType<RoleItem> = [
     { title: '角色编码', dataIndex: 'code', width: 150, fixed: 'left' },
@@ -334,7 +329,8 @@ export default function RoleListPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '角色编码 / 名称' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<RoleItem>
           storageKey="system-roles"

@@ -12,10 +12,10 @@
  * - 仓库排行   GET /api/reports/dashboard/warehouse-stock（每仓 total_qty）
  * - 库位利用率 GET /api/reports/dashboard/warehouse-stock（bin_utilization 0-100）
  */
-import { Flex, Progress, Typography } from 'antd'
+import { Flex, Typography } from 'antd'
 import type { AnalyticsTrendPoint, StockSummary } from '@/api/inventory'
 import type { DashboardWarehouseStock, TrendPoint } from '@/api/dashboard'
-import { formatNumber, formatPercent, formatQty } from '@/utils/format'
+import { formatQty } from '@/utils/format'
 import {
   SfAreaChart,
   SfBarChart,
@@ -178,32 +178,5 @@ export function WarehouseRankChart({
       onRetry={onRetry}
       emptyText="当前没有仓库库存数据"
     />
-  )
-}
-
-/** 库位利用率（§37 利用率只用 Gauge/Progress；仓库多时列表比单 Gauge 信息密度高） */
-export function BinUtilizationList({ items }: { items: DashboardWarehouseStock[] }) {
-  if (items.length === 0) {
-    return <Text type="secondary">暂无仓库数据</Text>
-  }
-  return (
-    <Flex vertical gap={12}>
-      {items.map((w) => (
-        <Flex key={w.warehouse_code} align="center" gap={12}>
-          <Text style={{ width: 80 }} ellipsis>
-            {w.warehouse_name}
-          </Text>
-          <Progress
-            percent={w.bin_utilization}
-            size="small"
-            style={{ flex: 1, marginBottom: 0 }}
-            format={(p) => formatPercent(p ?? 0, 0)}
-          />
-          <Text type="secondary" className="sf-num" style={{ fontSize: 12 }}>
-            {formatNumber(w.sku_count)} SKU
-          </Text>
-        </Flex>
-      ))}
-    </Flex>
   )
 }

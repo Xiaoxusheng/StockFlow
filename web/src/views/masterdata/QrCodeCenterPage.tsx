@@ -54,9 +54,20 @@ function toSfQrSkuInfo(record: SkuItem, productNameById: Map<string, string>): S
  * printingApi.tasks（SfQrPrintModal）；权限零新增：菜单 sku:view、打印 printing:task:create
  * fail-closed（qr-code.md §10）。
  */
+/**
+ * 查询表单值 → SkuQuery：SfSearchForm 下拉产出的是字符串，enabled 需转布尔
+ * （后端 strconv.ParseBool）。同时供 usePagedList 的 urlSync 解码。
+ */
+function toSkuQuery(raw: Record<string, unknown>): SkuQuery {
+  const enabledRaw = raw['enabled']
+  return {
+    keyword: typeof raw['keyword'] === 'string' ? raw['keyword'] : undefined,
+    enabled: enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined,
+  }
+}
+
 export default function QrCodeCenterPage() {
   const navigate = useNavigate()
-  const [params, setParams] = useState<SkuQuery>({})
   const [selectedKeys, setSelectedKeys] = useState<React.Key[]>([])
   const [drawerSku, setDrawerSku] = useState<SkuItem | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -65,10 +76,12 @@ export default function QrCodeCenterPage() {
   const [messageApi, contextHolder] = message.useMessage()
   const user = useAuthStore((s) => s.user)
 
+  // 筛选与分页同步到 URL：decodeParams 复用 toSkuQuery 把 enabled 还原为布尔
   const list = usePagedList<SkuItem, SkuQuery>({
     queryKey: ['masterdata', 'skus', 'qr-center'],
     fetch: (q) => masterdataApi.skus.list(q),
-    params,
+    urlSync: true,
+    decodeParams: toSkuQuery,
   })
 
   // 商品名 options map（列表不联表下发，同一 API 的真实数据兜底；失败降级 '-' 不阻塞页面）
@@ -262,16 +275,8 @@ export default function QrCodeCenterPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: 'SKU 编码 / 商品名称' },
             { name: 'enabled', label: '启停', control: 'select', options: ENABLED_FILTER_OPTIONS },
           ]}
-          onSearch={(values) => {
-            // SfSearchForm 下拉值为字符串，enabled 转布尔（后端 strconv.ParseBool）
-            const raw = values as Record<string, unknown>
-            const enabledRaw = raw['enabled']
-            setParams({
-              keyword: typeof raw['keyword'] === 'string' ? raw['keyword'] : undefined,
-              enabled: enabledRaw === 'true' ? true : enabledRaw === 'false' ? false : undefined,
-            })
-            list.resetToFirstPage()
-          }}
+          initialValues={list.formValues}
+          onSearch={list.applyFilters}
         />
         <SfTable<SkuItem>
           storageKey="qr-codes"

@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import type { StockItem } from '@/api/inventory'
 import { SfTable, type SfTableProps } from '@/components/table/SfTable'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 /** 数量列渲染（后端 Qty 为裸数字，identity.go:71） */
 function renderQty(value: number): ReactNode {
@@ -36,7 +37,7 @@ export function buildStockColumns(): ColumnsType<StockItem> {
       title: '更新时间',
       dataIndex: 'updated_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
   ]
 }

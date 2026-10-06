@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { Button, Card, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
@@ -12,6 +12,7 @@ import {
   type InboundOrderStatus,
   type InboundSourceType,
 } from '@/api/inbound'
+import { DateCell } from '@/components/table/cells'
 import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
@@ -21,7 +22,6 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
-import { formatDateTime } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -65,7 +65,6 @@ const SOURCE_TYPE_OPTIONS = (Object.entries(SOURCE_TYPE_LABEL) as Array<[Inbound
  * snake_case，internal/purchase/models.go:164-178；仓库/来源类型经筛选回传
  * keyword/status/source_type/source_no/warehouse_id，purchase/handler.go:220-243） */
 export default function InboundPage() {
-  const [params, setParams] = useState<InboundOrderQuery>({})
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, INBOUND_CREATE_PERMISSION)
@@ -81,12 +80,11 @@ export default function InboundPage() {
     [warehouseOptions.data],
   )
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
   const list = usePagedList<InboundOrder, InboundOrderQuery>({
     queryKey: ['inbound', 'orders'],
     fetch: (q) => inboundApi.list(q),
-    params,
-    // §26.3 进详情再返回时恢复离开前分页（OutboundPage 'outbound-orders' 同款）
-    persistKey: 'inbound-orders',
+    urlSync: true,
   })
 
   const columns: ColumnsType<InboundOrder> = [
@@ -127,13 +125,13 @@ export default function InboundPage() {
       title: '收货完成时间',
       dataIndex: 'received_at',
       width: 170,
-      render: (v: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string | null) => <DateCell value={v} />,
     },
     {
       title: '创建时间',
       dataIndex: 'created_at',
       width: 170,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '操作',
@@ -147,11 +145,6 @@ export default function InboundPage() {
       ),
     },
   ]
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as InboundOrderQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -187,7 +180,8 @@ export default function InboundPage() {
               })),
             },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<InboundOrder>
           storageKey="inbound-list"

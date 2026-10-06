@@ -10,6 +10,7 @@ import {
   type SystemJobRunLogItem,
   type SystemJobRunStatus,
 } from '@/api/system'
+import { DateCell } from '@/components/table/cells'
 import { resolveErrorMessage } from '@/api/client'
 import type { PageQuery } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
@@ -20,7 +21,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
+import { EMPTY_TEXT, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -41,6 +42,17 @@ function toEnabledFilter(value: unknown): boolean | undefined {
   if (value === 'enabled') return true
   if (value === 'disabled') return false
   return undefined
+}
+
+/**
+ * 查询表单值 → SystemJobQuery：enabled 由 'enabled' / 'disabled' 字符串转布尔。
+ * 同时供 usePagedList 的 urlSync 解码——URL 里存的也是字符串。
+ */
+function toJobQuery(raw: Record<string, unknown>): SystemJobQuery {
+  return {
+    keyword: typeof raw['keyword'] === 'string' ? raw['keyword'] : undefined,
+    enabled: toEnabledFilter(raw['enabled']),
+  }
 }
 
 /** 最近执行结果（DDL 000014 chk_scheduled_jobs_last_run_status 小写值域；
@@ -102,13 +114,13 @@ function RunLogTable({ job }: { job: SystemJobItem }) {
       title: '开始时间',
       dataIndex: 'start_at',
       width: 160,
-      render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v: string) => <DateCell value={v} />,
     },
     {
       title: '结束时间',
       dataIndex: 'end_at',
       width: 160,
-      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string | null) => <DateCell value={v} />,
     },
     {
       title: '触发方式',
@@ -168,7 +180,6 @@ function RunLogTable({ job }: { job: SystemJobItem }) {
  * 启停与执行日志走契约端点（sysops/routes.go:103-105 已挂载：list / status 热更新 / run-logs）。
  */
 export default function JobPage() {
-  const [params, setParams] = useState<SystemJobQuery>({})
   /** 执行日志抽屉当前任务（null=关闭） */
   const [logJob, setLogJob] = useState<SystemJobItem | null>(null)
   const [messageApi, contextHolder] = message.useMessage()
@@ -178,10 +189,12 @@ export default function JobPage() {
   // fail-closed：无 system:job:status 权限/权限点集为空一律不可启停（types/permission.ts canAccess）
   const canToggle = canAccess(user, SYSTEM_JOB_STATUS_PERMISSION)
 
+  // 筛选与分页同步到 URL：decodeParams 复用 toJobQuery 把 enabled 还原为布尔
   const list = usePagedList<SystemJobItem, SystemJobQuery>({
     queryKey: ['system', 'jobs'],
     fetch: (q) => systemApi.jobs.list(q),
-    params,
+    urlSync: true,
+    decodeParams: toJobQuery,
   })
 
   // 行反馈动效（frontend.md §31 #7）：任务启停先 API 后反馈，对应行淡色底 480ms 自动回落
@@ -235,7 +248,7 @@ export default function JobPage() {
       title: '最近执行',
       dataIndex: 'last_run_at',
       width: 160,
-      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string | null) => <DateCell value={v} />,
     },
     {
       title: '最近结果',
@@ -254,7 +267,7 @@ export default function JobPage() {
       title: '下次执行',
       dataIndex: 'next_run_at',
       width: 160,
-      render: (v?: string | null) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+      render: (v?: string | null) => <DateCell value={v} />,
     },
     {
       title: '备注',
@@ -316,13 +329,8 @@ export default function JobPage() {
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '任务编码 / 名称' },
             { name: 'enabled', label: '状态', control: 'select', options: ENABLED_FILTER_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams({
-              keyword: values.keyword as string | undefined,
-              enabled: toEnabledFilter(values.enabled),
-            })
-            list.resetToFirstPage()
-          }}
+          initialValues={list.formValues}
+          onSearch={list.applyFilters}
           onReset={() => list.resetToFirstPage()}
         />
         <SfTable<SystemJobItem>

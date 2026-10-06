@@ -12,10 +12,10 @@ import {
 } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router'
+import { Navigate, Outlet, useLocation, useNavigate } from 'react-router'
 import type { AutoCompleteProps, MenuProps, ThemeConfig } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { MENU_TREE, resolveMenuTrail, type MenuItem } from '@/config/menu'
+import { MENU_TREE, resolveMenuTrail, resolveRoutePermission, type MenuItem } from '@/config/menu'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { useUiStore } from '@/stores/ui'
@@ -158,6 +158,19 @@ export function PcLayout() {
   const searchSource = useMemo(() => flattenMenuLeaves(visibleMenu), [visibleMenu])
 
   const trail = resolveMenuTrail(location.pathname)
+  /** 当前路由对应的菜单权限点（最长前缀匹配，覆盖 /inbound/:id、/counts/new 等衍生路径） */
+  const routePermission = useMemo(
+    () => resolveRoutePermission(location.pathname),
+    [location.pathname],
+  )
+  /**
+   * 路由级权限守卫（permission.md §5：前端权限是体验优化，后端必须校验）：
+   * 侧边栏只过滤入口，直接输 URL 仍能进页——此处按菜单权限点兜底，无权访问跳 /403。
+   * sessionIncomplete 期间放行：权限快照尚未补全（首登强制改密后的残缺会话），
+   * 此时 canAccess fail-closed 会误拦全部带码页面，等上面 useEffect 的 /me 自愈完成后再判定。
+   */
+  const routeBlocked =
+    !sessionIncomplete && !!routePermission && !canAccess(user, routePermission)
   const openKey = useMemo(
     () =>
       MENU_TREE.find((group) => group.children?.some((child) => child.path === location.pathname))
@@ -361,7 +374,8 @@ export function PcLayout() {
         </Header>
 
         <Content style={{ minHeight: 'calc(100vh - var(--sf-header-height))' }}>
-          <Outlet />
+          {/* 路由级权限守卫：无权访问菜单外的直达 URL 时跳 403（见 routeBlocked 注释） */}
+          {routeBlocked ? <Navigate to="/403" replace /> : <Outlet />}
         </Content>
       </Layout>
 

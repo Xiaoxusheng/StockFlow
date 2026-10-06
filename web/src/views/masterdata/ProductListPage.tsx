@@ -29,6 +29,7 @@ import {
 } from '@/api/masterdata'
 import { fetchCategoryOptions, fetchUnitOptions } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
+import { useCrudPermissions } from '@/hooks/useCrudPermissions'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -108,21 +109,27 @@ function toPayload(values: ProductFormValues): ProductSavePayload {
 
 const NUM_2 = { min: 0, precision: 2, style: { width: '100%' } } as const
 
+/** 商品域资源段：useCrudPermissions 据此拼 product:{create|update|delete|status}，
+ *  经 matchBackendPermission 归一命中后端冻结码 masterdata:product:*（internal/auth/permissions.go:48-53） */
+const PERM_RESOURCE = 'product'
+
 /** 商品管理（/products，backend-m1-plan §5.4 masterdata 契约域） */
 export default function ProductListPage() {
-  const [params, setParams] = useState<ProductQuery>({})
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<ProductItem | null>(null)
   const [form] = Form.useForm<ProductFormValues>()
   const [messageApi, contextHolder] = message.useMessage()
   const queryClient = useQueryClient()
+  // 按钮级权限（无权限则隐藏入口，后端仍会独立校验）
+  const { canCreate, canUpdate, canDelete, canStatus } = useCrudPermissions(PERM_RESOURCE)
   // 动效 #7/删除行（frontend.md §31）：行淡色反馈 / 删除行 fade→收缩——仅在 API 成败回调后触发
   const fb = useTableRowFeedback()
 
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<ProductItem, ProductQuery>({
     queryKey: ['masterdata', 'products'],
     fetch: (q) => masterdataApi.products.list(q),
-    params,
+    urlSync: true,
   })
 
   // 表单依赖下拉：分类 / 单位分页取全（fetchCategoryOptions/fetchUnitOptions，超一页不截断）；
@@ -210,15 +217,21 @@ export default function ProductListPage() {
   // 即关闭的 Dropdown 菜单项内——改用同语义声明式 Modal（danger ok + confirmLoading）
   const [rowConfirm, setRowConfirm] = useState<{ kind: 'toggle' | 'remove'; record: ProductItem } | null>(null)
 
-  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多 */
+  /** 行内「更多」菜单（SkuListPage buildRowMenu 同构）：停用/启用/删除收进更多，操作列只留 编辑 + 更多。
+   *  菜单项按权限点过滤：无 product:status 不出「停用/启用」、无 product:delete 不出「删除」；
+   *  两项皆无权限时调用方不渲染「更多」按钮（见操作列 canMore 判定）。 */
   const buildRowMenu = (record: ProductItem): MenuProps => {
     const disabling = record.status === 'ENABLED'
+    const items: NonNullable<MenuProps['items']> = []
+    if (canStatus) {
+      items.push({ key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling })
+    }
+    if (canDelete) {
+      if (items.length > 0) items.push({ type: 'divider' })
+      items.push({ key: 'remove', label: '删除', danger: true })
+    }
     return {
-      items: [
-        { key: 'toggle', label: disabling ? '停用' : '启用', danger: disabling },
-        { type: 'divider' },
-        { key: 'remove', label: '删除', danger: true },
-      ],
+      items,
       onClick: ({ key }) => {
         if (key === 'toggle') setRowConfirm({ kind: 'toggle', record })
         if (key === 'remove') setRowConfirm({ kind: 'remove', record })
@@ -260,6 +273,33 @@ export default function ProductListPage() {
       .catch(() => {
         // 表单校验失败：Form.Item 已内联提示
       })
+  }
+
+  /** 「更多」是否可出（停用/启用 或 删除 至少一项有权限） */
+  const canMore = canStatus || canDelete
+
+  /** 操作列按权限装配：无编辑权限不出「编辑」，无状态/删除权限不出「更多」 */
+  const actionColumn: ColumnsType<ProductItem>[number] = {
+    title: '操作',
+    key: 'actions',
+    fixed: 'right',
+    width: 150,
+    render: (_: unknown, record: ProductItem) => (
+      <span style={{ whiteSpace: 'nowrap' }}>
+        {canUpdate && (
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+        )}
+        {canMore && (
+          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
+            <Button type="link" size="small" aria-label="更多操作">
+              更多<MoreOutlined style={{ marginLeft: 2 }} />
+            </Button>
+          </Dropdown>
+        )}
+      </span>
+    ),
   }
 
   const columns: ColumnsType<ProductItem> = [
@@ -353,24 +393,7 @@ export default function ProductListPage() {
       width: 160,
       render: (v?: string) => <DateCell value={v} />,
     },
-    {
-      title: '操作',
-      key: 'actions',
-      fixed: 'right',
-      width: 150,
-      render: (_: unknown, record: ProductItem) => (
-        <span style={{ whiteSpace: 'nowrap' }}>
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Dropdown menu={buildRowMenu(record)} trigger={['click']}>
-            <Button type="link" size="small" aria-label="更多操作">
-              更多<MoreOutlined style={{ marginLeft: 2 }} />
-            </Button>
-          </Dropdown>
-        </span>
-      ),
-    },
+    ...(canUpdate || canMore ? [actionColumn] : []),
   ]
 
   return (
@@ -380,9 +403,11 @@ export default function ProductListPage() {
         title="商品管理"
         subtitle="商品档案：分类 / 品牌 / 规格 / 计量单位"
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建商品
-          </Button>
+          canCreate ? (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建商品
+            </Button>
+          ) : undefined
         }
       />
       <Card size="small">
@@ -392,10 +417,8 @@ export default function ProductListPage() {
             { name: 'category_id', label: '分类', control: 'select', options: categoryFilterOptions },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
           ]}
-          onSearch={(values) => {
-            setParams(values as ProductQuery)
-            list.resetToFirstPage()
-          }}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<ProductItem>
           storageKey="masterdata-products"
@@ -409,11 +432,13 @@ export default function ProductListPage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="暂无商品，点击右上角「新建商品」创建"
+          emptyText={canCreate ? '暂无商品，点击右上角「新建商品」创建' : '暂无商品'}
           emptyAction={
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
-              新建商品
-            </Button>
+            canCreate ? (
+              <Button type="primary" size="small" icon={<PlusOutlined />} onClick={openCreate}>
+                新建商品
+              </Button>
+            ) : undefined
           }
           feedbackRowKey={fb.rowKey}
           feedbackTone={fb.tone}

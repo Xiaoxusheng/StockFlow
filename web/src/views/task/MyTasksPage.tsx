@@ -1,13 +1,13 @@
-import { useState } from 'react'
 import { Card } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { DateCell } from '@/components/table/cells'
 import { taskApi, type TaskItem, type TaskQuery, type TaskStatus, type TaskType } from '@/api/task'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { formatDateTime, formatNumber } from '@/utils/format'
+import { formatNumber } from '@/utils/format'
 
 /** 任务类型文案（api/task.ts TaskType 三值；未知值回退展示原始值） */
 const TYPE_LABEL: Record<string, string | undefined> = {
@@ -68,13 +68,13 @@ const COLUMNS: ColumnsType<TaskItem> = [
     title: '创建时间',
     dataIndex: 'created_at',
     width: 170,
-    render: (v: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v: string) => <DateCell value={v} />,
   },
   {
     title: '完成时间',
     dataIndex: 'completed_at',
     width: 170,
-    render: (v?: string) => <span style={{ whiteSpace: 'nowrap' }}>{formatDateTime(v)}</span>,
+    render: (v?: string) => <DateCell value={v} />,
   },
 ]
 
@@ -82,17 +82,12 @@ const COLUMNS: ColumnsType<TaskItem> = [
  * 行列含 raw_status 原表态）。筛选仅后端契约参数 task_type/status/warehouse_code
  * （workbench.go:865-891 仅读三键）——keyword 后端不消费，假筛选项已摘除（api.md §9 平台批）。 */
 export default function MyTasksPage() {
-  const [params, setParams] = useState<TaskQuery>({})
+  // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<TaskItem, TaskQuery>({
     queryKey: ['task', 'my'],
     fetch: (q) => taskApi.list(q),
-    params,
+    urlSync: true,
   })
-
-  const handleSearch = (values: Record<string, unknown>) => {
-    setParams(values as TaskQuery)
-    list.resetToFirstPage()
-  }
 
   return (
     <div className="sf-page">
@@ -104,7 +99,8 @@ export default function MyTasksPage() {
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
             { name: 'warehouse_code', label: '仓库', control: 'input', placeholder: '仓库编码' },
           ]}
-          onSearch={handleSearch}
+          initialValues={list.params}
+          onSearch={list.applyFilters}
         />
         <SfTable<TaskItem>
           storageKey="my-tasks"
