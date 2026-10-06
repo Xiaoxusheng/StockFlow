@@ -23,7 +23,6 @@ import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfAutoRefreshSelect } from '@/components/common/SfAutoRefreshSelect'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import { SfToolbar } from '@/components/table/SfToolbar'
 import ExceptionCreateModal from './ExceptionCreateModal'
 import ExceptionDetailDrawer from './ExceptionDetailDrawer'
 
@@ -151,25 +150,21 @@ export default function ExceptionCenterPage() {
         title="异常中心"
         subtitle="九类异常统一处理：收货 / 质检 / 上架 / 库存 / 拣货 / 复核 / 物流 / 盘点 / 系统（business-flow.md §11.2）"
         extra={
-          /* 导出当前视图（计划 §5.4 F3 列表页接入集，集成轮补齐）：scopeParams 严格透传
-             ExceptionExportSource 白名单认领键（status/type/source_type/source_no，
-             internal/returns/datax_export.go；source_type/source_no 为行源 2026-10-06
-             补齐键，与列表侧同为精确匹配）；异常单无仓库列，不涉仓库数据权限 */
-          <SfExportButton
-            module="EXCEPTION"
-            permission="datax:export:create"
-            scopeParams={{
-              type: list.params.type,
-              status: list.params.status,
-              source_type: list.params.source_type,
-              source_no: list.params.source_no,
-            }}
-          />
-        }
-      />
-      <Card size="small">
-        <SfToolbar
-          title={
+          <>
+            {/* 导出当前视图（计划 §5.4 F3 列表页接入集，集成轮补齐）：scopeParams 严格透传
+               ExceptionExportSource 白名单认领键（status/type/source_type/source_no，
+               internal/returns/datax_export.go；source_type/source_no 为行源 2026-10-06
+               补齐键，与列表侧同为精确匹配）；异常单无仓库列，不涉仓库数据权限 */}
+            <SfExportButton
+              module="EXCEPTION"
+              permission="datax:export:create"
+              scopeParams={{
+                type: list.params.type,
+                status: list.params.status,
+                source_type: list.params.source_type,
+                source_no: list.params.source_no,
+              }}
+            />
             <Button
               type="primary"
               icon={<PlusOutlined />}
@@ -179,8 +174,10 @@ export default function ExceptionCenterPage() {
             >
               登记异常
             </Button>
-          }
-        />
+          </>
+        }
+      />
+      <Card size="small">
         <SfSearchForm
           fields={[
             { name: 'source_no', label: '来源单号', control: 'input', placeholder: '来源单号（如入库单/质检单号）' },

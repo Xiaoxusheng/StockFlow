@@ -26,7 +26,6 @@ import { SfExportButton } from '@/components/common/SfExportButton'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
-import { SfToolbar } from '@/components/table/SfToolbar'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import type { StatusSemantic } from '@/types/status'
 import { formatNumber } from '@/utils/format'
@@ -215,6 +214,7 @@ export default function QualityInspectionListPage() {
         title="质检"
         subtitle="质检单：免检 / 抽检 / 全检，处理结果九值（business-flow.md §4）"
         extra={
+          <>
             <SfExportButton
               module="QUALITY"
               /* 按钮级权限对齐创建导出任务的真实权限点 datax:export:create
@@ -233,16 +233,15 @@ export default function QualityInspectionListPage() {
                 warehouse_id: list.params.warehouse_id,
               }}
             />
+            {canCreate && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+                手动建单
+              </Button>
+            )}
+          </>
         }
       />
       <Card size="small">
-        {canCreate && (
-          <SfToolbar>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-              手动建单
-            </Button>
-          </SfToolbar>
-        )}
         <SfSearchForm
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '质检单号 / 来源单号' },
