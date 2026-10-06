@@ -28,6 +28,19 @@ const (
 	maxLimit = 20 // 每组条数上限（超出收口）
 )
 
+// Navigation 跳转标识（ask 硬性要求：items 带 navigation 跳转标识）。后端不编码
+// 前端路由（§2.1 口径不变）——kind+id 为稳定实体标识，路由映射仍由
+// web/src/config/searchTargets.ts 承担；doc 组七分支单号前缀歧义由 kind 权威消解
+// （前端旧的前缀映射保留为回退，navigation 优先）。
+type Navigation struct {
+	// Kind 实体种类：普通 type 与 typ 同值（sku/product/…/logistics→shipment）；
+	// doc 组为七分支实体名（purchase_order/inbound_order/sales_order/outbound_order/
+	// transfer_order/count_order/exception）。
+	Kind string `json:"kind"`
+	// ID 业务 ID（字符串形态，api.md §2）。
+	ID string `json:"id"`
+}
+
 // Item 搜索条目（api.md §2 业务 ID 字符串形态）。
 type Item struct {
 	ID        string            `json:"id"`
@@ -37,6 +50,8 @@ type Item struct {
 	Status    string            `json:"status"`
 	Summary   string            `json:"summary"`
 	UpdatedAt database.JSONTime `json:"updated_at"`
+	// Navigation 跳转标识（additive 字段；旧消费方忽略不受影响）。
+	Navigation Navigation `json:"navigation"`
 
 	// rank 匹配档位（组装列，不出 JSON；doc 多分支合并排序用）。
 	rank int `json:"-"`
@@ -112,7 +127,11 @@ func (s *Service) Search(ctx context.Context, q SearchQuery) ([]Group, error) {
 				Status:    r.Status,
 				Summary:   r.Summary,
 				UpdatedAt: r.UpdatedAt,
-				rank:      r.MatchRank,
+				Navigation: Navigation{
+					Kind: u.navKindOrType(),
+					ID:   strconv.FormatInt(r.ID, 10),
+				},
+				rank: r.MatchRank,
 			})
 		}
 	}

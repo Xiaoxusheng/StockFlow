@@ -37,6 +37,15 @@ type unit struct {
 	match      []string // 匹配列（ILIKE）
 	scopeCols  []string // 仓库数据权限列（多列=OR；空=该 unit 不适用仓库过滤）
 	updCol     string   // updated_at 限定列（JOIN 歧义消解）
+	navKind    string   // navigation.kind（空=回落 typ；doc 七分支/物流为实体名）
+}
+
+// navKindOrType navigation.kind 取值（未显式声明的普通 type 与 typ 同值）。
+func (u unit) navKindOrType() string {
+	if u.navKind != "" {
+		return u.navKind
+	}
+	return u.typ
 }
 
 // units type→表/列/权限映射清单（efficiency-layer-phase1 §2.1；顺序即组输出顺序）。
@@ -103,52 +112,52 @@ var units = []unit{
 	},
 	// doc 七分支（UNION 语义由服务层合并；各自域 list 码，efficiency-layer-phase1 §2.1）。
 	{
-		typ: "doc", groupTitle: "单据", branch: "采购订单", perm: auth.PermPurchaseList,
+		typ: "doc", groupTitle: "单据", branch: "采购订单", perm: auth.PermPurchaseList, navKind: "purchase_order",
 		sel:   "o.id, o.po_no AS title, o.po_no AS code, o.status AS status, '采购订单' AS summary, o.updated_at",
 		from:  "purchase_orders o",
 		where: "o.deleted_at IS NULL",
 		match: []string{"o.po_no"}, scopeCols: []string{"o.warehouse_id"}, updCol: "o.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "入库单", perm: auth.PermInboundList,
+		typ: "doc", groupTitle: "单据", branch: "入库单", perm: auth.PermInboundList, navKind: "inbound_order",
 		sel:   "io.id, io.inbound_no AS title, io.inbound_no AS code, io.status AS status, '入库单' AS summary, io.updated_at",
 		from:  "inbound_orders io",
 		where: "io.deleted_at IS NULL",
 		match: []string{"io.inbound_no"}, scopeCols: []string{"io.warehouse_id"}, updCol: "io.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "销售订单", perm: auth.PermSalesList,
+		typ: "doc", groupTitle: "单据", branch: "销售订单", perm: auth.PermSalesList, navKind: "sales_order",
 		sel:   "so.id, so.so_no AS title, so.so_no AS code, so.status AS status, '销售订单' AS summary, so.updated_at",
 		from:  "sales_orders so",
 		match: []string{"so.so_no"}, scopeCols: []string{"so.warehouse_id"}, updCol: "so.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "出库单", perm: auth.PermOutboundList,
+		typ: "doc", groupTitle: "单据", branch: "出库单", perm: auth.PermOutboundList, navKind: "outbound_order",
 		sel:   "ob.id, ob.outbound_no AS title, ob.outbound_no AS code, ob.status AS status, '出库单' AS summary, ob.updated_at",
 		from:  "outbound_orders ob",
 		match: []string{"ob.outbound_no"}, scopeCols: []string{"ob.warehouse_id"}, updCol: "ob.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "调拨单", perm: auth.PermTransferList,
+		typ: "doc", groupTitle: "单据", branch: "调拨单", perm: auth.PermTransferList, navKind: "transfer_order",
 		sel:       "t.id, t.transfer_no AS title, t.transfer_no AS code, t.status AS status, '调拨单' AS summary, t.updated_at",
 		from:      "transfer_orders t",
 		match:     []string{"t.transfer_no"},
 		scopeCols: []string{"t.from_warehouse_id", "t.to_warehouse_id"}, updCol: "t.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "盘点单", perm: auth.PermCountList,
+		typ: "doc", groupTitle: "单据", branch: "盘点单", perm: auth.PermCountList, navKind: "count_order",
 		sel:   "c.id, c.count_no AS title, c.count_no AS code, c.status AS status, '盘点单' AS summary, c.updated_at",
 		from:  "count_orders c",
 		match: []string{"c.count_no"}, scopeCols: []string{"c.warehouse_id"}, updCol: "c.updated_at",
 	},
 	{
-		typ: "doc", groupTitle: "单据", branch: "异常单", perm: auth.PermExceptionList,
+		typ: "doc", groupTitle: "单据", branch: "异常单", perm: auth.PermExceptionList, navKind: "exception",
 		sel:   "e.id, e.exception_no AS title, e.exception_no AS code, e.status AS status, '异常单' AS summary, e.updated_at",
 		from:  "exceptions e",
 		match: []string{"e.exception_no"}, updCol: "e.updated_at",
 	},
 	{
-		typ: "logistics", groupTitle: "物流", perm: auth.PermShipmentList,
+		typ: "logistics", groupTitle: "物流", perm: auth.PermShipmentList, navKind: "shipment",
 		sel:       "sh.id, sh.shipment_no AS title, sh.shipment_no AS code, sh.status AS status, sh.carrier AS summary, sh.updated_at",
 		from:      "shipments sh",
 		match:     []string{"sh.shipment_no", "sh.tracking_no", "sh.outbound_no"},

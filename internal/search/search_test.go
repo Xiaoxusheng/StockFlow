@@ -454,14 +454,18 @@ func TestSearchPermissionFilter(t *testing.T) {
 	if !item.UpdatedAt.Equal(skuFixtureAt) {
 		t.Fatalf("updated_at 应为 %s，实际 %s", skuFixtureAt, item.UpdatedAt)
 	}
-	// JSON 形状冻结：七字段齐备。
+	// navigation 跳转标识：普通 type 与 typ 同值、id 与条目同值。
+	if item.Navigation.Kind != "sku" || item.Navigation.ID != "7" {
+		t.Fatalf("navigation 应为 {sku,7}，实际 %+v", item.Navigation)
+	}
+	// JSON 形状冻结：八字段齐备（id/type/title/code/status/summary/updated_at/navigation）。
 	raw := struct {
 		Groups []map[string]any `json:"groups"`
 	}{}
 	if err := json.Unmarshal(out.Data, &raw); err != nil {
 		t.Fatalf("JSON 解析失败: %v", err)
 	}
-	for _, key := range []string{"id", "type", "title", "code", "status", "summary", "updated_at"} {
+	for _, key := range []string{"id", "type", "title", "code", "status", "summary", "updated_at", "navigation"} {
 		itemMap, ok := raw.Groups[0]["items"].([]any)[0].(map[string]any)
 		if !ok {
 			t.Fatalf("items[0] 应为对象形态")
@@ -569,6 +573,55 @@ func TestSearchShortCircuit(t *testing.T) {
 
 	// types 白名单外 400。
 	env.mustErr("/api/search?q=SKU001&types=bogus", http.StatusBadRequest, "COMMON_INVALID_PARAM")
+}
+
+// ---- navigation.kind 注册表（doc 七分支权威区分，ask 硬性要求） ----
+
+// TestNavigationKinds navKind 注册表冻结：普通 type 回落 typ，唯 logistics 显式覆盖为
+// 实体名 shipment（"logistics" 是检索分组标签而非实体）；doc 七分支逐一持有独立实体名
+// （purchase_order/inbound_order/sales_order/outbound_order/transfer_order/count_order/
+// exception）——前端 searchTargets.ts 据此映射路由。
+func TestNavigationKinds(t *testing.T) {
+	// 非 doc type 的显式覆盖白名单（其余必须回落 typ）。
+	overrides := map[string]string{"logistics": "shipment"}
+	wantDoc := map[string]bool{
+		"purchase_order": false, "inbound_order": false, "sales_order": false,
+		"outbound_order": false, "transfer_order": false, "count_order": false,
+		"exception": false,
+	}
+	docUnits := 0
+	for _, u := range units {
+		k := u.navKindOrType()
+		if k == "" {
+			t.Fatalf("unit %s(%s) navigation.kind 为空", u.typ, u.branch)
+		}
+		if u.typ != "doc" {
+			if want, ok := overrides[u.typ]; ok {
+				if u.navKind != want {
+					t.Fatalf("type %s 显式 navKind 应为 %q，实际 %q", u.typ, want, u.navKind)
+				}
+			} else if u.navKind != "" {
+				t.Fatalf("普通 type %s 不应显式声明 navKind（回落 typ）", u.typ)
+			}
+			if k != u.typ && k != overrides[u.typ] {
+				t.Fatalf("type %s 的 navigation.kind 应为 %s，实际 %s", u.typ, u.typ, k)
+			}
+			continue
+		}
+		docUnits++
+		if _, ok := wantDoc[k]; !ok {
+			t.Fatalf("doc 分支 %s 的 kind %q 不在冻结清单: %v", u.branch, k, wantDoc)
+		}
+		wantDoc[k] = true
+	}
+	if docUnits != 7 {
+		t.Fatalf("doc 应恰 7 分支，实际 %d", docUnits)
+	}
+	for k, seen := range wantDoc {
+		if !seen {
+			t.Fatalf("doc 分支缺实体 kind %q", k)
+		}
+	}
 }
 
 // ---- 路由冻结（T14 口径） ----
