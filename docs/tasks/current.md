@@ -6,6 +6,22 @@
 
 **后端主线（M1–M3）全量交付完毕，后端收尾轮已完成（2026-10-04：遗留债务清偿 + 000015/000016 迁移修复 + 阶段 20 CI 关卡 + swag 汇总 + 服务器部署升级与真库回归）**——MT1–MT7 门禁记录见下「2026-10-04 后端：M3 平台能力全量交付」节；开发计划余量均为**待环境项**：阶段 16 真机验收（PDA/扫码枪深度接入与多终端、StockFlow Scan 现场验收场景 9）与阶段 21 性能优化（索引/缓存/慢查询治理）待环境后启动；阶段 22 生产部署的环境配置/发布流程已随本轮推进（里程碑 M4 的 7 验收场景走通待现场）；CI 的 go test -race 关卡待 push 后首次 Actions 运行验证（main 领先 origin/main 9 提交未推送）。汇总见 docs/changelog.md 同日「后端收尾轮」条目与下文同日节。2026-10-04 清偿轮执行核对员债务清单（F3–F21 代码修复 + F5/F16/NEW-1 文档回写：guard-inventory 守卫、department_id fail-fast、seed 残留幂等、迁移 000015、release 密钥测试、BindErrorDetails 收敛、panic 日志截断、swag 269 路由注解 + `make swag`、数据权限集成测试等；同日复核修正轮：guard-inventory 补 _test.go fixture 豁免、F20 补收敛 printing/returns/stockops 14 处 bind 路径、迁移 000015 down 补齐 transfer 索引、F16 补注 m1-plan/analysis 三处），销项记录见 docs/changelog.md 同日条目。
 
+## 2026-10-06 演示数据补全轮（已交付，待提交）
+
+**目标**：每个前端页面都有可展示数据、每个业务状态机都有样例。
+
+| 项 | 内容 | 状态 |
+|---|---|---|
+| S1 | 缺口分析：72 张迁移表 vs 原 seed 覆盖 48 表；逐表判定「应补 / 禁止写（审计+生产初始化）/ 启动期 upsert」 | ✅ |
+| S2 | dev_seed.sql §12–§17 六段补数（库存四态+锁定+调整 / 退货+异常 / 设备+扫码 / 文件+导入导出 / 运维 / 各单据状态机全值域） | ✅ |
+| S3 | 静态契约测试同步：条数冻结表（106 条 INSERT）、期初两段成对断言、新增 3 个守卫（自然键禁 `ON CONFLICT (id)`、引用编码必须已定义、幂等三形态计数） | ✅ |
+| S4 | dev_seed_verify.sql 补 §8–§16 自检段与摘要列 | ✅ |
+| S5 | 真库验证（本地 PG16）：干净库连跑 3 遍幂等 + verify 全过；脏库优雅跳过同号行 | ✅ |
+| S6 | 修复真库暴露的 4 处硬伤（`ON CONFLICT (id)` 中断事务、allocation_records 重复追加、FR-01-11 静默丢行、§17.7/§17.9 列名与值域） | ✅ |
+| S7 | 应用到本地开发库 stockflow + 回写 changelog/current | ✅ |
+
+**遗留**：开发库 `stockflow` 因运行期已占用 `PO-20261006-000001` 等同号单据，有 1 个演示状态行（采购 APPROVED）被跳过，`make seed-demo-verify` 在该库会报该缺口；要 100% 完整演示集需重建演示库。改动未提交。
+
 ### 历史任务：前端基础平台（2026-10-02，已交付）
 
 **前端基础平台**（docs/plans/2026-10-02-frontend-foundation.md，F1–F5 + 库存中心示范）

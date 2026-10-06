@@ -682,7 +682,7 @@ FROM (VALUES (9825, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 30.
              (9839, 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 8.0000::numeric(18, 4)),
              (9840, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 20.0000::numeric(18, 4)),
              (9841, 'WH-E03', 'FG-02-11', 'SKU-E015-01', 'B20261002-E015', 500.0000::numeric(18, 4)),
-             (9842, 'WH-E03', 'FR-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+             (9842, 'WH-E03', 'FP-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
 JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
 JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
 JOIN zones z ON z.id = b.zone_id
@@ -720,7 +720,7 @@ FROM (VALUES (9879, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'B20260928-E001', 30.
              (9893, 'WH-E03', 'FG-01-21', 'SKU-E013-02', NULL, 8.0000::numeric(18, 4)),
              (9894, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 20.0000::numeric(18, 4)),
              (9895, 'WH-E03', 'FG-02-11', 'SKU-E015-01', 'B20261002-E015', 500.0000::numeric(18, 4)),
-             (9896, 'WH-E03', 'FR-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+             (9896, 'WH-E03', 'FP-01-11', 'SKU-E015-02', NULL, 2000.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
 JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
 JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
 JOIN zones z ON z.id = b.zone_id
@@ -1037,6 +1037,8 @@ JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
 ON CONFLICT DO NOTHING;
 
 -- 分配记录：OUT-1 两行（FIFO）已完成；OUT-2 已发部分（lock 核销后 lock_id=0）
+-- 幂等：本表除主键外无唯一索引（同一出库行可跨批次分多条分配记录），ON CONFLICT 无从触发，
+--   故与 document_approvals 同口径改用 WHERE NOT EXISTS 防重跑重复追加。
 INSERT INTO allocation_records (outbound_no, line_no, sku_id, batch_id, warehouse_id, bin_id, qty, strategy, reason, lock_id, created_at, created_by)
 SELECT v.outbound_no, v.line_no, sku.id, COALESCE(bat.id, 0), w.id, b.id, v.qty, v.strategy,
        jsonb_build_object('hit', v.strategy, 'available_snapshot', v.qty), 0, v.created_at, 9901
@@ -1048,7 +1050,9 @@ JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
 JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
 JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
 LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
-ON CONFLICT DO NOTHING;
+WHERE NOT EXISTS (
+    SELECT 1 FROM allocation_records ar
+    WHERE ar.outbound_no = v.outbound_no AND ar.line_no = v.line_no AND ar.sku_id = sku.id);
 
 -- 拣货任务 4（2 完成 + 1 拣货中 + 1 待领）
 INSERT INTO pick_tasks (pick_no, outbound_no, outbound_line_no, sku_id, batch_id, source_warehouse_id,
@@ -1200,7 +1204,7 @@ VALUES (9991, 'SKU 二维码标准标签', 'SKU_LABEL', 'THERMAL_60_40', 'CODE12
        (9992, '库位标签', 'BIN_LABEL', 'THERMAL_40_30', 'CODE128', TRUE,
         '{"bin_code": "库位编码", "warehouse_name": "仓库"}'::jsonb,
         '', 'ENABLED', 'DEV SEED 库位标识', 0)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 INSERT INTO print_tasks (print_no, object_type, template_id, template_snapshot, paper, copies, total_count,
                          status, result, printed_by, printed_at, created_at, created_by)
@@ -1226,7 +1230,7 @@ FROM (VALUES (9995, 'PT-20261004-000001', 1, 'SKU-E013-01', '9436', '智能温�
              (9998, 'PT-20261005-000002', 2, 'REEL-02-11', '9974', '元器件存储区', '', ''),
              (9999, 'PT-20261005-000002', 3, 'FG-01-11', '9992', '成品存储区', '', '')) AS v(id, print_no, seq, code, data_id, product_name, spec, barcode)
 JOIN print_tasks t ON t.print_no = v.print_no
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT DO NOTHING;
 
 -- ---- 11.9 单号计数器推进（GREATEST 幂等：重跑不回退既有最大值，服务后续取号无缝衔接）----
 INSERT INTO doc_number_counters (prefix, period, next_no, created_at, updated_at, created_by)
@@ -1265,6 +1269,712 @@ FROM (VALUES ('purchase_order', 'PO-20261002-000001', 'SUBMIT', '', '提交审�
              ('transfer_order', 'TR-20261004-000001', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-04 10:00:00+08'::timestamptz),
              ('transfer_order', 'TR-20261005-000002', 'SUBMIT', '', 'MCU 调拨申请', 9901, '王经理', '2026-10-05 12:45:00+08'::timestamptz),
              ('transfer_order', 'TR-20261005-000002', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-05 13:00:00+08'::timestamptz)) AS v(target_type, target_no, action, result, opinion, operator_id, operator_name, created_at)
+WHERE NOT EXISTS (
+    SELECT 1 FROM document_approvals da
+    WHERE da.target_type = v.target_type AND da.target_no = v.target_no
+      AND da.action = v.action AND da.created_at = v.created_at);
+
+-- ============ 12) 演示数据补全轮（2026-10-06：全部页面 + 全部状态情况） ============
+--
+-- 目的：让每个前端页面都有可展示数据、每个业务状态机都有样例。新增段全部沿用 §8/§10 的
+--   幂等口径（显式 9xxx 主键或自然键 ON CONFLICT DO NOTHING、单事务内），与既有数据零冲突
+--   （新单号 / 新主键 / 新五维键）。
+-- 覆盖：库存四态（锁定/冻结/待检/残次）+ 库存锁定 + 库存调整单 + 退货（销售/采购）+
+--   异常九类 + 设备与扫码 + 文件/导入导出 + 定时任务执行日志/通知/备份 + 各单据缺失状态。
+-- 边界（有意留白）：审计表 operation_logs / login_logs 按既有硬性约束零写入
+--   （dev_seed_test.go TestDevSeedNoProductionInitPollution）——日志页数据由真实登录/操作产生；
+--   files / backup_records 为登记型记录，其物理文件不在演示库（下载端 404 属预期）。
+
+-- ---- 12.1 库存状态演示行（locked/frozen/pending_inspect/defective 四态齐备）----
+-- §8/§10 期初段只写 total/available 两列；本段为「状态行」，六列全写并满足恒等式
+--   total = available + locked + frozen + pending_inspect + defective（inventory-rules §2）。
+-- 每行仍与一条 '期初' 流水 1:1 成对（qty=total、0→n），保证「库存变更必带流水」口径；
+-- 状态流转明细由 §12.2 锁定记录承载（锁定的 qty 与本段 locked/frozen 量一一对应）。
+-- 选键原则：避开 §8/§10 已占五维键与序列号管理 SKU（E008-01/E013-01/E013-02/E014-01），
+--   避免扰动期初成对与「序列号一物一行」断言。
+INSERT INTO inventory (id, warehouse_id, zone_id, shelf_id, bin_id, sku_id, batch_id,
+                       total_qty, available_qty, locked_qty, frozen_qty, pending_inspect_qty, defective_qty, created_by)
+SELECT v.id, w.id, z.id, s.id, b.id, sku.id, COALESCE(bat.id, 0),
+       v.qty, v.avail, v.locked, v.frozen, v.pending, v.defect, 0
+FROM (VALUES (9843, 'WH-E01', 'REEL-01-22', 'SKU-E001-01', 'B20260928-E001', 50.0000::numeric(18, 4), 30.0000::numeric(18, 4), 20.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             (9844, 'WH-E01', 'RV-01-11', 'SKU-E004-01', NULL, 300.0000::numeric(18, 4), 240.0000::numeric(18, 4), 0.0000::numeric(18, 4), 60.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             (9845, 'WH-E01', 'RV-01-12', 'SKU-E012-01', 'B20260918-E012', 60.0000::numeric(18, 4), 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 20.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             (9846, 'WH-E01', 'NG-01-11', 'SKU-E011-01', NULL, 30.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 30.0000::numeric(18, 4)),
+             (9847, 'WH-E03', 'FG-01-12', 'SKU-E015-01', 'B20261002-E015', 40.0000::numeric(18, 4), 25.0000::numeric(18, 4), 15.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             (9848, 'WH-E03', 'FG-02-12', 'SKU-E015-01', 'B20261002-E015', 200.0000::numeric(18, 4), 150.0000::numeric(18, 4), 0.0000::numeric(18, 4), 50.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty, avail, locked, frozen, pending, defect)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (warehouse_id, bin_id, sku_id, batch_id) DO NOTHING;
+
+-- 状态行的期初流水（与上方同 VALUES 成对；id 9901 起避开 §8/§10 已用 9851-9900）
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, COALESCE(bat.id, 0),
+       'INBOUND', '期初', 'DEV-SEED-OPEN-' || v.id::text, 'available', 'available',
+       0, v.qty, v.qty,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED', '2026-10-05 10:00:00+08'::timestamptz
+FROM (VALUES (9901, 'WH-E01', 'REEL-01-22', 'SKU-E001-01', 'B20260928-E001', 50.0000::numeric(18, 4)),
+             (9902, 'WH-E01', 'RV-01-11', 'SKU-E004-01', NULL, 300.0000::numeric(18, 4)),
+             (9903, 'WH-E01', 'RV-01-12', 'SKU-E012-01', 'B20260918-E012', 60.0000::numeric(18, 4)),
+             (9904, 'WH-E01', 'NG-01-11', 'SKU-E011-01', NULL, 30.0000::numeric(18, 4)),
+             (9905, 'WH-E03', 'FG-01-12', 'SKU-E015-01', 'B20261002-E015', 40.0000::numeric(18, 4)),
+             (9906, 'WH-E03', 'FG-02-12', 'SKU-E015-01', 'B20261002-E015', 200.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (ledger_no) DO NOTHING;
+
+-- ---- 12.2 库存锁定（5 种 lock_type × 3 种 status 全值域覆盖）----
+-- ACTIVE 锁的 qty 与 §12.1 状态行的 locked/frozen/pending_inspect 量一一对应（数据自洽）；
+-- RELEASED/CONSUMED 为历史锁（已释放/已核销，不影响当前现存量）。
+INSERT INTO inventory_locks (id, warehouse_id, bin_id, sku_id, batch_id, lock_type, source_type, source_no,
+                             qty, status, released_at, released_by, remark, created_at, created_by)
+SELECT v.id, w.id, b.id, sku.id, COALESCE(bat.id, 0), v.lock_type, v.source_type, v.source_no,
+       v.qty, v.status, v.released_at, CASE WHEN v.released_at IS NULL THEN 0 ELSE 9901 END,
+       v.remark, v.created_at, 9901
+FROM (VALUES
+    -- ACTIVE：销售预占（ORDER_HOLD → locked 20）
+    (9910, 'WH-E01', 'REEL-01-22', 'SKU-E001-01', 'B20260928-E001', 'ORDER_HOLD', 'SALES_ORDER', 'SO-20261004-000002', 20.0000::numeric(18, 4), 'ACTIVE', NULL::timestamptz, 'DEV SEED 销售单预占（对应库存行 locked_qty=20）', '2026-10-05 11:00:00+08'::timestamptz),
+    -- ACTIVE：手工冻结（MANUAL_FREEZE → frozen 60）
+    (9911, 'WH-E01', 'RV-01-11', 'SKU-E004-01', NULL, 'MANUAL_FREEZE', 'MANUAL', 'MF-20261005-000001', 60.0000::numeric(18, 4), 'ACTIVE', NULL::timestamptz, 'DEV SEED 手工冻结待工艺确认（对应库存行 frozen_qty=60）', '2026-10-05 11:20:00+08'::timestamptz),
+    -- ACTIVE：质检冻结（QC_FREEZE → pending_inspect 20）
+    (9912, 'WH-E01', 'RV-01-12', 'SKU-E012-01', 'B20260918-E012', 'QC_FREEZE', 'QUALITY', 'QC-20261003-000001', 20.0000::numeric(18, 4), 'ACTIVE', NULL::timestamptz, 'DEV SEED 收货待检批次暂存锁定（对应库存行 pending_inspect_qty=20）', '2026-10-05 11:40:00+08'::timestamptz),
+    -- ACTIVE：销售预占（成品仓，locked 15）
+    (9913, 'WH-E03', 'FG-01-12', 'SKU-E015-01', 'B20261002-E015', 'ORDER_HOLD', 'SALES_ORDER', 'SO-20261005-000003', 15.0000::numeric(18, 4), 'ACTIVE', NULL::timestamptz, 'DEV SEED 样机单预占（对应库存行 locked_qty=15）', '2026-10-05 15:10:00+08'::timestamptz),
+    -- ACTIVE：异常冻结（EXCEPTION_FREEZE → frozen 50；freeze_lock_id 回指见 §13.5 异常单）
+    (9914, 'WH-E03', 'FG-02-12', 'SKU-E015-01', 'B20261002-E015', 'EXCEPTION_FREEZE', 'EXCEPTION', 'EX-20261006-000001', 50.0000::numeric(18, 4), 'ACTIVE', NULL::timestamptz, 'DEV SEED 彩盒受潮异常冻结（对应库存行 frozen_qty=50）', '2026-10-06 09:20:00+08'::timestamptz),
+    -- RELEASED：盘点冻结已解冻（盘点完成）
+    (9915, 'WH-E01', 'REEL-02-12', 'SKU-E003-01', 'B20260915-E003', 'COUNT_FREEZE', 'COUNT', 'CK-20261004-000001', 100.0000::numeric(18, 4), 'RELEASED', '2026-10-04 12:00:00+08'::timestamptz, 'DEV SEED 盘点冻结已解冻', '2026-10-04 09:00:00+08'::timestamptz),
+    -- RELEASED：异常冻结已解冻
+    (9916, 'WH-E01', 'IC-01-11', 'SKU-E004-01', NULL, 'EXCEPTION_FREEZE', 'EXCEPTION', 'EX-20261004-000002', 30.0000::numeric(18, 4), 'RELEASED', '2026-10-05 09:00:00+08'::timestamptz, 'DEV SEED 异常处理完成解冻', '2026-10-04 16:30:00+08'::timestamptz),
+    -- RELEASED：手工冻结已解冻
+    (9917, 'WH-E02', 'SA-01-11', 'SKU-E008-01', 'B20261004-E008', 'MANUAL_FREEZE', 'MANUAL', 'MF-20261004-000002', 5.0000::numeric(18, 4), 'RELEASED', '2026-10-05 10:00:00+08'::timestamptz, 'DEV SEED 半成品待检已放行', '2026-10-04 15:00:00+08'::timestamptz),
+    -- CONSUMED：销售预占已核销（出库消耗）
+    (9918, 'WH-E03', 'FG-01-11', 'SKU-E013-01', NULL, 'ORDER_HOLD', 'SALES_ORDER', 'SO-20261003-000001', 12.0000::numeric(18, 4), 'CONSUMED', '2026-10-04 16:30:00+08'::timestamptz, 'DEV SEED 预占随出库核销', '2026-10-03 11:30:00+08'::timestamptz),
+    -- CONSUMED：销售预占部分核销
+    (9919, 'WH-E03', 'FG-01-22', 'SKU-E014-01', NULL, 'ORDER_HOLD', 'SALES_ORDER', 'SO-20261004-000002', 10.0000::numeric(18, 4), 'CONSUMED', '2026-10-05 11:20:00+08'::timestamptz, 'DEV SEED 部分发货核销', '2026-10-04 10:20:00+08'::timestamptz)) AS v(id, wh_code, bin_code, sku_code, batch_no, lock_type, source_type, source_no, qty, status, released_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT DO NOTHING;
+
+-- ---- 12.3 库存调整单（6 种状态 × 5 种调整类型覆盖）----
+-- 单号走 docnum ADJ 前缀真实格式（ResetAll：ADJ-{YYYYMMDD}-{6 位流水}），计数器见 §12.9。
+-- EXECUTED 行对应盘点差异 CK-20261004-000001 的 -4 盘亏（count_differences.adjust_no 回写见 §12.10）。
+INSERT INTO inventory_adjustments (id, adjustment_no, warehouse_id, sku_id, bin_id, batch_id, adjust_type, qty,
+                                   reason, status, approved_by, approved_at, executed_by, executed_at,
+                                   created_at, created_by, updated_by)
+SELECT v.id, v.adjustment_no, w.id, sku.id, b.id, COALESCE(bat.id, 0), v.adjust_type, v.qty,
+       v.reason, v.status,
+       CASE WHEN v.status IN ('APPROVED', 'EXECUTED') THEN 9901 ELSE 0 END, v.approved_at,
+       CASE WHEN v.status = 'EXECUTED' THEN 9904 ELSE 0 END, v.executed_at,
+       v.created_at, 9904, 9904
+FROM (VALUES
+    -- EXECUTED：盘点差异核销（盘亏 4）
+    (9930, 'ADJ-20261004-000001', 'WH-E01', 'SKU-E004-01', 'IC-01-11', NULL, '盘亏', 4.0000::numeric(18, 4), 'CK-20261004-000001 循环盘点账实差 -4，审核通过后核销', 'EXECUTED', '2026-10-04 14:00:00+08'::timestamptz, '2026-10-04 14:30:00+08'::timestamptz, '2026-10-04 13:00:00+08'::timestamptz),
+    -- PENDING_APPROVAL：盘盈待审
+    (9931, 'ADJ-20261005-000002', 'WH-E01', 'SKU-E006-01', 'PK-01-11', 'B20260926-E006', '盘盈', 12.0000::numeric(18, 4), '收货尾数溢装 12，待审核后入账', 'PENDING_APPROVAL', NULL::timestamptz, NULL::timestamptz, '2026-10-05 09:30:00+08'::timestamptz),
+    -- PENDING_APPROVAL：报废待审
+    (9932, 'ADJ-20261005-000003', 'WH-E01', 'SKU-E011-01', 'NG-01-11', NULL, '报废', 30.0000::numeric(18, 4), '钢网变形 30 张，隔离区报废申请', 'PENDING_APPROVAL', NULL::timestamptz, NULL::timestamptz, '2026-10-05 10:10:00+08'::timestamptz),
+    -- APPROVED：损耗已审待执行
+    (9933, 'ADJ-20261005-000004', 'WH-E01', 'SKU-E003-01', 'REEL-02-12', 'B20260915-E003', '损耗', 6.0000::numeric(18, 4), 'MCU 静电损伤损耗 6，审核通过待执行', 'APPROVED', '2026-10-05 11:00:00+08'::timestamptz, NULL::timestamptz, '2026-10-05 10:40:00+08'::timestamptz),
+    -- REJECTED：盘盈驳回
+    (9934, 'ADJ-20261005-000005', 'WH-E02', 'SKU-E008-01', 'SA-01-11', 'B20261004-E008', '盘盈', 8.0000::numeric(18, 4), '半成品仓疑似盘盈 8，核查为未登记入库已驳回', 'REJECTED', '2026-10-05 15:00:00+08'::timestamptz, NULL::timestamptz, '2026-10-05 14:30:00+08'::timestamptz),
+    -- DRAFT：草稿
+    (9935, 'ADJ-20261006-000006', 'WH-E03', 'SKU-E015-02', 'FP-01-11', NULL, '其他', 50.0000::numeric(18, 4), '彩盒受潮 50 个待定处置方式（草稿）', 'DRAFT', NULL::timestamptz, NULL::timestamptz, '2026-10-06 09:40:00+08'::timestamptz),
+    -- EXECUTED：报废已执行
+    (9936, 'ADJ-20261004-000007', 'WH-E01', 'SKU-E012-01', 'REEL-02-22', 'B20260918-E012', '报废', 4.0000::numeric(18, 4), 'ESD 托盘破损报废 4，已执行', 'EXECUTED', '2026-10-04 17:00:00+08'::timestamptz, '2026-10-04 17:20:00+08'::timestamptz, '2026-10-04 16:40:00+08'::timestamptz),
+    -- CANCELLED：作废
+    (9937, 'ADJ-20261003-000008', 'WH-E01', 'SKU-E007-01', 'PK-01-12', NULL, '盘亏', 20.0000::numeric(18, 4), 'FPC 排线疑似盘亏，复盘后确认账实相符，作废', 'CANCELLED', NULL::timestamptz, NULL::timestamptz, '2026-10-03 16:00:00+08'::timestamptz)) AS v(id, adjustment_no, wh_code, sku_code, bin_code, batch_no, adjust_type, qty, reason, status, approved_at, executed_at, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT DO NOTHING;
+
+-- ---- 13.1 销售退货单（type=SALES，8 态中覆盖 7 态；SHIPPED 仅采购退货适用）----
+INSERT INTO return_orders (id, return_no, type, source_no, customer_id, supplier_id, warehouse_id, status,
+                           approved_by, approved_at, received_at, qc_at, completed_at, cancelled_at,
+                           remark, created_at, created_by, updated_by)
+SELECT v.id, v.return_no, 'SALES', v.source_no, cus.id, 0, w.id, v.status,
+       CASE WHEN v.status IN ('APPROVED', 'RECEIVING', 'IN_QC', 'COMPLETED') THEN 9901 ELSE 0 END,
+       v.approved_at, v.received_at, v.qc_at, v.completed_at, v.cancelled_at,
+       v.remark, v.created_at, 9903, 9903
+FROM (VALUES
+    (9950, 'RT-20261006-000001', 'SO-20261004-000002', 'CUS-E002', 'WH-E03', 'DRAFT', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '客户反馈 1 台白温控器外观瑕疵（草稿）', '2026-10-06 16:10:00+08'::timestamptz),
+    (9951, 'RT-20261006-000002', 'SO-20261004-000002', 'CUS-E002', 'WH-E03', 'PENDING_APPROVAL', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '插座 2 台不通电待审核', '2026-10-06 16:40:00+08'::timestamptz),
+    (9952, 'RT-20261006-000003', 'SO-20261003-000001', 'CUS-E001', 'WH-E03', 'APPROVED', '2026-10-06 17:20:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '温控器 2 台待客户退回', '2026-10-06 17:00:00+08'::timestamptz),
+    (9953, 'RT-20261005-000001', 'SO-20261003-000001', 'CUS-E001', 'WH-E03', 'RECEIVING', '2026-10-06 08:40:00+08'::timestamptz, '2026-10-05 09:30:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '客户退回包裹已到仓，清点中', '2026-10-05 08:20:00+08'::timestamptz),
+    (9954, 'RT-20261005-000002', 'SO-20261003-000001', 'CUS-E001', 'WH-E03', 'IN_QC', '2026-10-05 09:00:00+08'::timestamptz, '2026-10-05 09:40:00+08'::timestamptz, '2026-10-06 10:10:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '退货质检中（正常/不良判定）', '2026-10-05 08:50:00+08'::timestamptz),
+    (9955, 'RT-20261004-000001', 'SO-20261003-000001', 'CUS-E001', 'WH-E03', 'COMPLETED', '2026-10-04 10:00:00+08'::timestamptz, '2026-10-04 14:00:00+08'::timestamptz, '2026-10-04 15:00:00+08'::timestamptz, '2026-10-04 16:00:00+08'::timestamptz, NULL::timestamptz, '退货入库完成，良品回架、不良转隔离', '2026-10-04 09:40:00+08'::timestamptz),
+    (9956, 'RT-20261004-000002', 'SO-20261004-000002', 'CUS-E002', 'WH-E03', 'CANCELLED', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '2026-10-04 18:00:00+08'::timestamptz, '客户撤销退货申请，单作废', '2026-10-04 17:30:00+08'::timestamptz)) AS v(id, return_no, source_no, cus_code, wh_code, status, approved_at, received_at, qc_at, completed_at, cancelled_at, remark, created_at)
+JOIN customers cus ON cus.code = v.cus_code AND cus.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 13.2 采购退货单（type=PURCHASE，覆盖 APPROVED / SHIPPED / COMPLETED）----
+INSERT INTO return_orders (id, return_no, type, source_no, customer_id, supplier_id, warehouse_id, status,
+                           approved_by, approved_at, received_at, qc_at, completed_at, cancelled_at,
+                           remark, created_at, created_by, updated_by)
+SELECT v.id, v.return_no, 'PURCHASE', v.source_no, 0, sup.id, w.id, v.status, 9901, v.approved_at,
+       NULL::timestamptz, NULL::timestamptz, v.completed_at, NULL::timestamptz,
+       v.remark, v.created_at, 9902, 9902
+FROM (VALUES
+    (9957, 'RT-20261004-000003', 'PO-20261002-000001', 'SUP-E001', 'WH-E01', 'APPROVED', '2026-10-04 11:00:00+08'::timestamptz, NULL::timestamptz, '来料丝印不良 20 盘待退回供应商', '2026-10-04 10:40:00+08'::timestamptz),
+    (9958, 'RT-20261005-000003', 'PO-20261002-000001', 'SUP-E001', 'WH-E01', 'SHIPPED', '2026-10-05 09:00:00+08'::timestamptz, NULL::timestamptz, '不良物料已交快递退回', '2026-10-05 08:40:00+08'::timestamptz),
+    (9959, 'RT-20261003-000001', 'PO-20261002-000001', 'SUP-E001', 'WH-E01', 'COMPLETED', '2026-10-03 10:00:00+08'::timestamptz, '2026-10-03 16:00:00+08'::timestamptz, '退供应商完成，供应商已确认收货', '2026-10-03 09:30:00+08'::timestamptz)) AS v(id, return_no, source_no, sup_code, wh_code, status, approved_at, completed_at, remark, created_at)
+JOIN suppliers sup ON sup.code = v.sup_code AND sup.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 13.3 退货明细（各退货单 1-2 行；四量随状态推进）----
+INSERT INTO return_items (id, return_id, line_no, sku_id, qty_return, qty_received, qty_inspected, qty_defective,
+                          reason, remark, created_at, created_by)
+SELECT v.id, r.id, v.line_no, sku.id, v.qty_return, v.qty_received, v.qty_inspected, v.qty_defective,
+       v.reason, '', r.created_at, 9903
+FROM (VALUES (9950, 'RT-20261006-000001', 1, 'SKU-E013-01', 1.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '外观瑕疵'),
+             (9951, 'RT-20261006-000002', 1, 'SKU-E014-01', 2.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '通电异常'),
+             (9952, 'RT-20261006-000003', 1, 'SKU-E013-01', 2.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '客户拒收'),
+             (9953, 'RT-20261005-000001', 1, 'SKU-E013-01', 2.0000::numeric(18, 4), 2.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '客户拒收'),
+             (9954, 'RT-20261005-000002', 1, 'SKU-E015-01', 5.0000::numeric(18, 4), 5.0000::numeric(18, 4), 5.0000::numeric(18, 4), 1.0000::numeric(18, 4), '来料彩盒破损'),
+             (9955, 'RT-20261004-000001', 1, 'SKU-E013-01', 3.0000::numeric(18, 4), 3.0000::numeric(18, 4), 3.0000::numeric(18, 4), 0.0000::numeric(18, 4), '客户退换'),
+             (9960, 'RT-20261004-000001', 2, 'SKU-E015-01', 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 2.0000::numeric(18, 4), '包装破损'),
+             (9956, 'RT-20261004-000002', 1, 'SKU-E014-01', 1.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '客户撤销'),
+             (9957, 'RT-20261004-000003', 1, 'SKU-E001-01', 20.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '丝印不良'),
+             (9958, 'RT-20261005-000003', 1, 'SKU-E001-01', 20.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '丝印不良'),
+             (9959, 'RT-20261003-000001', 1, 'SKU-E002-01', 5.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '来料容值偏差')) AS v(id, return_no, line_no, sku_code, qty_return, qty_received, qty_inspected, qty_defective, reason)
+JOIN return_orders r ON r.return_no = v.return_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 13.4 异常单（九类异常 × 六态生命周期全覆盖，20 条）----
+-- handle_records 追加式台账（action：freeze/assign/start/review/resolve/close/release）；
+-- 9950+ 中的 EX-20261006-000001 回指 §12.2 的 EXCEPTION_FREEZE 锁 9914（异常冻结联动）。
+INSERT INTO exceptions (id, exception_no, type, source_type, source_no, sku_id, bin_id, serial_no, status, detail,
+                        assignee_id, assignee_name, owner_id, owner_name, handle_records, image_refs, freeze_lock_id,
+                        assigned_at, resolved_at, closed_at, remark, created_at, created_by, updated_by)
+SELECT v.id, v.exception_no, v.type, v.source_type, v.source_no,
+       COALESCE(sku.id, 0), COALESCE(b.id, 0), v.serial_no, v.status, v.detail,
+       v.assignee_id, v.assignee_name, v.owner_id, v.owner_name,
+       v.handle_records::jsonb, v.image_refs::jsonb, v.freeze_lock_id,
+       v.assigned_at, v.resolved_at, v.closed_at, v.remark, v.created_at, 9904, 9904
+FROM (VALUES
+    (9970, 'EX-20261006-000001', '库存异常', 'COUNT', 'CK-20261004-000001', 'SKU-E015-01', 'FG-02-12', '', 'PROCESSING', '成品彩盒受潮 50 个，已冻结待处置', 9902, '李收货', 9901, '王经理', '[{"at": "2026-10-06 09:20:00", "action": "freeze", "by_id": 9904, "by_name": "赵盘点", "note": "彩盒受潮冻结 50", "lock_id": 9914, "qty": "50.0000"}, {"at": "2026-10-06 09:30:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派李收货跟进"}, {"at": "2026-10-06 09:45:00", "action": "start", "by_id": 9902, "by_name": "李收货", "note": "联系供应商换货"}]', '[]', 9914, '2026-10-05 09:30:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, 'DEV SEED 异常冻结联动示例', '2026-10-06 09:20:00+08'::timestamptz),
+    (9971, 'EX-20261006-000002', '收货异常', 'INBOUND', 'IN-20261003-000002', 'SKU-E006-01', 'RV-01-11', '', 'OPEN', '到货连接器外箱破损 1 箱，待处理', 0, '', 0, '', '[]', '[]', NULL::bigint, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-06 10:00:00+08'::timestamptz),
+    (9972, 'EX-20261006-000003', '收货异常', 'INBOUND', 'IN-20261003-000002', 'SKU-E006-02', 'RV-01-12', '', 'ASSIGNED', '到货数量短装 10 个', 9902, '李收货', 9901, '王经理', '[{"at": "2026-10-05 14:10:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派李收货核实"}]', '[]', NULL::bigint, '2026-10-05 14:10:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 14:00:00+08'::timestamptz),
+    (9973, 'EX-20261005-000001', '质检异常', 'QUALITY', 'QC-20261003-000001', 'SKU-E006-01', 'PK-01-11', '', 'PROCESSING', '抽检发现 3 个端子氧化，处理中', 9904, '赵盘点', 9902, '李收货', '[{"at": "2026-10-05 15:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派质检跟进"}, {"at": "2026-10-05 15:20:00", "action": "start", "by_id": 9904, "by_name": "赵盘点", "note": "全检排查同批次"}]', '[]', NULL::bigint, '2026-10-05 15:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 14:50:00+08'::timestamptz),
+    (9974, 'EX-20261005-000002', '质检异常', 'QUALITY', 'QC-20261002-000001', 'SKU-E003-01', 'REEL-02-12', '', 'PENDING_REVIEW', 'MCU 湿敏等级需烘烤，已提交复核', 9904, '赵盘点', 9902, '李收货', '[{"at": "2026-10-05 16:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派质检"}, {"at": "2026-10-05 16:20:00", "action": "start", "by_id": 9904, "by_name": "赵盘点", "note": "烘烤方案拟定"}, {"at": "2026-10-05 17:00:00", "action": "review", "by_id": 9904, "by_name": "赵盘点", "note": "提交复核"}]', '[]', NULL::bigint, '2026-10-05 16:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 15:50:00+08'::timestamptz),
+    (9975, 'EX-20261004-000001', '上架异常', 'PUTAWAY', 'PW-20261003-000001', 'SKU-E001-01', 'REEL-01-11', '', 'RESOLVED', '目标库位容量不足，已改派相邻库位', 9902, '李收货', 9902, '李收货', '[{"at": "2026-10-04 10:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派上架处理"}, {"at": "2026-10-04 10:20:00", "action": "start", "by_id": 9902, "by_name": "李收货", "note": "查找空位"}, {"at": "2026-10-04 10:50:00", "action": "review", "by_id": 9902, "by_name": "李收货", "note": "改派 REEL-01-22"}, {"at": "2026-10-04 11:10:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "确认上架完成"}]', '[]', NULL::bigint, '2026-10-04 10:00:00+08'::timestamptz, '2026-10-04 11:10:00+08'::timestamptz, NULL::timestamptz, '', '2026-10-04 09:50:00+08'::timestamptz),
+    (9976, 'EX-20261004-000002', '上架异常', 'PUTAWAY', 'PW-20261003-000002', 'SKU-E002-01', 'REEL-02-11', '', 'CLOSED', '货架标签脱落，已补打并关闭', 9902, '李收货', 9902, '李收货', '[{"at": "2026-10-04 11:30:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派处理"}, {"at": "2026-10-04 11:40:00", "action": "start", "by_id": 9902, "by_name": "李收货", "note": "补打标签"}, {"at": "2026-10-04 12:00:00", "action": "review", "by_id": 9902, "by_name": "李收货", "note": "提交复核"}, {"at": "2026-10-04 12:10:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "复核通过"}, {"at": "2026-10-04 12:20:00", "action": "close", "by_id": 9901, "by_name": "王经理", "note": "关闭"}]', '[]', NULL::bigint, '2026-10-04 11:30:00+08'::timestamptz, '2026-10-04 12:10:00+08'::timestamptz, '2026-10-04 12:20:00+08'::timestamptz, '', '2026-10-04 11:20:00+08'::timestamptz),
+    (9977, 'EX-20261004-000003', '库存异常', 'COUNT', 'CK-20261004-000001', 'SKU-E004-01', 'IC-01-11', '', 'RESOLVED', '循环盘点账实差 -4，已生成调整单核销', 9904, '赵盘点', 9901, '王经理', '[{"at": "2026-10-04 13:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派盘点复核"}, {"at": "2026-10-04 13:20:00", "action": "start", "by_id": 9904, "by_name": "赵盘点", "note": "复盘确认差异"}, {"at": "2026-10-04 13:50:00", "action": "review", "by_id": 9904, "by_name": "赵盘点", "note": "提交复核"}, {"at": "2026-10-04 14:00:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "生成 ADJ-20261004-000001"}]', '[]', NULL::bigint, '2026-10-04 13:00:00+08'::timestamptz, '2026-10-04 14:00:00+08'::timestamptz, NULL::timestamptz, '', '2026-10-04 12:50:00+08'::timestamptz),
+    (9978, 'EX-20261005-000003', '拣货异常', 'PICK', 'PK-20261004-000002', 'SKU-E015-01', 'FG-02-11', '', 'ASSIGNED', '拣货位库存不足，缺 5 个', 9903, '陈发货', 9903, '陈发货', '[{"at": "2026-10-05 10:20:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派发货组处理"}]', '[]', NULL::bigint, '2026-10-05 10:20:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 10:10:00+08'::timestamptz),
+    (9979, 'EX-20261004-000004', '拣货异常', 'PICK', 'PK-20261003-000002', 'SKU-E015-01', 'FG-02-11', '', 'CLOSED', '拣货位标签与实物不符，已更正关闭', 9903, '陈发货', 9903, '陈发货', '[{"at": "2026-10-04 15:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派处理"}, {"at": "2026-10-04 15:20:00", "action": "start", "by_id": 9903, "by_name": "陈发货", "note": "核对实物"}, {"at": "2026-10-04 15:50:00", "action": "review", "by_id": 9903, "by_name": "陈发货", "note": "更正标签"}, {"at": "2026-10-04 16:10:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "复核通过"}, {"at": "2026-10-04 16:20:00", "action": "close", "by_id": 9901, "by_name": "王经理", "note": "关闭"}]', '[]', NULL::bigint, '2026-10-04 15:00:00+08'::timestamptz, '2026-10-04 16:10:00+08'::timestamptz, '2026-10-04 16:20:00+08'::timestamptz, '', '2026-10-04 14:50:00+08'::timestamptz),
+    (9980, 'EX-20261005-000004', '复核异常', 'CHECK', 'CH-20261004-000001', 'SKU-E014-01', 'FG-01-22', '', 'PENDING_REVIEW', '复核发现串码，已提交复核', 9903, '陈发货', 9903, '陈发货', '[{"at": "2026-10-05 11:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派复核组"}, {"at": "2026-10-05 11:20:00", "action": "start", "by_id": 9903, "by_name": "陈发货", "note": "追查串码批次"}, {"at": "2026-10-05 12:00:00", "action": "review", "by_id": 9903, "by_name": "陈发货", "note": "提交复核"}]', '[]', NULL::bigint, '2026-10-05 11:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 10:50:00+08'::timestamptz),
+    (9981, 'EX-20261003-000001', '复核异常', 'CHECK', 'CH-20261003-000001', 'SKU-E013-01', 'FG-01-11', '', 'CLOSED', '数量复核差异 1 台，已核实并关闭', 9903, '陈发货', 9903, '陈发货', '[{"at": "2026-10-03 16:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派处理"}, {"at": "2026-10-03 16:20:00", "action": "start", "by_id": 9903, "by_name": "陈发货", "note": "二次点数"}, {"at": "2026-10-03 16:50:00", "action": "review", "by_id": 9903, "by_name": "陈发货", "note": "确认无差异"}, {"at": "2026-10-03 17:10:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "复核通过"}, {"at": "2026-10-03 17:20:00", "action": "close", "by_id": 9901, "by_name": "王经理", "note": "关闭"}]', '[]', NULL::bigint, '2026-10-03 16:00:00+08'::timestamptz, '2026-10-03 17:10:00+08'::timestamptz, '2026-10-03 17:20:00+08'::timestamptz, '', '2026-10-03 15:50:00+08'::timestamptz),
+    (9982, 'EX-20261005-000005', '物流异常', 'SHIPMENT', 'SH-20261004-000001', 'SKU-E015-01', '', '', 'OPEN', '快递揽收后轨迹停滞 24h，待跟进', 0, '', 0, '', '[]', '[]', NULL::bigint, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 09:00:00+08'::timestamptz),
+    (9983, 'EX-20261005-000006', '物流异常', 'SHIPMENT', 'SH-20261004-000002', 'SKU-E014-01', '', '', 'PROCESSING', '客户反馈外箱凹陷，处理中', 9903, '陈发货', 9903, '陈发货', '[{"at": "2026-10-05 13:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派发货组"}, {"at": "2026-10-05 13:20:00", "action": "start", "by_id": 9903, "by_name": "陈发货", "note": "联系快递理赔"}]', '[]', NULL::bigint, '2026-10-05 13:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 12:50:00+08'::timestamptz),
+    (9984, 'EX-20261005-000007', '盘点异常', 'COUNT', 'CK-20261005-000002', 'SKU-E010-01', 'REEL-02-21', '', 'PENDING_REVIEW', '盘点发现锡膏批次已过效期，提交复核', 9904, '赵盘点', 9901, '王经理', '[{"at": "2026-10-05 09:30:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派盘点处理"}, {"at": "2026-10-05 09:50:00", "action": "start", "by_id": 9904, "by_name": "赵盘点", "note": "核查效期"}, {"at": "2026-10-05 10:20:00", "action": "review", "by_id": 9904, "by_name": "赵盘点", "note": "提交复核"}]', '[]', NULL::bigint, '2026-10-05 09:30:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-05 09:20:00+08'::timestamptz),
+    (9985, 'EX-20261004-000005', '盘点异常', 'COUNT', 'CK-20261004-000001', 'SKU-E006-01', 'PK-01-11', '', 'RESOLVED', '盘点时发现库位混放，已整理归位', 9904, '赵盘点', 9904, '赵盘点', '[{"at": "2026-10-04 11:30:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派整理"}, {"at": "2026-10-04 11:40:00", "action": "start", "by_id": 9904, "by_name": "赵盘点", "note": "整理库位"}, {"at": "2026-10-04 12:10:00", "action": "review", "by_id": 9904, "by_name": "赵盘点", "note": "提交复核"}, {"at": "2026-10-04 12:30:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "确认归位"}]', '[]', NULL::bigint, '2026-10-04 11:30:00+08'::timestamptz, '2026-10-04 12:30:00+08'::timestamptz, NULL::timestamptz, '', '2026-10-04 11:20:00+08'::timestamptz),
+    (9986, 'EX-20261006-000004', '系统异常', 'SYSTEM', '', '', '', '', 'OPEN', '扫码解析接口偶发超时，待排查', 0, '', 0, '', '[]', '[]', NULL::bigint, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-06 11:00:00+08'::timestamptz),
+    (9987, 'EX-20261004-000006', '系统异常', 'SYSTEM', '', '', '', '', 'CLOSED', '导出任务队列积压，已扩容关闭', 9901, '王经理', 9901, '王经理', '[{"at": "2026-10-04 18:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "自行跟进"}, {"at": "2026-10-04 18:10:00", "action": "start", "by_id": 9901, "by_name": "王经理", "note": "扩容队列"}, {"at": "2026-10-04 18:30:00", "action": "review", "by_id": 9901, "by_name": "王经理", "note": "提交复核"}, {"at": "2026-10-04 18:40:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "队列恢复正常"}, {"at": "2026-10-04 18:50:00", "action": "close", "by_id": 9901, "by_name": "王经理", "note": "关闭"}]', '[]', NULL::bigint, '2026-10-04 18:00:00+08'::timestamptz, '2026-10-04 18:40:00+08'::timestamptz, '2026-10-04 18:50:00+08'::timestamptz, '', '2026-10-04 17:50:00+08'::timestamptz),
+    (9988, 'EX-20261003-000002', '库存异常', 'MANUAL', '', 'SKU-E011-01', 'NG-01-11', '', 'ASSIGNED', '钢网变形 30 张待报废处置', 9904, '赵盘点', 9901, '王经理', '[{"at": "2026-10-03 15:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派盘点确认数量"}]', '[]', NULL::bigint, '2026-10-03 15:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '', '2026-10-03 14:50:00+08'::timestamptz),
+    (9989, 'EX-20261002-000001', '收货异常', 'INBOUND', 'IN-20261002-000001', 'SKU-E003-01', 'RV-01-11', '', 'CLOSED', '到货外箱受潮，已开箱全检并关闭', 9902, '李收货', 9902, '李收货', '[{"at": "2026-10-02 15:00:00", "action": "assign", "by_id": 9901, "by_name": "王经理", "note": "指派全检"}, {"at": "2026-10-02 15:20:00", "action": "start", "by_id": 9902, "by_name": "李收货", "note": "开箱全检"}, {"at": "2026-10-02 16:00:00", "action": "review", "by_id": 9902, "by_name": "李收货", "note": "全检无异常"}, {"at": "2026-10-02 16:20:00", "action": "resolve", "by_id": 9901, "by_name": "王经理", "note": "复核通过"}, {"at": "2026-10-02 16:30:00", "action": "close", "by_id": 9901, "by_name": "王经理", "note": "关闭"}]', '[]', NULL::bigint, '2026-10-02 15:00:00+08'::timestamptz, '2026-10-02 16:20:00+08'::timestamptz, '2026-10-02 16:30:00+08'::timestamptz, '', '2026-10-02 14:50:00+08'::timestamptz)) AS v(id, exception_no, type, source_type, source_no, sku_code, bin_code, serial_no, status, detail, assignee_id, assignee_name, owner_id, owner_name, handle_records, image_refs, freeze_lock_id, assigned_at, resolved_at, closed_at, remark, created_at)
+LEFT JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN bins b ON b.code = v.bin_code
+ON CONFLICT DO NOTHING;
+
+-- ---- 14.1 设备档案（5 种 type × 启停/激活状态覆盖）----
+-- code 为管理端命名（devices.md §6：SF-{类型}-{序号}），非 docnum 单号；warehouse_id/bound_user_id
+-- 为裸 ID 引用（9103=WH-E01 / 9104=WH-E02 / 9105=WH-E03；9901-9905 为演示账号）。
+INSERT INTO devices (id, code, name, type, brand, model, os, warehouse_id, bound_user_id, status,
+                     activation_status, activation_expires_at, activated_at, activated_by, app_version,
+                     last_online_at, last_scan_at, battery_level, ip, token_version, remark,
+                     created_at, created_by, updated_by)
+VALUES
+    (9001, 'SF-PC-001', '办公 PC-01', 'pc', 'Lenovo', 'ThinkCentre M720', 'Windows 11', 9103, 9901, 'ENABLED', 'ACTIVATED', NULL, '2026-10-02 09:00:00+08', 9901, '', '2026-10-06 11:30:00+08', NULL, NULL, '10.20.1.11', 1, 'DEV SEED 管理端固定终端', '2026-10-02 09:00:00+08', 0, 0),
+    (9002, 'SF-PAD-001', '平板-收货台', 'pad', 'Samsung', 'Galaxy Tab A9+', 'Android 14', 9103, 9902, 'ENABLED', 'ACTIVATED', NULL, '2026-10-03 09:10:00+08', 9902, '1.2.0', '2026-10-06 11:28:00+08', '2026-10-06 11:25:00+08', 78, '10.20.2.21', 1, 'DEV SEED 收货作业平板', '2026-10-03 09:10:00+08', 0, 0),
+    (9003, 'SF-PDA-001', 'PDA-拣货01', 'pda', 'Zebra', 'MC3300x', 'Android 11', 9105, 9903, 'ENABLED', 'ACTIVATED', NULL, '2026-10-03 09:20:00+08', 9903, '1.2.0', '2026-10-06 11:29:00+08', '2026-10-06 11:27:00+08', 64, '10.20.3.31', 2, 'DEV SEED 拣货工业 PDA', '2026-10-03 09:20:00+08', 0, 0),
+    (9004, 'SF-PDA-002', 'PDA-上架02', 'pda', 'Zebra', 'MC3300x', 'Android 11', 9103, 0, 'ENABLED', 'PENDING', '2026-10-06 12:30:00+08', NULL, 0, '', NULL, NULL, NULL, '', 1, 'DEV SEED 待激活 PDA', '2026-10-06 11:00:00+08', 0, 0),
+    (9005, 'SF-SCAN-001', '扫码枪-复核台', 'scanner', 'Honeywell', 'HH660', '', 9105, 9903, 'ENABLED', 'ACTIVATED', NULL, '2026-10-03 09:30:00+08', 9903, '', '2026-10-06 11:26:00+08', '2026-10-06 11:20:00+08', NULL, '10.20.3.41', 1, 'DEV SEED 复核台扫码枪', '2026-10-03 09:30:00+08', 0, 0),
+    (9006, 'SF-SCAN-002', '扫码枪-备用', 'scanner', 'Honeywell', 'HH660', '', 0, 0, 'DISABLED', 'ACTIVATED', NULL, '2026-10-02 10:00:00+08', 9901, '', '2026-09-28 09:00:00+08', NULL, NULL, '', 3, 'DEV SEED 已停用备用设备', '2026-10-02 10:00:00+08', 0, 0),
+    (9007, 'SF-PRT-001', '标签打印机-01', 'printer', 'Zebra', 'ZD421', '', 9103, 9902, 'ENABLED', 'ACTIVATED', NULL, '2026-10-03 09:40:00+08', 9902, '', '2026-10-06 10:50:00+08', NULL, NULL, '10.20.2.51', 1, 'DEV SEED 热敏标签打印机', '2026-10-03 09:40:00+08', 0, 0),
+    (9008, 'SF-PRT-002', '标签打印机-02', 'printer', 'Zebra', 'ZD421', '', 9105, 0, 'ENABLED', 'PENDING', '2026-10-06 13:00:00+08', NULL, 0, '', NULL, NULL, NULL, '', 1, 'DEV SEED 待激活打印机', '2026-10-06 11:10:00+08', 0, 0)
+ON CONFLICT DO NOTHING;
+
+-- ---- 14.2 设备配置（device_id 一机一配置；下发项 devices.md §7.3 九键）----
+INSERT INTO device_configs (id, device_id, config, version, created_at, created_by, updated_by)
+VALUES (9001, 9002, '{"scan_mode": "camera", "sound": true, "vibrate": true, "auto_focus": true, "continuous_scan": false, "scan_timeout_seconds": 30, "default_warehouse_id": 9103, "task_refresh_seconds": 60, "auto_lock_minutes": 10}'::jsonb, 3, '2026-10-05 09:00:00+08', 9901, 9901),
+       (9002, 9003, '{"scan_mode": "hardware", "sound": true, "vibrate": true, "auto_focus": false, "continuous_scan": true, "scan_timeout_seconds": 20, "default_warehouse_id": 9105, "task_refresh_seconds": 30, "auto_lock_minutes": 0}'::jsonb, 5, '2026-10-05 09:10:00+08', 9901, 9901),
+       (9003, 9005, '{"scan_mode": "hid", "sound": false, "vibrate": false, "auto_focus": false, "continuous_scan": true, "scan_timeout_seconds": 10, "default_warehouse_id": 9105, "task_refresh_seconds": 60, "auto_lock_minutes": 0}'::jsonb, 2, '2026-10-05 09:20:00+08', 9901, 9901),
+       (9004, 9007, '{"scan_mode": "hid", "sound": true, "vibrate": false, "auto_focus": false, "continuous_scan": false, "scan_timeout_seconds": 15, "default_warehouse_id": 9103, "task_refresh_seconds": 120, "auto_lock_minutes": 0}'::jsonb, 1, '2026-10-05 09:30:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ---- 14.3 设备运行日志（INFO/WARN/ERROR 三级别；append-only 设备端上报）----
+INSERT INTO device_logs (id, device_id, level, event_type, message, context, occurred_at, created_at)
+VALUES
+    (9001, 9002, 'INFO', 'BOOT', '设备启动完成，版本 1.2.0', '{"boot_ms": 1850}'::jsonb, '2026-10-06 08:00:00+08', '2026-10-06 08:00:05+08'),
+    (9002, 9002, 'INFO', 'CONFIG_SYNC', '配置已同步至版本 3', '{"config_version": 3}'::jsonb, '2026-10-06 08:01:00+08', '2026-10-06 08:01:02+08'),
+    (9003, 9002, 'WARN', 'BATTERY_LOW', '电量低于 20%，请及时充电', '{"battery": 18}'::jsonb, '2026-10-06 10:30:00+08', '2026-10-06 10:30:03+08'),
+    (9004, 9003, 'INFO', 'SCAN', '扫码成功 6901234000368', '{"symbology": "EAN13"}'::jsonb, '2026-10-06 11:20:00+08', '2026-10-06 11:20:01+08'),
+    (9005, 9003, 'ERROR', 'NETWORK', '网络请求超时，已重试 3 次', '{"endpoint": "/api/tasks", "timeout_ms": 5000}'::jsonb, '2026-10-06 11:22:00+08', '2026-10-06 11:22:30+08'),
+    (9006, 9005, 'INFO', 'SCAN', '扫码成功 REEL-01-11', '{"symbology": "CODE128"}'::jsonb, '2026-10-06 11:20:00+08', '2026-10-06 11:20:01+08'),
+    (9007, 9005, 'WARN', 'SCAN_SLOW', '单次识别耗时 820ms（阈值 500ms）', '{"duration_ms": 820}'::jsonb, '2026-10-06 11:21:00+08', '2026-10-06 11:21:01+08'),
+    (9008, 9007, 'ERROR', 'PRINT', '打印任务 PT-20261005-000002 缺纸失败', '{"print_no": "PT-20261005-000002"}'::jsonb, '2026-10-05 16:05:00+08', '2026-10-05 16:05:10+08')
+ON CONFLICT DO NOTHING;
+
+-- ---- 14.4 扫码审计（成功/失败、设备/Web HID 双轨；device_id NULL = Web HID 场景）----
+INSERT INTO scan_logs (id, device_id, device_code, user_id, username, ip, warehouse_id, raw_code, symbology,
+                       resolve_type, resolve_id, resolve_code, page, business_no, success, error_code, created_at)
+VALUES
+    (9001, 9003, 'SF-PDA-001', 9903, 'dev_shipper', '10.20.3.31', 9105, '6901234000368', 'EAN13', 'sku', 9436, 'SKU-E013-01', '/picking', 'OUT-20261004-000002', TRUE, '', '2026-10-06 11:20:00+08'),
+    (9002, 9005, 'SF-SCAN-001', 9903, 'dev_shipper', '10.20.3.41', 9105, 'REEL-01-11', 'CODE128', 'bin', 9970, 'REEL-01-11', '/checking', 'CH-20261004-000001', TRUE, '', '2026-10-06 11:20:30+08'),
+    (9003, 9003, 'SF-PDA-001', 9903, 'dev_shipper', '10.20.3.31', 9105, 'OUT-20261004-000002', 'CODE128', 'doc', 0, 'OUT-20261004-000002', '/picking', 'OUT-20261004-000002', TRUE, '', '2026-10-06 11:21:00+08'),
+    (9004, 9002, 'SF-PAD-001', 9902, 'dev_receiver', '10.20.2.21', 9103, '6901234000214', 'EAN13', 'sku', 9421, 'SKU-E001-01', '/pad/receive', 'IN-20261003-000002', TRUE, '', '2026-10-06 11:22:00+08'),
+    (9005, 9002, 'SF-PAD-001', 9902, 'dev_receiver', '10.20.2.21', 9103, 'B20260928-E001', 'CODE128', 'batch', 9601, 'B20260928-E001', '/pad/receive', 'IN-20261003-000002', TRUE, '', '2026-10-06 11:22:20+08'),
+    (9006, 9002, 'SF-PAD-001', 9902, 'dev_receiver', '10.20.2.21', 9103, 'SN-D001-0001', 'CODE128', 'serial', 9701, 'SN-D001-0001', '/pad/receive', '', TRUE, '', '2026-10-06 11:22:40+08'),
+    (9007, 9002, 'SF-PAD-001', 9902, 'dev_receiver', '10.20.2.21', 9103, '9999999999999', 'EAN13', '', 0, '', '/pad/receive', '', FALSE, 'BARCODE_NOT_FOUND', '2026-10-06 11:23:00+08'),
+    (9008, NULL, NULL, 9901, 'dev_manager', '10.20.1.11', 9103, 'IN-20261003-000002', 'CODE128', 'doc', 0, 'IN-20261003-000002', '/inbound', 'IN-20261003-000002', TRUE, '', '2026-10-06 11:24:00+08'),
+    (9009, NULL, NULL, 9901, 'dev_manager', '10.20.1.11', 9103, 'BAD-CODE-0001', '', '', 0, '', '/inventory/stock', '', FALSE, 'UNKNOWN_BARCODE', '2026-10-06 11:25:00+08'),
+    (9010, 9003, 'SF-PDA-001', 9903, 'dev_shipper', '10.20.3.31', 9105, 'CK-20261005-000002', 'CODE128', 'doc', 0, 'CK-20261005-000002', '/counts', 'CK-20261005-000002', TRUE, '', '2026-10-06 11:26:00+08')
+ON CONFLICT DO NOTHING;
+
+-- ---- 14.5 App 版本（DRAFT/PUBLISHED/DEPRECATED 三态；架构预留表）----
+INSERT INTO app_versions (id, platform, version_code, version_name, release_notes, file_url, min_supported_code,
+                          force_update, status, published_at, created_at, created_by, updated_by)
+VALUES (9001, 'android', 100, '1.0.0', '首个正式版：收货/上架/拣货/复核/盘点五作业流', 'https://demo.dev/apk/stockflow-scan-1.0.0.apk', 100, FALSE, 'DEPRECATED', '2026-09-01 10:00:00+08', '2026-09-01 09:00:00+08', 9901, 9901),
+       (9002, 'android', 120, '1.2.0', '新增连续扫码与离线任务缓存', 'https://demo.dev/apk/stockflow-scan-1.2.0.apk', 100, FALSE, 'PUBLISHED', '2026-10-01 10:00:00+08', '2026-10-01 09:00:00+08', 9901, 9901),
+       (9003, 'android', 130, '1.3.0', '扫码性能优化（草稿，待发布）', '', 120, FALSE, 'DRAFT', NULL, '2026-10-06 10:00:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ---- 15.1 文件中心登记（各业务模块覆盖；物理文件不在演示库，下载端 404 属预期）----
+INSERT INTO files (id, file_name, stored_name, storage_path, mime_type, file_type, size_bytes, module, business_no,
+                   uploader_id, uploader_name, expires_at, created_at, created_by, updated_by)
+VALUES
+    (9001, '商品导入模板.xlsx', 'a1b2c3d4e5f60718293a4b5c6d7e8f90.xlsx', '202610/a1b2c3d4e5f60718293a4b5c6d7e8f90.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', 18432, 'PRODUCT', '', 9901, '王经理', NULL, '2026-10-04 09:00:00+08', 9901, 9901),
+    (9002, '商品导入_错误明细.xlsx', 'b2c3d4e5f60718293a4b5c6d7e8f9012.xlsx', '202610/b2c3d4e5f60718293a4b5c6d7e8f9012.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', 9216, 'PRODUCT', 'IMP-20261004-000001', 9901, '王经理', '2026-11-03 09:00:00+08', '2026-10-04 09:05:00+08', 9901, 9901),
+    (9003, '库存导出_20261005.xlsx', 'c3d4e5f60718293a4b5c6d7e8f901234.xlsx', '202610/c3d4e5f60718293a4b5c6d7e8f901234.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', 65536, 'INVENTORY', 'EXP-20261005-000001', 9901, '王经理', '2026-11-04 10:00:00+08', '2026-10-05 10:00:00+08', 9901, 9901),
+    (9004, '彩盒受潮取证.jpg', 'd4e5f60718293a4b5c6d7e8f90123456.jpg', '202610/d4e5f60718293a4b5c6d7e8f90123456.jpg', 'image/jpeg', 'jpg', 348160, 'EXCEPTION', 'EX-20261006-000001', 9904, '赵盘点', NULL, '2026-10-06 09:25:00+08', 9904, 9904),
+    (9005, '供应商报价单.pdf', 'e5f60718293a4b5c6d7e8f9012345678.pdf', '202610/e5f60718293a4b5c6d7e8f9012345678.pdf', 'application/pdf', 'pdf', 512000, 'SUPPLIER', 'SUP-E003', 9901, '王经理', NULL, '2026-10-03 14:00:00+08', 9901, 9901),
+    (9006, '来料检验标准.txt', 'f60718293a4b5c6d7e8f901234567890.txt', '202610/f60718293a4b5c6d7e8f901234567890.txt', 'text/plain; charset=utf-8', 'txt', 4096, 'QUALITY', 'QC-20261002-000001', 9904, '赵盘点', NULL, '2026-10-02 18:10:00+08', 9904, 9904),
+    (9007, '设备离线排查记录.zip', '0718293a4b5c6d7e8f90123456789012.zip', '202610/0718293a4b5c6d7e8f90123456789012.zip', 'application/zip', 'zip', 1048576, 'devices', 'SF-PDA-002', 9901, '王经理', '2026-11-05 11:00:00+08', '2026-10-05 11:00:00+08', 9901, 9901),
+    (9008, '销售订单导入模板.xlsx', '18293a4b5c6d7e8f9012345678901234.xlsx', '202610/18293a4b5c6d7e8f9012345678901234.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'xlsx', 16384, 'SALES_ORDER', '', 9903, '陈发货', NULL, '2026-10-05 15:00:00+08', 9903, 9903)
+ON CONFLICT DO NOTHING;
+
+-- ---- 15.2 导入任务（六态覆盖；import_type 九值取样）----
+INSERT INTO import_tasks (id, import_no, import_type, status, source_file_id, total_rows, valid_rows, error_rows,
+                          success_rows, failed_rows, error_file_id, error_message, started_at, finished_at,
+                          created_at, created_by, updated_by)
+VALUES
+    (9001, 'IMP-20261004-000001', 'PRODUCT', 'PARTIAL_SUCCESS', 9001, 50, 47, 3, 47, 0, 9002, '3 行校验失败（分类编码不存在）', '2026-10-04 09:05:00+08', '2026-10-04 09:06:20+08', '2026-10-04 09:00:00+08', 9901, 9901),
+    (9002, 'IMP-20261005-000002', 'SUPPLIER', 'SUCCESS', 9005, 12, 12, 0, 12, 0, 0, '', '2026-10-05 10:10:00+08', '2026-10-05 10:10:40+08', '2026-10-05 10:05:00+08', 9901, 9901),
+    (9003, 'IMP-20261005-000003', 'INITIAL_INVENTORY', 'VALIDATED', 9003, 30, 30, 0, 0, 0, 0, '', NULL, NULL, '2026-10-05 14:00:00+08', 9901, 9901),
+    (9004, 'IMP-20261006-000004', 'SKU', 'PARSED', 9008, 25, 0, 0, 0, 0, 0, '', NULL, NULL, '2026-10-06 09:30:00+08', 9903, 9903),
+    (9005, 'IMP-20261006-000005', 'SALES_ORDER', 'EXECUTING', 9008, 8, 8, 0, 5, 0, 0, '', '2026-10-06 10:00:00+08', NULL, '2026-10-06 09:50:00+08', 9903, 9903),
+    (9006, 'IMP-20261006-000006', 'CUSTOMER', 'FAILED', 0, 0, 0, 0, 0, 0, 0, '文件解析失败：表头缺少「客户编码」列', NULL, '2026-10-06 10:20:00+08', '2026-10-06 10:15:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO import_task_rows (id, task_id, row_no, raw, parsed, status, errors, batch_no, created_at, created_by, updated_by)
+VALUES
+    (9001, 9001, 1, '{"code": "P-NEW-001", "name": "演示新商品A", "category": "P-E01"}'::jsonb, '{"code": "P-NEW-001", "name": "演示新商品A"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-04 09:05:00+08', 9901, 9901),
+    (9002, 9001, 2, '{"code": "P-NEW-002", "name": "演示新商品B", "category": "P-E01"}'::jsonb, '{"code": "P-NEW-002", "name": "演示新商品B"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-04 09:05:00+08', 9901, 9901),
+    (9003, 9001, 3, '{"code": "P-NEW-003", "name": "演示新商品C", "category": "NOT-EXIST"}'::jsonb, '{"code": "P-NEW-003", "name": "演示新商品C"}'::jsonb, 'INVALID', '[{"row": 3, "column": "category", "message": "分类编码不存在"}]'::jsonb, 1, '2026-10-04 09:05:00+08', 9901, 9901),
+    (9004, 9001, 4, '{"code": "P-NEW-004", "name": "演示新商品D", "category": "P-E01"}'::jsonb, '{"code": "P-NEW-004", "name": "演示新商品D"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-04 09:05:00+08', 9901, 9901),
+    (9005, 9005, 1, '{"so_no": "SO-IMP-001", "customer": "CUS-E001", "sku": "SKU-E013-01", "qty": "5"}'::jsonb, '{"so_no": "SO-IMP-001", "qty": 5}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-06 10:00:00+08', 9903, 9903),
+    (9006, 9005, 2, '{"so_no": "SO-IMP-001", "customer": "CUS-E001", "sku": "SKU-E015-01", "qty": "10"}'::jsonb, '{"so_no": "SO-IMP-001", "qty": 10}'::jsonb, 'QUEUED', NULL, 1, '2026-10-06 10:00:00+08', 9903, 9903),
+    (9007, 9005, 3, '{"so_no": "SO-IMP-002", "customer": "CUS-E002", "sku": "SKU-E014-01", "qty": "3"}'::jsonb, '{"so_no": "SO-IMP-002", "qty": 3}'::jsonb, 'QUEUED', NULL, 1, '2026-10-06 10:00:00+08', 9903, 9903),
+    (9008, 9003, 1, '{"wh": "WH-E01", "bin": "REEL-01-22", "sku": "SKU-E001-01", "qty": "50"}'::jsonb, '{"qty": 50}'::jsonb, 'VALID', NULL, 0, '2026-10-05 14:00:00+08', 9901, 9901),
+    (9009, 9004, 1, '{"code": "SKU-NEW-001", "product": "P-NEW-001"}'::jsonb, '{"code": "SKU-NEW-001"}'::jsonb, 'RAW', NULL, 0, '2026-10-06 09:30:00+08', 9903, 9903),
+    (9010, 9002, 1, '{"code": "SUP-NEW-001", "name": "演示供应商"}'::jsonb, '{"code": "SUP-NEW-001"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-05 10:10:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ---- 15.3 导出任务（五态覆盖；module 十六值取样）----
+INSERT INTO export_tasks (id, export_no, module, scope, params, status, progress, total_rows, file_id,
+                          error_message, started_at, finished_at, created_at, created_by, updated_by)
+VALUES
+    (9001, 'EXP-20261005-000001', 'INVENTORY', 'BY_FILTER', '{"filters": {"warehouse_id": "9103"}}'::jsonb, 'SUCCESS', 100, 42, 9003, '', '2026-10-05 10:00:00+08', '2026-10-05 10:00:12+08', '2026-10-05 09:59:00+08', 9901, 9901),
+    (9002, 'EXP-20261005-000002', 'INVENTORY_LEDGER', 'TIME_RANGE', '{"time_from": "2026-10-01 00:00:00", "time_to": "2026-10-05 23:59:59"}'::jsonb, 'SUCCESS', 100, 128, 9003, '', '2026-10-05 10:05:00+08', '2026-10-05 10:05:30+08', '2026-10-05 10:04:00+08', 9901, 9901),
+    (9003, 'EXP-20261006-000003', 'EXCEPTION', 'ALL', '{}'::jsonb, 'PROCESSING', 60, 0, 0, '', '2026-10-06 11:00:00+08', NULL, '2026-10-06 10:59:00+08', 9904, 9904),
+    (9004, 'EXP-20261006-000004', 'PURCHASE_ORDER', 'SELECTED', '{"ids": ["1", "2", "3"]}'::jsonb, 'QUEUED', 0, 0, 0, '', NULL, NULL, '2026-10-06 11:10:00+08', 9901, 9901),
+    (9005, 'EXP-20261006-000005', 'REPORT', 'CURRENT_PAGE', '{"page": 1, "page_size": 50}'::jsonb, 'FAILED', 30, 0, 0, '导出中断：报表数据源超时', '2026-10-06 11:20:00+08', '2026-10-06 11:20:45+08', '2026-10-06 11:19:00+08', 9901, 9901),
+    (9006, 'EXP-20261006-000006', 'TRANSFER', 'ALL', '{}'::jsonb, 'PARTIAL_SUCCESS', 100, 3, 9003, '部分行导出失败（1 行数据异常）', '2026-10-06 11:30:00+08', '2026-10-06 11:30:08+08', '2026-10-06 11:29:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ---- 16.1 定时任务执行日志（五任务注册表；SCHEDULED/MANUAL/SKIPPED 三触发方式）----
+-- scheduled_jobs 注册表行由服务启动 Scheduler.UpsertRegistry 幂等补齐（sysops/store.go），
+-- 本段只补执行日志（scheduled_job_runs）——job_code 与冻结注册表同源。
+INSERT INTO scheduled_job_runs (id, job_code, "trigger", start_at, end_at, success, duration_ms, message, created_at, created_by, updated_by)
+VALUES
+    (9001, 'inventory_low_stock_scan', 'SCHEDULED', '2026-10-06 11:00:00+08', '2026-10-06 11:00:02+08', TRUE, 2140, '扫描完成：低库存 3 条，新增通知 3 条', '2026-10-06 11:00:00+08', 0, 0),
+    (9002, 'inventory_low_stock_scan', 'SCHEDULED', '2026-10-06 10:50:00+08', '2026-10-06 10:50:02+08', TRUE, 1980, '扫描完成：低库存 2 条，新增通知 2 条', '2026-10-06 10:50:00+08', 0, 0),
+    (9003, 'inventory_expiry_scan', 'SCHEDULED', '2026-10-06 06:00:00+08', '2026-10-06 06:00:03+08', TRUE, 3260, '扫描完成：临期 2 批、已过期 1 批', '2026-10-06 06:00:00+08', 0, 0),
+    (9004, 'inventory_stagnant_scan', 'SCHEDULED', '2026-10-06 06:00:05+08', '2026-10-06 06:00:07+08', TRUE, 2870, '扫描完成：积压 30 天档 1 条', '2026-10-06 06:00:05+08', 0, 0),
+    (9005, 'task_timeout_scan', 'SCHEDULED', '2026-10-06 11:00:00+08', '2026-10-06 11:00:01+08', TRUE, 860, '扫描完成：拣货超时 1 条，已通知', '2026-10-06 11:00:00+08', 0, 0),
+    (9006, 'file_cleanup', 'SCHEDULED', '2026-10-06 03:30:00+08', '2026-10-06 03:30:04+08', TRUE, 4120, '清理完成：过期文件 2 个', '2026-10-06 03:30:00+08', 0, 0),
+    (9007, 'inventory_expiry_scan', 'MANUAL', '2026-10-05 15:00:00+08', '2026-10-05 15:00:03+08', TRUE, 3110, '手动触发：临期 3 批', '2026-10-05 15:00:00+08', 9901, 9901),
+    (9008, 'file_cleanup', 'MANUAL', '2026-10-05 16:00:00+08', '2026-10-05 16:00:06+08', FALSE, 6020, '失败：存储目录不可写（/data/files/202609）', '2026-10-05 16:00:00+08', 9901, 9901),
+    (9009, 'inventory_low_stock_scan', 'SKIPPED', '2026-10-05 16:10:00+08', '2026-10-05 16:10:00+08', FALSE, 0, '防重入跳过：上一周期仍在执行', '2026-10-05 16:10:00+08', 0, 0),
+    (9010, 'task_timeout_scan', 'SCHEDULED', '2026-10-06 10:00:00+08', '2026-10-06 10:00:01+08', TRUE, 790, '扫描完成：无超时任务', '2026-10-06 10:00:00+08', 0, 0)
+ON CONFLICT DO NOTHING;
+
+-- ---- 16.2 站内通知（六类型 × 已读/未读；user_id 恒非空，dedup_key 复合收件人）----
+INSERT INTO notifications (id, user_id, type, title, content, dedup_key, read, read_at, created_at, created_by, updated_by)
+VALUES
+    (9001, 9901, 'STOCK_ALERT', '低库存预警：SKU-E011-01', '电子原料仓 SKU-E011-01 可用量 0 低于安全库存 2，请及时补货', 'lowstock:20261006:SKU-E011-01:9103:9901', FALSE, NULL, '2026-10-06 11:00:02+08', 0, 0),
+    (9002, 9901, 'STOCK_ALERT', '低库存预警：SKU-E010-01', '电子原料仓 SKU-E010-01 可用量 18 低于安全库存 10 的 2 倍线，请关注', 'lowstock:20261006:SKU-E010-01:9103:9901', TRUE, '2026-10-06 11:05:00+08', '2026-10-06 11:00:02+08', 0, 0),
+    (9003, 9901, 'EXPIRY_ALERT', '效期预警：批次 B20260514-E010', '锡膏批次 B20260514-E010 已过期，请隔离处置', 'expiry:20261006:B20260514-E010:expired:9901', FALSE, NULL, '2026-10-06 06:00:03+08', 0, 0),
+    (9004, 9902, 'EXPIRY_ALERT', '效期预警：批次 B20260918-E012', 'ESD 托盘批次 B20260918-E012 距到期 7 天，请优先使用', 'expiry:20261006:B20260918-E012:d7:9902', FALSE, NULL, '2026-10-06 06:00:03+08', 0, 0),
+    (9005, 9901, 'EXCEPTION', '异常单待分派：EX-20261006-000002', '收货异常「到货连接器外箱破损 1 箱」待分派处理人', 'exception:EX-20261006-000002:9901', FALSE, NULL, '2026-10-06 10:00:00+08', 0, 0),
+    (9006, 9902, 'EXCEPTION', '异常单已分派：EX-20261006-000001', '库存异常「成品彩盒受潮 50 个」已分派给你，请尽快处理', 'exception:EX-20261006-000001:9902', TRUE, '2026-10-06 09:40:00+08', '2026-10-06 09:30:00+08', 0, 0),
+    (9007, 9901, 'APPROVAL', '待审批：采购订单 PO-20261004-000003', 'PCB V1.2 批量板 + 锡膏补库 待你审批', 'approval:PO-20261004-000003:9901', FALSE, NULL, '2026-10-04 16:02:00+08', 0, 0),
+    (9008, 9901, 'APPROVAL', '待审批：销售订单 SO-20261005-000003', '样机 + 铺货 待你审批', 'approval:SO-20261005-000003:9901', TRUE, '2026-10-05 14:10:00+08', '2026-10-05 14:05:00+08', 0, 0),
+    (9009, 9903, 'TASK', '拣货任务超时提醒', '拣货任务 PK-20261004-000002 已超过 4 小时未完成，请尽快处理', 'tasktimeout:PK-20261004-000002:9903', FALSE, NULL, '2026-10-06 11:00:01+08', 0, 0),
+    (9010, 9902, 'TASK', '上架任务待领取', '入库单 IN-20261003-000002 有 1 条上架任务待领取', 'task:putaway:IN-20261003-000002:9902', TRUE, '2026-10-04 10:05:00+08', '2026-10-04 10:00:00+08', 0, 0),
+    (9011, 9901, 'SYSTEM', '系统公告：版本升级通知', 'StockFlow 将于 2026-10-08 02:00 进行版本升级，预计停机 30 分钟', 'system:20261006:upgrade:9901', FALSE, NULL, '2026-10-06 09:00:00+08', 0, 0),
+    (9012, 9905, 'SYSTEM', '欢迎使用 StockFlow', '演示账号已开通，可查看库存与报表数据', 'system:20261002:welcome:9905', TRUE, '2026-10-02 09:30:00+08', '2026-10-02 09:00:00+08', 0, 0)
+ON CONFLICT DO NOTHING;
+
+-- ---- 16.3 备份登记（REQUESTED/RUNNING/SUCCESS/FAILED 四态；混合模式）----
+-- 注意：uk_backup_records_inflight 部分唯一索引限制同 trigger 至多 1 条在途
+-- （REQUESTED/RUNNING）——AUTO 与 MANUAL 各留 1 条在途即上限。
+INSERT INTO backup_records (id, file_name, file_path, size_bytes, "trigger", status, message,
+                            started_at, finished_at, created_at, created_by, updated_by)
+VALUES
+    (9001, 'stockflow_20261004_023000.dump', 'backups/stockflow_20261004_023000.dump', 48234496, 'AUTO', 'SUCCESS', '自动备份成功', '2026-10-04 02:30:00+08', '2026-10-04 02:32:10+08', '2026-10-04 02:30:00+08', 0, 0),
+    (9002, 'stockflow_20261005_023000.dump', 'backups/stockflow_20261005_023000.dump', 48992256, 'AUTO', 'SUCCESS', '自动备份成功', '2026-10-05 02:30:00+08', '2026-10-05 02:32:25+08', '2026-10-05 02:30:00+08', 0, 0),
+    (9003, 'stockflow_manual_20261005.dump', 'backups/stockflow_manual_20261005.dump', 49012736, 'MANUAL', 'SUCCESS', '管理端手动备份成功', '2026-10-05 11:00:00+08', '2026-10-05 11:02:05+08', '2026-10-05 10:59:00+08', 9901, 9901),
+    (9004, 'stockflow_manual_20261003.dump', 'backups/stockflow_manual_20261003.dump', 0, 'MANUAL', 'FAILED', '失败：磁盘剩余空间不足', '2026-10-03 18:00:00+08', '2026-10-03 18:00:35+08', '2026-10-03 17:59:00+08', 9901, 9901),
+    (9005, '', '', 0, 'AUTO', 'RUNNING', '自动备份执行中', '2026-10-06 02:30:00+08', NULL, '2026-10-06 02:30:00+08', 0, 0),
+    (9006, '', '', 0, 'MANUAL', 'REQUESTED', '已登记，等待部署侧执行器拾取', NULL, NULL, '2026-10-06 11:40:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ============ 17) 各单据缺失状态补全（状态机全值域覆盖） ============
+--
+-- §11 已交付"主链走通"的单据（完成/部分/待审/草稿）；本段补齐各状态机剩余态，使每个
+--   单据列表页的「状态」筛选每个选项都有命中行。新增单号统一走 20261006 日期段
+--   （自 000001 起连续编号），计数器推进见 §17.9。
+
+-- ---- 17.1 采购订单补 3 态（APPROVED / RECEIVED_ALL / CANCELLED）----
+INSERT INTO purchase_orders (po_no, supplier_id, warehouse_id, total_amount, status, approved_by, approved_at,
+                             received_at, completed_at, cancelled_at, remark, created_at, created_by, updated_by)
+SELECT v.po_no, sup.id, w.id, v.total, v.status, v.approved_by, v.approved_at, v.received_at, v.completed_at,
+       v.cancelled_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('PO-20261006-000001', 'SUP-E002', 'WH-E01', 5600.0000::numeric(18, 4), 'APPROVED', 9901, '2026-10-06 09:10:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '已审核待收货：FPC 补库', '2026-10-06 09:00:00+08'::timestamptz),
+             ('PO-20261006-000002', 'SUP-E003', 'WH-E01', 7900.0000::numeric(18, 4), 'RECEIVED_ALL', 9901, '2026-10-06 09:30:00+08'::timestamptz, '2026-10-06 14:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '已全收待质检上架：PCB 板', '2026-10-06 09:20:00+08'::timestamptz),
+             ('PO-20261006-000003', 'SUP-E004', 'WH-E03', 1200.0000::numeric(18, 4), 'CANCELLED', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '2026-10-06 10:30:00+08'::timestamptz, '供应商无法供货，采购取消', '2026-10-06 10:00:00+08'::timestamptz)) AS v(po_no, sup_code, wh_code, total, status, approved_by, approved_at, received_at, completed_at, cancelled_at, remark, created_at)
+JOIN suppliers sup ON sup.code = v.sup_code AND sup.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (po_no) DO NOTHING;
+
+INSERT INTO purchase_order_items (po_id, line_no, sku_id, qty_ordered, qty_received, qty_rejected, qty_putaway,
+                                  price, amount, remark, created_at, created_by)
+SELECT p.id, v.line_no, sku.id, v.qty, v.received, 0, v.putaway, v.price, v.qty * v.price, '', v.created_at, 9901
+FROM (VALUES ('PO-20261006-000001', 1, 'SKU-E007-01', 300.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 2.2000::numeric(18, 4), '2026-10-06 09:00:00+08'::timestamptz),
+             ('PO-20261006-000001', 2, 'SKU-E008-01', 50.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 38.0000::numeric(18, 4), '2026-10-06 09:00:00+08'::timestamptz),
+             ('PO-20261006-000002', 1, 'SKU-E009-01', 500.0000::numeric(18, 4), 500.0000::numeric(18, 4), 500.0000::numeric(18, 4), 15.8000::numeric(18, 4), '2026-10-06 09:20:00+08'::timestamptz),
+             ('PO-20261006-000003', 1, 'SKU-E015-01', 200.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 1.8000::numeric(18, 4), '2026-10-06 10:00:00+08'::timestamptz)) AS v(po_no, line_no, sku_code, qty, received, putaway, price, created_at)
+JOIN purchase_orders p ON p.po_no = v.po_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.2 入库单补 5 态（DRAFT / RECEIVING / AWAITING_QC / CLOSED / CANCELLED）----
+INSERT INTO inbound_orders (inbound_no, source_type, source_no, warehouse_id, status, received_at, inspected_at,
+                            putaway_at, completed_at, remark, created_at, created_by, updated_by)
+SELECT v.inbound_no, v.source_type, v.source_no, w.id, v.status, v.received_at, v.inspected_at,
+       v.putaway_at, v.completed_at, v.remark, v.created_at, 9902, 9902
+FROM (VALUES ('IN-20261006-000001', 'PURCHASE', 'PO-20261006-000001', 'WH-E01', 'DRAFT', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '到货登记草稿（未提交）', '2026-10-06 09:40:00+08'::timestamptz),
+             ('IN-20261006-000002', 'PURCHASE', 'PO-20261006-000002', 'WH-E01', 'RECEIVING', '2026-10-06 14:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '收货中：PCB 板清点中', '2026-10-06 13:50:00+08'::timestamptz),
+             ('IN-20261006-000003', 'PURCHASE', 'PO-20261002-000001', 'WH-E01', 'AWAITING_QC', '2026-10-06 15:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '已收货待质检', '2026-10-06 14:50:00+08'::timestamptz),
+             ('IN-20261006-000004', 'PURCHASE', 'PO-20261002-000001', 'WH-E01', 'CLOSED', '2026-10-02 14:30:00+08'::timestamptz, '2026-10-03 10:30:00+08'::timestamptz, '2026-10-03 17:00:00+08'::timestamptz, '2026-10-03 17:30:00+08'::timestamptz, '短装差额关闭（供应商不再补货）', '2026-10-02 14:10:00+08'::timestamptz),
+             ('IN-20261006-000005', 'OTHER', '', 'WH-E01', 'CANCELLED', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '重复登记，作废', '2026-10-06 11:00:00+08'::timestamptz)) AS v(inbound_no, source_type, source_no, wh_code, status, received_at, inspected_at, putaway_at, completed_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (inbound_no) DO NOTHING;
+
+INSERT INTO inbound_items (inbound_id, line_no, sku_id, qty, qty_received, qty_inspected, qty_putaway, remark, created_at, created_by)
+SELECT i.id, v.line_no, sku.id, v.qty, v.received, v.inspected, v.putaway, '', i.created_at, 9902
+FROM (VALUES ('IN-20261006-000001', 1, 'SKU-E007-01', 300.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('IN-20261006-000002', 1, 'SKU-E009-01', 500.0000::numeric(18, 4), 200.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('IN-20261006-000003', 1, 'SKU-E001-01', 40.0000::numeric(18, 4), 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('IN-20261006-000004', 1, 'SKU-E002-01', 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 25.0000::numeric(18, 4), 25.0000::numeric(18, 4))) AS v(inbound_no, line_no, sku_code, qty, received, inspected, putaway)
+JOIN inbound_orders i ON i.inbound_no = v.inbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.3 上架任务补 3 态（IN_PROGRESS / PAUSED / CANCELLED）----
+INSERT INTO putaway_tasks (putaway_no, inbound_no, receipt_no, sku_id, batch_id, serial_no, qty, from_state,
+                           target_warehouse_id, target_zone_id, target_shelf_id, target_bin_id, status,
+                           claimed_by, claimed_at, completed_at, remark, created_at, created_by)
+SELECT v.putaway_no, v.inbound_no, v.receipt_no, sku.id, COALESCE(bat.id, 0), '',
+       v.qty, 'available', w.id, b.zone_id, b.shelf_id, b.id, v.status,
+       CASE WHEN v.status IN ('IN_PROGRESS', 'PAUSED') THEN 9902 ELSE 0 END,
+       CASE WHEN v.status IN ('IN_PROGRESS', 'PAUSED') THEN v.created_at ELSE NULL END,
+       NULL::timestamptz, v.remark, v.created_at, 9902
+FROM (VALUES ('PW-20261006-000001', 'IN-20261003-000002', 'RC-20261003-000001', 'SKU-E006-01', 'B20260926-E006', 200.0000::numeric(18, 4), 'IN_PROGRESS', 'WH-E01', 'PK-01-12', '上架中：已扫 120/200', '2026-10-06 10:00:00+08'::timestamptz),
+             ('PW-20261006-000002', 'IN-20261003-000002', 'RC-20261003-000001', 'SKU-E006-01', 'B20260926-E006', 200.0000::numeric(18, 4), 'PAUSED', 'WH-E01', 'PK-01-12', '已暂停：目标库位待清理', '2026-10-06 10:30:00+08'::timestamptz),
+             ('PW-20261006-000003', 'IN-20261006-000005', '', 'SKU-E007-01', NULL, 10.0000::numeric(18, 4), 'CANCELLED', 'WH-E01', 'REEL-01-21', '入库单作废，任务取消', '2026-10-06 11:10:00+08'::timestamptz)) AS v(putaway_no, inbound_no, receipt_no, sku_code, batch_no, qty, status, wh_code, bin_code, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (putaway_no) DO NOTHING;
+
+-- ---- 17.4 质检单补 2 态 + 结果值域（PENDING / INSPECTING + 部分合格/不合格）----
+INSERT INTO quality_orders (qc_no, source_type, source_no, warehouse_id, inspection_type, status,
+                            qty_inspected, qty_qualified, qty_defective, result, inspector_id, inspector_name,
+                            inspected_at, remark, created_at, created_by)
+SELECT v.qc_no, v.source_type, v.source_no, w.id, v.inspection_type, v.status,
+       v.qty_inspected, v.qty_qualified, v.qty_defective, v.result,
+       CASE WHEN v.status = 'COMPLETED' THEN 9904 ELSE 0 END,
+       CASE WHEN v.status = 'COMPLETED' THEN '赵盘点' ELSE '' END,
+       v.inspected_at, v.remark, v.created_at, 9901
+FROM (VALUES ('QC-20261006-000001', 'INBOUND', 'IN-20261006-000003', 'WH-E01', '抽检', 'PENDING', 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), '', NULL::timestamptz, '待检：来料 40 盘', '2026-10-06 15:00:00+08'::timestamptz),
+             ('QC-20261006-000002', 'INBOUND', 'IN-20261006-000002', 'WH-E01', '全检', 'INSPECTING', 120.0000::numeric(18, 4), 118.0000::numeric(18, 4), 2.0000::numeric(18, 4), '', '2026-10-06 15:30:00+08'::timestamptz, '全检进行中：PCB 板 120/500', '2026-10-06 15:10:00+08'::timestamptz),
+             ('QC-20261006-000003', 'INBOUND', 'IN-20261003-000002', 'WH-E01', '全检', 'COMPLETED', 400.0000::numeric(18, 4), 397.0000::numeric(18, 4), 3.0000::numeric(18, 4), '部分合格', '2026-10-04 09:40:00+08'::timestamptz, '全检完成：3 个端子氧化判不合格', '2026-10-04 09:00:00+08'::timestamptz)) AS v(qc_no, source_type, source_no, wh_code, inspection_type, status, qty_inspected, qty_qualified, qty_defective, result, inspected_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (qc_no) DO NOTHING;
+
+INSERT INTO quality_items (qc_id, line_no, sku_id, batch_no, qty_inspected, qty_qualified, qty_defective, remark, created_at, created_by)
+SELECT q.id, v.line_no, sku.id, v.batch_no, v.qty, v.qualified, v.defective, '', q.created_at, 9901
+FROM (VALUES ('QC-20261006-000001', 1, 'SKU-E001-01', 'B20260928-E001', 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('QC-20261006-000002', 1, 'SKU-E009-01', 'B20260915-E003', 120.0000::numeric(18, 4), 118.0000::numeric(18, 4), 2.0000::numeric(18, 4)),
+             ('QC-20261006-000003', 1, 'SKU-E006-01', 'B20260926-E006', 400.0000::numeric(18, 4), 397.0000::numeric(18, 4), 3.0000::numeric(18, 4))) AS v(qc_no, line_no, sku_code, batch_no, qty, qualified, defective)
+JOIN quality_orders q ON q.qc_no = v.qc_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.5 销售订单补 5 态（DRAFT / APPROVED / SHIPPED_ALL / REJECTED / CANCELLED）----
+INSERT INTO sales_orders (so_no, customer_id, warehouse_id, shipping_address, delivery_method, total_amount,
+                          status, approved_by, approved_at, shipped_at, completed_at, cancelled_at, remark,
+                          created_at, created_by, updated_by)
+SELECT v.so_no, cus.id, w.id, cus.shipping_address, v.delivery_method, v.total, v.status, v.approved_by,
+       v.approved_at, v.shipped_at, v.completed_at, v.cancelled_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('SO-20261006-000001', 'CUS-E001', 'WH-E03', '物流专线', 1290.0000::numeric(18, 4), 'DRAFT', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '草稿：10 台白温控器', '2026-10-06 09:00:00+08'::timestamptz),
+             ('SO-20261006-000002', 'CUS-E003', 'WH-E03', '快递', 2720.0000::numeric(18, 4), 'APPROVED', 9901, '2026-10-06 10:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '已审核待分配：40 台插座', '2026-10-06 09:40:00+08'::timestamptz),
+             ('SO-20261006-000003', 'CUS-E002', 'WH-E03', '物流专线', 1554.0000::numeric(18, 4), 'SHIPPED_ALL', 9901, '2026-10-06 10:20:00+08'::timestamptz, '2026-10-06 15:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '已全发待签收', '2026-10-06 10:10:00+08'::timestamptz),
+             ('SO-20261006-000004', 'CUS-E001', 'WH-E03', '快递', 645.0000::numeric(18, 4), 'REJECTED', 9901, '2026-10-06 11:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '审核驳回：客户信用额度不足', '2026-10-06 10:40:00+08'::timestamptz),
+             ('SO-20261006-000005', 'CUS-E002', 'WH-E03', '快递', 900.0000::numeric(18, 4), 'CANCELLED', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '2026-10-06 11:30:00+08'::timestamptz, '客户取消订单', '2026-10-06 11:10:00+08'::timestamptz)) AS v(so_no, cus_code, wh_code, delivery_method, total, status, approved_by, approved_at, shipped_at, completed_at, cancelled_at, remark, created_at)
+JOIN customers cus ON cus.code = v.cus_code AND cus.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (so_no) DO NOTHING;
+
+INSERT INTO sales_order_items (so_id, line_no, sku_id, qty, price, amount, qty_allocated, qty_shipped, remark, created_at, created_by)
+SELECT so.id, v.line_no, sku.id, v.qty, v.price, v.qty * v.price, v.allocated, v.shipped, '', so.created_at, 9901
+FROM (VALUES ('SO-20261006-000001', 1, 'SKU-E013-01', 10.0000::numeric(18, 4), 129.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('SO-20261006-000002', 1, 'SKU-E014-01', 40.0000::numeric(18, 4), 59.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('SO-20261006-000002', 2, 'SKU-E015-01', 200.0000::numeric(18, 4), 1.8000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('SO-20261006-000003', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 129.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4)),
+             ('SO-20261006-000004', 1, 'SKU-E014-01', 10.0000::numeric(18, 4), 59.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('SO-20261006-000005', 1, 'SKU-E013-02', 7.0000::numeric(18, 4), 129.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4))) AS v(so_no, line_no, sku_code, qty, price, allocated, shipped)
+JOIN sales_orders so ON so.so_no = v.so_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.6 出库单补 8 态 + 类型值域（PENDING_ALLOCATE / ALLOCATED / PICKING / PICKED / CHECKED / PACKED / CANCELLED / CLOSED）----
+INSERT INTO outbound_orders (outbound_no, so_no, type, warehouse_id, status, picked_at, checked_at, packed_at,
+                             shipped_at, remark, created_at, created_by, updated_by)
+SELECT v.outbound_no, v.so_no, v.type, w.id, v.status, v.picked_at, v.checked_at, v.packed_at, v.shipped_at,
+       v.remark, v.created_at, 9903, 9903
+FROM (VALUES ('OUT-20261006-000001', 'SO-20261006-000002', '销售出库', 'WH-E03', 'PENDING_ALLOCATE', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '待分配库存', '2026-10-06 10:05:00+08'::timestamptz),
+             ('OUT-20261006-000002', 'SO-20261006-000002', '销售出库', 'WH-E03', 'ALLOCATED', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '已分配，待拣货', '2026-10-06 10:10:00+08'::timestamptz),
+             ('OUT-20261006-000003', 'SO-20261006-000003', '销售出库', 'WH-E03', 'PICKING', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '拣货中', '2026-10-06 10:30:00+08'::timestamptz),
+             ('OUT-20261006-000004', 'SO-20261006-000003', '销售出库', 'WH-E03', 'PICKED', '2026-10-06 11:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '拣货完成待复核', '2026-10-06 10:35:00+08'::timestamptz),
+             ('OUT-20261006-000005', 'SO-20261006-000003', '销售出库', 'WH-E03', 'CHECKED', '2026-10-06 11:00:00+08'::timestamptz, '2026-10-06 11:20:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '复核完成待打包', '2026-10-06 10:40:00+08'::timestamptz),
+             ('OUT-20261006-000006', 'SO-20261006-000003', '销售出库', 'WH-E03', 'PACKED', '2026-10-06 11:00:00+08'::timestamptz, '2026-10-06 11:20:00+08'::timestamptz, '2026-10-06 11:40:00+08'::timestamptz, NULL::timestamptz, '打包完成待发货', '2026-10-06 10:45:00+08'::timestamptz),
+             ('OUT-20261006-000007', '', '生产领料', 'WH-E01', 'CANCELLED', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '产线计划变更，出库取消', '2026-10-06 11:00:00+08'::timestamptz),
+             ('OUT-20261006-000008', 'SO-20261006-000001', '销售出库', 'WH-E03', 'CLOSED', '2026-10-06 09:30:00+08'::timestamptz, '2026-10-06 09:50:00+08'::timestamptz, '2026-10-06 10:00:00+08'::timestamptz, '2026-10-06 10:20:00+08'::timestamptz, '差额关闭：客户确认不再补发', '2026-10-06 09:00:00+08'::timestamptz)) AS v(outbound_no, so_no, type, wh_code, status, picked_at, checked_at, packed_at, shipped_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (outbound_no) DO NOTHING;
+
+INSERT INTO outbound_items (outbound_id, line_no, sku_id, qty, qty_picked, qty_checked, qty_packed, qty_shipped, remark, created_at, created_by)
+SELECT o.id, v.line_no, sku.id, v.qty, v.picked, v.checked, v.packed, v.shipped, '', o.created_at, 9903
+FROM (VALUES ('OUT-20261006-000001', 1, 'SKU-E014-01', 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000002', 1, 'SKU-E014-01', 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000003', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 6.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000004', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000005', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000006', 1, 'SKU-E013-01', 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 12.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('OUT-20261006-000008', 1, 'SKU-E013-01', 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 10.0000::numeric(18, 4), 8.0000::numeric(18, 4))) AS v(outbound_no, line_no, sku_code, qty, picked, checked, packed, shipped)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.7 拣货 / 复核 / 发货补态（对齐 000007/000008 真实 DDL：assignee_id/assignee_name、
+--      done_at、warehouse_id 必填；三表状态机枚举全值域覆盖）----
+-- pick_tasks 枚举 PENDING/CLAIMED/PICKING/PICKED/EXCEPTION/CANCELLED：§11 已给
+--   PENDING/PICKING/PICKED，本段补 CLAIMED/EXCEPTION/CANCELLED。
+INSERT INTO pick_tasks (pick_no, outbound_no, outbound_line_no, sku_id, batch_id, source_warehouse_id,
+                        source_zone_id, source_shelf_id, source_bin_id, qty, picked_qty, status,
+                        assignee_id, assignee_name, claimed_at, picked_at, scanned_code, scan_matched,
+                        warehouse_id, remark, created_at, created_by)
+SELECT v.pick_no, v.outbound_no, 1, sku.id, COALESCE(bat.id, 0), w.id, b.zone_id, b.shelf_id, b.id,
+       v.qty, v.picked, v.status,
+       CASE WHEN v.status <> 'PENDING' THEN 9903 ELSE 0 END,
+       CASE WHEN v.status <> 'PENDING' THEN '陈发货' ELSE '' END,
+       CASE WHEN v.status <> 'PENDING' THEN v.at ELSE NULL END,
+       CASE WHEN v.status = 'PICKED' THEN v.at ELSE NULL END,
+       '', FALSE,
+       w.id, v.remark, v.at, 9903
+FROM (VALUES ('PK-20261006-000001', 'OUT-20261006-000002', 'SKU-E014-01', NULL, 'WH-E03', 'FG-01-22', 40.0000::numeric(18, 4), 0.0000::numeric(18, 4), 'CLAIMED', '已领取待拣货', '2026-10-06 10:15:00+08'::timestamptz),
+             ('PK-20261006-000002', 'OUT-20261006-000003', 'SKU-E013-01', NULL, 'WH-E03', 'FG-01-11', 12.0000::numeric(18, 4), 4.0000::numeric(18, 4), 'EXCEPTION', '拣货位实物与标签不符，已登记异常', '2026-10-06 10:35:00+08'::timestamptz),
+             ('PK-20261006-000003', 'OUT-20261006-000007', 'SKU-E001-01', 'B20260928-E001', 'WH-E01', 'REEL-01-11', 20.0000::numeric(18, 4), 0.0000::numeric(18, 4), 'CANCELLED', '出库单作废，任务取消', '2026-10-06 11:05:00+08'::timestamptz)) AS v(pick_no, outbound_no, sku_code, batch_no, wh_code, bin_code, qty, picked, status, remark, at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (pick_no) DO NOTHING;
+
+-- check_tasks 枚举 PENDING/DONE/EXCEPTION：§11 已给 DONE，本段补 PENDING/EXCEPTION；
+-- result 值域（错货/少货/多货/批次错误/序列号错误）取样覆盖。
+INSERT INTO check_tasks (check_no, outbound_no, outbound_line_no, sku_id, batch_id, serial_no, qty, status,
+                         result, assignee_id, assignee_name, claimed_at, done_at, warehouse_id, remark, created_at, created_by)
+SELECT v.check_no, v.outbound_no, 1, sku.id, 0, '', v.qty, v.status,
+       v.result,
+       CASE WHEN v.status = 'DONE' THEN 9903 ELSE 0 END,
+       CASE WHEN v.status = 'DONE' THEN '陈发货' ELSE '' END,
+       CASE WHEN v.status = 'DONE' THEN v.at - interval '10 minutes' ELSE NULL END,
+       CASE WHEN v.status = 'DONE' THEN v.at ELSE NULL END,
+       o.warehouse_id, v.remark, v.at, 9903
+FROM (VALUES ('CH-20261006-000001', 'OUT-20261006-000005', 'SKU-E013-01', 12.0000::numeric(18, 4), 'PENDING', '', '待复核领取', '2026-10-06 11:05:00+08'::timestamptz),
+             ('CH-20261006-000002', 'OUT-20261006-000006', 'SKU-E013-01', 12.0000::numeric(18, 4), 'EXCEPTION', '序列号错误', '复核发现串码，已登记异常', '2026-10-06 11:25:00+08'::timestamptz)) AS v(check_no, outbound_no, sku_code, qty, status, result, remark, at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT (check_no) DO NOTHING;
+
+-- shipments 枚举 PENDING/SHIPPED/IN_TRANSIT/SIGNED/ABNORMAL：§11 已给 SHIPPED，
+-- 本段补 PENDING/IN_TRANSIT/SIGNED/ABNORMAL（000008 无 signed_at 列，签收时间即 shipped_at）。
+INSERT INTO shipments (shipment_no, outbound_no, carrier, tracking_no, warehouse_id, shipper_id, shipper_name,
+                       package_count, status, shipped_at, idempotency_key, remark, created_at, created_by)
+SELECT v.shipment_no, v.outbound_no, v.carrier, v.tracking_no, o.warehouse_id, 9903, '陈发货',
+       1, v.status, v.shipped_at, 'dev-seed-' || v.shipment_no, v.remark, v.created_at, 9903
+FROM (VALUES ('SH-20261006-000001', 'OUT-20261006-000006', '顺丰速运', 'SF0000000000001', 'PENDING', NULL::timestamptz, '待揽收', '2026-10-06 11:45:00+08'::timestamptz),
+             ('SH-20261006-000002', 'OUT-20261003-000001', '顺丰速运', 'SF0000000000002', 'IN_TRANSIT', '2026-10-04 16:30:00+08'::timestamptz, '运输中', '2026-10-04 16:20:00+08'::timestamptz),
+             ('SH-20261006-000003', 'OUT-20261003-000001', '德邦物流', 'DB0000000000003', 'ABNORMAL', '2026-10-04 16:30:00+08'::timestamptz, '物流异常：外箱破损待理赔', '2026-10-04 16:25:00+08'::timestamptz),
+             ('SH-20261006-000004', 'OUT-20261004-000002', '京东物流', 'JD0000000000004', 'SIGNED', '2026-10-05 11:20:00+08'::timestamptz, '客户已签收', '2026-10-05 11:10:00+08'::timestamptz)) AS v(shipment_no, outbound_no, carrier, tracking_no, status, shipped_at, remark, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+ON CONFLICT (shipment_no) DO NOTHING;
+
+-- ---- 17.8 调拨单补 5 态（DRAFT / PENDING_APPROVAL / APPROVED / TRANSFERRING / CANCELLED）----
+INSERT INTO transfer_orders (transfer_no, type, from_warehouse_id, to_warehouse_id, status, approved_by, approved_at,
+                             outbound_at, received_at, cancelled_at, remark, created_at, created_by, updated_by)
+SELECT v.transfer_no, v.type, fw.id, tw.id, v.status, v.approved_by, v.approved_at, v.outbound_at, v.received_at,
+       v.cancelled_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('TR-20261006-000001', 'BIN', 'WH-E01', 'WH-E01', 'DRAFT', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '草稿：库位整理搬迁', '2026-10-06 09:00:00+08'::timestamptz),
+             ('TR-20261006-000002', 'WAREHOUSE', 'WH-E01', 'WH-E02', 'PENDING_APPROVAL', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '待审核：电阻拨料', '2026-10-06 09:30:00+08'::timestamptz),
+             ('TR-20261006-000003', 'WAREHOUSE', 'WH-E01', 'WH-E02', 'APPROVED', 9901, '2026-10-06 10:00:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '已审核待出库', '2026-10-06 09:40:00+08'::timestamptz),
+             ('TR-20261006-000004', 'WAREHOUSE', 'WH-E01', 'WH-E02', 'TRANSFERRING', 9901, '2026-10-06 10:20:00+08'::timestamptz, '2026-10-06 10:40:00+08'::timestamptz, NULL::timestamptz, NULL::timestamptz, '调拨在途', '2026-10-06 10:10:00+08'::timestamptz),
+             ('TR-20261006-000005', 'WAREHOUSE', 'WH-E02', 'WH-E03', 'CANCELLED', 0, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '2026-10-06 11:00:00+08'::timestamptz, '计划调整，调拨取消', '2026-10-06 10:50:00+08'::timestamptz)) AS v(transfer_no, type, from_wh, to_wh, status, approved_by, approved_at, outbound_at, received_at, cancelled_at, remark, created_at)
+JOIN warehouses fw ON fw.code = v.from_wh AND fw.deleted_at IS NULL
+JOIN warehouses tw ON tw.code = v.to_wh AND tw.deleted_at IS NULL
+ON CONFLICT (transfer_no) DO NOTHING;
+
+INSERT INTO transfer_items (transfer_id, line_no, sku_id, batch_id, from_warehouse_id, from_zone_id, from_shelf_id,
+                            from_bin_id, to_warehouse_id, to_zone_id, to_shelf_id, to_bin_id, qty, qty_out, qty_in,
+                            created_at, created_by)
+SELECT t.id, v.line_no, sku.id, COALESCE(bat.id, 0), fw.id, fb.zone_id, fb.shelf_id, fb.id,
+       tw.id, tb.zone_id, tb.shelf_id, tb.id, v.qty, v.qty_out, v.qty_in, t.created_at, 9901
+FROM (VALUES ('TR-20261006-000001', 1, 'SKU-E001-01', 'B20260928-E001', 'WH-E01', 'REEL-01-11', 'WH-E01', 'REEL-01-22', 10.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('TR-20261006-000002', 1, 'SKU-E001-02', 'B20260928-E002', 'WH-E01', 'REEL-01-21', 'WH-E02', 'SR-01-11', 6.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('TR-20261006-000003', 1, 'SKU-E002-01', 'B20261005-E002', 'WH-E01', 'REEL-02-11', 'WH-E02', 'SR-01-12', 5.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('TR-20261006-000004', 1, 'SKU-E003-01', 'B20260915-E003', 'WH-E01', 'REEL-02-12', 'WH-E02', 'SA-01-12', 50.0000::numeric(18, 4), 50.0000::numeric(18, 4), 0.0000::numeric(18, 4)),
+             ('TR-20261006-000005', 1, 'SKU-E008-01', 'B20261004-E008', 'WH-E02', 'SA-01-11', 'WH-E03', 'FG-01-12', 5.0000::numeric(18, 4), 0.0000::numeric(18, 4), 0.0000::numeric(18, 4))) AS v(transfer_no, line_no, sku_code, batch_no, from_wh, from_bin, to_wh, to_bin, qty, qty_out, qty_in)
+JOIN transfer_orders t ON t.transfer_no = v.transfer_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+JOIN warehouses fw ON fw.code = v.from_wh AND fw.deleted_at IS NULL
+JOIN bins fb ON fb.code = v.from_bin AND fb.warehouse_id = fw.id
+JOIN warehouses tw ON tw.code = v.to_wh AND tw.deleted_at IS NULL
+JOIN bins tb ON tb.code = v.to_bin AND tb.warehouse_id = tw.id
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.9 盘点单补 3 态（DRAFT / COMPLETED / CANCELLED）+ 差异状态全值域 ----
+INSERT INTO count_orders (count_no, warehouse_id, scope, status, frozen_at, reviewed_at, completed_at,
+                          cancelled_at, remark, created_at, created_by)
+SELECT v.count_no, w.id, v.scope, v.status, v.frozen_at, v.reviewed_at, v.completed_at, v.cancelled_at,
+       v.remark, v.created_at, 9904
+FROM (VALUES ('CK-20261006-000001', 'WH-E03', '{"type": "WAREHOUSE"}'::jsonb, 'DRAFT', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '成品仓全盘计划（草稿）', '2026-10-06 09:00:00+08'::timestamptz),
+             ('CK-20261006-000002', 'WH-E01', '{"type": "BIN", "bins": ["REEL-01-22", "RV-01-11", "RV-01-12"]}'::jsonb, 'COMPLETED', '2026-10-06 08:00:00+08'::timestamptz, '2026-10-06 09:00:00+08'::timestamptz, '2026-10-06 09:30:00+08'::timestamptz, NULL::timestamptz, '循环盘点完成，3 项差异已分别驳回/审核/核销', '2026-10-06 07:50:00+08'::timestamptz),
+             ('CK-20261006-000003', 'WH-E02', '{"type": "ZONE", "zone": "E02-STORE"}'::jsonb, 'CANCELLED', NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, '2026-10-06 10:00:00+08'::timestamptz, '生产计划冲突，盘点取消', '2026-10-06 09:50:00+08'::timestamptz)) AS v(count_no, wh_code, scope, status, frozen_at, reviewed_at, completed_at, cancelled_at, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (count_no) DO NOTHING;
+
+-- 盘点明细：按盘点点范围（3 个库位）从现存库存行取快照，账实一致（qty_counted = qty_system）
+INSERT INTO count_items (count_id, inventory_row_id, sku_id, warehouse_id, zone_id, shelf_id, bin_id,
+                         qty_system, qty_counted, counted_by, counted_at, serial_no, created_at, created_by)
+SELECT c.id, i.id, sku.id, i.warehouse_id, i.zone_id, i.shelf_id, i.bin_id,
+       i.total_qty, i.total_qty, 9904, c.frozen_at, '', c.created_at, 9904
+FROM count_orders c
+JOIN inventory i ON i.warehouse_id = c.warehouse_id
+                AND i.bin_id IN (SELECT b.id FROM bins b
+                                 WHERE b.code IN ('REEL-01-22', 'RV-01-11', 'RV-01-12')
+                                   AND b.warehouse_id = c.warehouse_id)
+JOIN skus sku ON sku.id = i.sku_id
+WHERE c.count_no = 'CK-20261006-000002'
+ON CONFLICT DO NOTHING;
+
+-- 盘点差异补全 4 态中的 3 态（PENDING 见 §11.7）：REJECTED / APPROVED / EXECUTED 各 1 行，
+-- 与上方 count_items 的 3 个库位一一对应（uk_count_differences_count_line 保证 (盘点,行号) 唯一）。
+INSERT INTO count_differences (count_id, line_no, sku_id, warehouse_id, bin_id, batch_id, qty_system, qty_counted,
+                               diff_qty, adjust_no, status, remark, created_at, created_by)
+SELECT c.id, v.line_no, sku.id, c.warehouse_id, i.bin_id, i.batch_id, v.qty_sys, v.qty_cnt,
+       v.qty_cnt - v.qty_sys, v.adjust_no, v.status, v.remark, c.frozen_at, 9904
+FROM (VALUES (1, 'SKU-E001-01', 'REEL-01-22', 50.0000::numeric(18, 4), 50.0000::numeric(18, 4), '', 'REJECTED', '复盘点确认账实相符，差异记录驳回'),
+             (2, 'SKU-E004-01', 'RV-01-11', 300.0000::numeric(18, 4), 296.0000::numeric(18, 4), '', 'APPROVED', 'MOS 管实盘少 4，审核通过待生成调整单'),
+             (3, 'SKU-E012-01', 'RV-01-12', 60.0000::numeric(18, 4), 56.0000::numeric(18, 4), 'ADJ-20261004-000001', 'EXECUTED', 'ESD 托盘少 4，已由调整单核销')) AS v(line_no, sku_code, bin_code, qty_sys, qty_cnt, adjust_no, status, remark)
+JOIN count_orders c ON c.count_no = 'CK-20261006-000002'
+JOIN skus sku ON sku.code = v.sku_code
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = c.warehouse_id
+JOIN inventory i ON i.warehouse_id = c.warehouse_id AND i.bin_id = b.id AND i.sku_id = sku.id
+ON CONFLICT DO NOTHING;
+
+-- ---- 17.10 单号计数器推进（20261006 日期段；GREATEST 幂等）----
+INSERT INTO doc_number_counters (prefix, period, next_no, created_at, updated_at, created_by)
+VALUES ('PO', '20261006', 4, now(), now(), 0), ('IN', '20261006', 6, now(), now(), 0),
+       ('PW', '20261006', 4, now(), now(), 0), ('QC', '20261006', 4, now(), now(), 0),
+       ('SO', '20261006', 6, now(), now(), 0), ('OUT', '20261006', 9, now(), now(), 0),
+       ('PK', '20261006', 5, now(), now(), 0), ('CH', '20261006', 3, now(), now(), 0),
+       ('SH', '20261006', 4, now(), now(), 0), ('TR', '20261006', 6, now(), now(), 0),
+       ('CK', '20261006', 4, now(), now(), 0), ('RT', '20261006', 4, now(), now(), 0),
+       ('EX', '20261006', 5, now(), now(), 0), ('ADJ', 'ALL', 9, now(), now(), 0),
+       ('IMP', '20261006', 7, now(), now(), 0), ('EXP', '20261006', 7, now(), now(), 0)
+ON CONFLICT (prefix, period) DO UPDATE SET next_no = GREATEST(doc_number_counters.next_no, EXCLUDED.next_no);
+
+-- ---- 17.11 审批记录补充（退货 / 调整 / 盘点差异；append-only NOT EXISTS 防重跑）----
+INSERT INTO document_approvals (target_type, target_no, action, result, opinion, operator_id, operator_name, created_at)
+SELECT v.target_type, v.target_no, v.action, v.result, v.opinion, v.operator_id, v.operator_name, v.created_at
+FROM (VALUES ('purchase_order', 'PO-20261006-000001', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 09:05:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261006-000001', 'APPROVE', 'APPROVED', '同意，按需到货', 9901, '王经理', '2026-10-06 09:10:00+08'::timestamptz),
+             ('purchase_order', 'PO-20261006-000003', 'CANCEL', 'CANCELLED', '供应商缺货，取消', 9901, '王经理', '2026-10-06 10:30:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000002', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 09:45:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000002', 'APPROVE', 'APPROVED', '同意，库存充足', 9901, '王经理', '2026-10-06 10:00:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000003', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 10:15:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000003', 'APPROVE', 'APPROVED', '同意，现货直发', 9901, '王经理', '2026-10-06 10:20:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000004', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 10:50:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000004', 'APPROVE', 'REJECTED', '客户信用额度不足，驳回', 9901, '王经理', '2026-10-06 11:00:00+08'::timestamptz),
+             ('sales_order', 'SO-20261006-000005', 'CANCEL', 'CANCELLED', '客户取消', 9901, '王经理', '2026-10-06 11:30:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000002', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 09:35:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000003', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 09:45:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000003', 'APPROVE', 'APPROVED', '同意拨料', 9901, '王经理', '2026-10-06 10:00:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000004', 'SUBMIT', '', '提交审核', 9901, '王经理', '2026-10-06 10:15:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000004', 'APPROVE', 'APPROVED', '同意', 9901, '王经理', '2026-10-06 10:20:00+08'::timestamptz),
+             ('transfer_order', 'TR-20261006-000005', 'CANCEL', 'CANCELLED', '计划调整取消', 9901, '王经理', '2026-10-06 11:00:00+08'::timestamptz),
+             ('inventory_adjustment', 'ADJ-20261004-000001', 'APPROVE', 'APPROVED', '同意核销盘亏 4', 9901, '王经理', '2026-10-04 14:00:00+08'::timestamptz),
+             ('inventory_adjustment', 'ADJ-20261004-000007', 'APPROVE', 'APPROVED', '同意报废 4', 9901, '王经理', '2026-10-04 17:00:00+08'::timestamptz),
+             ('inventory_adjustment', 'ADJ-20261005-000005', 'APPROVE', 'REJECTED', '核查为未登记入库，驳回', 9901, '王经理', '2026-10-05 15:00:00+08'::timestamptz),
+             ('return_order', 'RT-20261004-000001', 'SUBMIT', '', '提交退货申请', 9903, '陈发货', '2026-10-04 09:45:00+08'::timestamptz),
+             ('return_order', 'RT-20261004-000001', 'APPROVE', 'APPROVED', '同意退货', 9901, '王经理', '2026-10-04 10:00:00+08'::timestamptz),
+             ('return_order', 'RT-20261004-000002', 'CANCEL', 'CANCELLED', '客户撤销', 9903, '陈发货', '2026-10-04 18:00:00+08'::timestamptz),
+             ('return_order', 'RT-20261005-000001', 'SUBMIT', '', '提交退货申请', 9903, '陈发货', '2026-10-05 08:45:00+08'::timestamptz),
+             ('return_order', 'RT-20261005-000001', 'APPROVE', 'APPROVED', '同意退回', 9901, '王经理', '2026-10-05 09:00:00+08'::timestamptz)) AS v(target_type, target_no, action, result, opinion, operator_id, operator_name, created_at)
 WHERE NOT EXISTS (
     SELECT 1 FROM document_approvals da
     WHERE da.target_type = v.target_type AND da.target_no = v.target_no

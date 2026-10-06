@@ -5,7 +5,10 @@
 --   2) 库存恒等式成立（inventory-rules §2，数据库 CHECK 之外的复核）；
 --   3) 期初库存与期初流水 1:1 成对（qty_before=0 → qty_after=n，business_type='期初'，
 --      remark='DEV SEED'，business_no='DEV-SEED-OPEN-*'）；
---   4) 序列号台账数与序列号 SKU 的期初库存吻合（一物一行，inventory-rules §8）。
+--   4) 序列号台账数与序列号 SKU 的期初库存吻合（一物一行，inventory-rules §8）；
+--   5) 演示补全轮（2026-10-06，dev_seed.sql §12–§17）覆盖：库存四态（锁定/冻结/待检/残次）、
+--      库存锁定 5 类型×3 态、调整单 6 态、退货（销售/采购）与异常九类、设备/扫码、
+--      文件/导入/导出、定时任务执行日志/通知/备份，以及各单据状态机全值域（每态都有命中行）。
 --
 -- 本文件只读（仅 SELECT/DO 内断言），任何断言失败即 RAISE EXCEPTION 退出（配合
 -- ON_ERROR_STOP，psql 返回非 0），可安全在任何环境执行；演示数据缺失时首项断言即报错。
@@ -187,6 +190,166 @@ BEGIN
 END
 $$;
 
+-- ---- 8) 库存状态覆盖：locked/frozen/pending_inspect/defective 四态齐备（§12.1） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(*) INTO n FROM inventory
+    WHERE id BETWEEN 9000 AND 9999 AND locked_qty > 0;
+    IF n = 0 THEN RAISE EXCEPTION '[库存状态] 缺少锁定态样例（locked_qty > 0）'; END IF;
+    SELECT count(*) INTO n FROM inventory
+    WHERE id BETWEEN 9000 AND 9999 AND frozen_qty > 0;
+    IF n = 0 THEN RAISE EXCEPTION '[库存状态] 缺少冻结态样例（frozen_qty > 0）'; END IF;
+    SELECT count(*) INTO n FROM inventory
+    WHERE id BETWEEN 9000 AND 9999 AND pending_inspect_qty > 0;
+    IF n = 0 THEN RAISE EXCEPTION '[库存状态] 缺少待检态样例（pending_inspect_qty > 0）'; END IF;
+    SELECT count(*) INTO n FROM inventory
+    WHERE id BETWEEN 9000 AND 9999 AND defective_qty > 0;
+    IF n = 0 THEN RAISE EXCEPTION '[库存状态] 缺少残次态样例（defective_qty > 0）'; END IF;
+END
+$$;
+
+-- ---- 9) 库存锁定：lock_type ≥5 值 / status 3 值全值域（§12.2） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT lock_type) INTO n FROM inventory_locks WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[库存锁定] lock_type 应覆盖 ≥5 种，实际 %', n; END IF;
+    SELECT count(DISTINCT status) INTO n FROM inventory_locks WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[库存锁定] status 应覆盖 ACTIVE/RELEASED/CONSUMED 三态，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 10) 库存调整单：status 6 态 / adjust_type ≥5 类（§12.3） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT status) INTO n FROM inventory_adjustments WHERE id BETWEEN 9000 AND 9999;
+    IF n < 6 THEN RAISE EXCEPTION '[库存调整] status 应覆盖 ≥6 态，实际 %', n; END IF;
+    SELECT count(DISTINCT adjust_type) INTO n FROM inventory_adjustments WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[库存调整] adjust_type 应覆盖 ≥5 类，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 11) 退货单：销售/采购双类型 + status ≥6 态 + 明细 ≥5 行（§13.1-13.3） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT type) INTO n FROM return_orders WHERE id BETWEEN 9000 AND 9999;
+    IF n < 2 THEN RAISE EXCEPTION '[退货] type 应覆盖 SALES/PURCHASE 两类，实际 %', n; END IF;
+    SELECT count(DISTINCT status) INTO n FROM return_orders WHERE id BETWEEN 9000 AND 9999;
+    IF n < 6 THEN RAISE EXCEPTION '[退货] status 应覆盖 ≥6 态，实际 %', n; END IF;
+    SELECT count(*) INTO n FROM return_items WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[退货] 退货明细应 ≥5 行，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 12) 异常单：九类异常 × 六态生命周期（§13.4） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT type) INTO n FROM exceptions WHERE id BETWEEN 9000 AND 9999;
+    IF n < 9 THEN RAISE EXCEPTION '[异常] type 应覆盖 ≥9 类，实际 %', n; END IF;
+    SELECT count(DISTINCT status) INTO n FROM exceptions WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[异常] status 应覆盖 ≥5 态，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 13) 设备与扫码：设备类型 / 配置 / 日志级别 / 扫码审计 / App 版本（§14） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT type) INTO n FROM devices WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[设备] type 应覆盖 ≥3 种，实际 %', n; END IF;
+    SELECT count(DISTINCT activation_status) INTO n FROM devices WHERE id BETWEEN 9000 AND 9999;
+    IF n < 2 THEN RAISE EXCEPTION '[设备] activation_status 应覆盖 ≥2 态（ACTIVATED/PENDING），实际 %', n; END IF;
+    SELECT count(*) INTO n FROM device_configs WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[设备] 设备配置应 ≥3 行，实际 %', n; END IF;
+    SELECT count(DISTINCT level) INTO n FROM device_logs WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[设备] 运行日志级别应覆盖 INFO/WARN/ERROR，实际 %', n; END IF;
+    SELECT count(*) INTO n FROM scan_logs WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[扫码] 扫码审计应 ≥5 行，实际 %', n; END IF;
+    IF NOT EXISTS (SELECT 1 FROM scan_logs WHERE id BETWEEN 9000 AND 9999 AND success)
+       OR NOT EXISTS (SELECT 1 FROM scan_logs WHERE id BETWEEN 9000 AND 9999 AND NOT success) THEN
+        RAISE EXCEPTION '[扫码] 扫码成功/失败样例应齐备';
+    END IF;
+    SELECT count(DISTINCT status) INTO n FROM app_versions WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[设备] App 版本状态应覆盖 DRAFT/PUBLISHED/DEPRECATED，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 14) 数据域：文件登记 / 导入 / 导出（§15） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT module) INTO n FROM files WHERE id BETWEEN 9000 AND 9999;
+    IF n < 4 THEN RAISE EXCEPTION '[文件] 文件登记模块应覆盖 ≥4 个，实际 %', n; END IF;
+    SELECT count(DISTINCT status) INTO n FROM import_tasks WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[导入] status 应覆盖 ≥5 态，实际 %', n; END IF;
+    SELECT count(*) INTO n FROM import_task_rows WHERE id BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[导入] 导入行应 ≥5 行，实际 %', n; END IF;
+    SELECT count(DISTINCT status) INTO n FROM export_tasks WHERE id BETWEEN 9000 AND 9999;
+    IF n < 4 THEN RAISE EXCEPTION '[导出] status 应覆盖 ≥4 态，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 15) 运维：定时任务执行日志 / 站内通知 / 备份登记（§16） ----
+DO $$
+DECLARE n int;
+BEGIN
+    SELECT count(DISTINCT "trigger") INTO n FROM scheduled_job_runs WHERE id BETWEEN 9000 AND 9999;
+    IF n < 2 THEN RAISE EXCEPTION '[定时任务] trigger 应覆盖 ≥2 种（SCHEDULED/MANUAL），实际 %', n; END IF;
+    SELECT count(DISTINCT type) INTO n FROM notifications WHERE id BETWEEN 9000 AND 9999;
+    IF n < 4 THEN RAISE EXCEPTION '[通知] type 应覆盖 ≥4 类，实际 %', n; END IF;
+    IF NOT EXISTS (SELECT 1 FROM notifications WHERE id BETWEEN 9000 AND 9999 AND read)
+       OR NOT EXISTS (SELECT 1 FROM notifications WHERE id BETWEEN 9000 AND 9999 AND NOT read) THEN
+        RAISE EXCEPTION '[通知] 已读/未读样例应齐备';
+    END IF;
+    SELECT count(DISTINCT status) INTO n FROM backup_records WHERE id BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[备份] status 应覆盖 ≥3 态，实际 %', n; END IF;
+END
+$$;
+
+-- ---- 16) 单据状态机全值域：各单据列表页的每个状态筛选都有命中行（§11 + §17） ----
+DO $$
+DECLARE n int;
+BEGIN
+    -- 采购订单：DRAFT/PENDING_APPROVAL/APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL/COMPLETED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM purchase_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 7 THEN RAISE EXCEPTION '[单据状态] purchase_orders 应覆盖 7 态，实际 %', n; END IF;
+    -- 入库单：DRAFT/RECEIVING/AWAITING_QC/AWAITING_PUTAWAY/COMPLETED/CLOSED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM inbound_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 7 THEN RAISE EXCEPTION '[单据状态] inbound_orders 应覆盖 7 态，实际 %', n; END IF;
+    -- 上架任务：PENDING/IN_PROGRESS/PAUSED/COMPLETED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM putaway_tasks WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[单据状态] putaway_tasks 应覆盖 5 态，实际 %', n; END IF;
+    -- 质检单：PENDING/INSPECTING/COMPLETED
+    SELECT count(DISTINCT status) INTO n FROM quality_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[单据状态] quality_orders 应覆盖 3 态，实际 %', n; END IF;
+    -- 销售订单：DRAFT/PENDING_APPROVAL/APPROVED/REJECTED/PARTIAL_SHIPPED/SHIPPED_ALL/COMPLETED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM sales_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 7 THEN RAISE EXCEPTION '[单据状态] sales_orders 应覆盖 ≥7 态，实际 %', n; END IF;
+    -- 出库单：PENDING_ALLOCATE/ALLOCATED/PICKING/PICKED/CHECKED/PACKED/PARTIAL_SHIPPED/SHIPPED_ALL/CANCELLED/CLOSED
+    SELECT count(DISTINCT status) INTO n FROM outbound_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 8 THEN RAISE EXCEPTION '[单据状态] outbound_orders 应覆盖 ≥8 态，实际 %', n; END IF;
+    -- 调拨单：DRAFT/PENDING_APPROVAL/APPROVED/TRANSFERRING/AWAITING_RECEIPT/COMPLETED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM transfer_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 6 THEN RAISE EXCEPTION '[单据状态] transfer_orders 应覆盖 ≥6 态，实际 %', n; END IF;
+    -- 盘点单：DRAFT/COUNTING/PENDING_REVIEW/COMPLETED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM count_orders WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 5 THEN RAISE EXCEPTION '[单据状态] count_orders 应覆盖 5 态，实际 %', n; END IF;
+    -- 拣货任务：PENDING/PICKING/PICKED/CANCELLED
+    SELECT count(DISTINCT status) INTO n FROM pick_tasks WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[单据状态] pick_tasks 应覆盖 ≥3 态，实际 %', n; END IF;
+    -- 发货单：PENDING/SHIPPED/DELIVERED/EXCEPTION
+    SELECT count(DISTINCT status) INTO n FROM shipments WHERE created_by BETWEEN 9000 AND 9999;
+    IF n < 3 THEN RAISE EXCEPTION '[单据状态] shipments 应覆盖 ≥3 态，实际 %', n; END IF;
+    -- 审批留痕：document_approvals 覆盖多目标类型（采购/销售/退货/调整/盘点差异）
+    SELECT count(DISTINCT target_type) INTO n FROM document_approvals WHERE operator_id BETWEEN 9000 AND 9999;
+    IF n < 2 THEN RAISE EXCEPTION '[审批] document_approvals 目标类型应覆盖 ≥2 类，实际 %', n; END IF;
+END
+$$;
+
 -- ---- 自检通过：输出演示集摘要 ----
 \echo '>>> 自检通过。演示集摘要：'
 SELECT (SELECT count(*) FROM users WHERE username LIKE 'dev\_%')            AS "测试账号",
@@ -203,4 +366,14 @@ SELECT (SELECT count(*) FROM users WHERE username LIKE 'dev\_%')            AS "
        (SELECT count(*) FROM inventory WHERE id BETWEEN 9000 AND 9999)      AS "期初库存行",
        (SELECT count(*) FROM inventory_ledgers WHERE id BETWEEN 9000 AND 9999
                 AND business_type = '期初')                                  AS "期初流水行",
-       (SELECT count(*) FROM serial_numbers WHERE id BETWEEN 9000 AND 9999) AS "序列号";
+       (SELECT count(*) FROM serial_numbers WHERE id BETWEEN 9000 AND 9999) AS "序列号",
+       (SELECT count(*) FROM inventory_locks WHERE id BETWEEN 9000 AND 9999)        AS "库存锁定",
+       (SELECT count(*) FROM inventory_adjustments WHERE id BETWEEN 9000 AND 9999)  AS "库存调整",
+       (SELECT count(*) FROM return_orders WHERE id BETWEEN 9000 AND 9999)          AS "退货单",
+       (SELECT count(*) FROM exceptions WHERE id BETWEEN 9000 AND 9999)             AS "异常单",
+       (SELECT count(*) FROM devices WHERE id BETWEEN 9000 AND 9999)                AS "设备",
+       (SELECT count(*) FROM files WHERE id BETWEEN 9000 AND 9999)                  AS "文件",
+       (SELECT count(*) FROM import_tasks WHERE id BETWEEN 9000 AND 9999)           AS "导入任务",
+       (SELECT count(*) FROM export_tasks WHERE id BETWEEN 9000 AND 9999)           AS "导出任务",
+       (SELECT count(*) FROM notifications WHERE id BETWEEN 9000 AND 9999)          AS "通知",
+       (SELECT count(*) FROM backup_records WHERE id BETWEEN 9000 AND 9999)         AS "备份记录";

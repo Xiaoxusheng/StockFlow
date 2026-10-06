@@ -14,6 +14,26 @@
 
 ## 文档记录
 
+## [2026-10-06] 功能：演示数据补全轮——全页面全状态覆盖（dev_seed.sql §12–§17）+ 真库验证修复三处硬伤
+
+- **背景**：原演示集（§0–§11）只覆盖主链走通的少数状态，多数页面（库存锁定/调整、退货、异常中心、设备、文件/导入导出、通知/备份、运维任务）无数据，各单据状态机只命中 2–4 个态。本轮对照 72 张迁移表与各表 CHECK 值域逐表补齐，目标"每个页面有数据、每个业务状态有样例"。
+- **新增段（dev_seed.sql §12–§17，均在原单事务内、幂等口径不变）**：
+  - §12 库存四态演示行（locked/frozen/pending_inspect/defective 六列全写且满足恒等式，配 6 条 '期初' 流水 1:1 成对）+ `inventory_locks` 10 行（5 lock_type × 3 status）+ `inventory_adjustments` 8 行（6 status × 5 adjust_type）。
+  - §13 退货 `return_orders` 销售 7 态 / 采购 3 态 + `return_items` 11 行 + `exceptions` 20 行（9 类异常 × 6 态生命周期，含 `handle_records` 追加式台账与 freeze_lock_id 联动）。
+  - §14 `devices` 8 行（5 type × 启停/激活）+ `device_configs` 4 + `device_logs` 8（INFO/WARN/ERROR）+ `scan_logs` 10（设备/Web HID 双轨）+ `app_versions` 3 态。
+  - §15 `files` 8（多模块）+ `import_tasks` 6 态 + `import_task_rows` 10 + `export_tasks` 5 态。
+  - §16 `scheduled_job_runs` 10（SCHEDULED/MANUAL/SKIPPED）+ `notifications` 12（6 类型 × 已读/未读）+ `backup_records` 6（4 态，遵守在途部分唯一索引）。
+  - §17 各单据状态机全值域补全（采购 7 / 入库 7 / 上架 5 / 质检 3 / 销售 8 / 出库 10 / 拣货 6 / 复核 3 / 发货 5 / 调拨 7 / 盘点 5 / 差异 4）+ 单号计数器推进 + 审批留痕 24 行。
+- **真库验证发现并修复的硬伤（静态契约测试均无法覆盖，均为本地 PG16 + 真实 `make seed-demo` 等价路径实测）**：
+  1. **`ON CONFLICT (id)` 挡不住自然键唯一索引 → 整个 seed 事务中断**。exceptions/return_orders/return_items/inventory_adjustments/devices/device_configs/app_versions/import_tasks/import_task_rows/export_tasks/notifications/backup_records/print_tasks 除主键外还有自然键唯一索引（uk_*_no / uk_devices_code / uk_notifications_dedup 等），运行期已按 docnum 同日期段生成同号单据时再灌演示数据会撞索引直接 abort（实测 `duplicate key value violates unique constraint "uk_exceptions_no"`）。修复：这些表统一改无目标 `ON CONFLICT DO NOTHING`。
+  2. **`allocation_records` 无自然唯一键 → `ON CONFLICT DO NOTHING` 形同虚设，每次重跑重复追加 3 行**（实测第 5 次重跑后 15 行）。修复：改用 `WHERE NOT EXISTS` 守卫（与 document_approvals 同口径）。
+  3. **库位编码写错致整行静默丢弃**：§10.6 的 `FR-01-11` 在 WH-E03 不存在（实际为 FP-01-11），三处引用（期初库存 9842 / 期初流水 9896 / 调整单 9935）JOIN 不命中被静默跳过，期初库存长期少 1 行。修复：三处统一改 `FP-01-11`。
+  4. 另修 §17.7 三表列名与真实 DDL 不符（`picker_id`/`checker_id`/`signed_at` 不存在；漏必填 `warehouse_id`）与 §17.9 盘点差异只覆盖 1/4 态（注释宣称 3 态）。
+- **测试守卫同步**：`internal/database/dev_seed_test.go` 更新条数冻结表（48→106 条 INSERT / 新增 20 表）、期初成对断言改为"期初段 + §12.1 状态行"两段合并校验（含六列恒等式与四态齐备），新增三个守卫：`TestDevSeedBareConflictOnNaturalKeyTables`（自然键表禁用 `ON CONFLICT (id)`）、`TestDevSeedReferencedCodesExist`（引用的仓库/库位/SKU 编码必须在本文件内定义——直接拦截上述第 3 类静默丢弃）、幂等守卫三形态计数强校验（ON CONFLICT + NOT EXISTS == INSERT 总数）。`db/seed/dev_seed_verify.sql` 新增 §8–§16 自检段（库存四态、锁定/调整/退货/异常/设备/数据域/运维值域、各单据状态机全值域）并扩充摘要。
+- **验证**：`go build/vet/test ./...` 24 包全绿；**真库验证**（本地 PG16 便携版，等价 `SF_ENV=dev make seed-demo`）：干净库（schema + 生产初始化角色）连跑 3 遍 seed —— 首遍 912 行、后两遍仅 47 行（纯计数器 upsert），库存/流水/锁定/调整/退货/异常/通知行数三遍恒定，`dev_seed_verify.sql` 全部断言通过；脏库（含运行期 smoke 数据）重跑 0 错误、优雅跳过同号行。演示数据已应用到本地开发库 `stockflow`（inventory 41→48、exceptions 2→20、locks 0→10 等）。
+- **口径披露**：脏库上运行期已占用同号单据（如 `PO-20261006-000001`、`IMP/EXP-20261004-000001`）时，对应演示行被跳过——页面该状态仍可见（由运行期行提供），但 `make seed-demo-verify` 的演示域断言会报缺口；要 100% 完整的演示集需重建演示库（drop → migrate → 启动一次服务完成 BootstrapIfEmpty → `SF_ENV=dev make seed-demo`）。
+- 影响范围：db/seed/{dev_seed.sql,dev_seed_verify.sql}、internal/database/dev_seed_test.go、docs/changelog.md。改动未提交（留提交阶段）。
+
 ## [2026-10-06] 功能：库存层级分布端点交付（GET /api/inventory/{id}/distribution——前端先行契约补齐，库存详情『库存分布』页签点亮）
 
 - **背景**：库存详情页『库存分布』页签为前端先行契约（frontend.md §10.4），此前呈统一错误态（页内文案「接口尚未交付」）。本批后端补齐，前端契约形状零变更（web/src/api/inventory.ts StockDistributionNode 逐字段回对）。
