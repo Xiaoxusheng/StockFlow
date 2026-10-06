@@ -155,6 +155,14 @@ export default function SalesOrderListPage() {
           fields={[
             { name: 'so_no', label: '销售单号', control: 'input', placeholder: '销售单号（精确匹配）' },
             { name: 'status', label: '状态', control: 'select', options: STATUS_OPTIONS },
+            /* 时间范围：后端 GET /api/sales 支持 created_from/created_to
+               （internal/sales/handler.go:121-127，成对参数） */
+            {
+              name: 'created',
+              label: '创建时间',
+              control: 'dateRange',
+              rangeKeys: ['created_from', 'created_to'],
+            },
             {
               name: 'warehouse_id',
               label: '仓库',

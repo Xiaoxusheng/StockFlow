@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Flex, Form, Select, Input } from 'antd'
+import { Button, DatePicker, Flex, Form, Input, Select } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
 import type { ReactNode } from 'react'
 
 const { useWatch } = Form
@@ -8,10 +9,23 @@ const { useWatch } = Form
 export interface SearchField {
   name: string
   label: string
-  control: 'input' | 'select'
+  /**
+   * 控件类型：input / select / dateRange。
+   * - dateRange：渲染 RangePicker，提交时**展开为两个 query 参数**（见 rangeKeys），
+   *   与后端 `created_from` / `created_to` 等成对时间参数对齐；
+   * - 仅当目标列表端点**真实支持**时间参数时才使用（后端不消费的参数会造成假筛选）。
+   */
+  control: 'input' | 'select' | 'dateRange'
   options?: Array<{ label: ReactNode; value: string }>
   placeholder?: string
   allowClear?: boolean
+  /**
+   * dateRange 专用：展开输出的两个参数名，缺省 `${name}_from` / `${name}_to`。
+   * 例：name='created' + rangeKeys=['created_from','created_to']。
+   */
+  rangeKeys?: readonly [string, string]
+  /** dateRange 专用：是否带时分秒（缺省 true → 'YYYY-MM-DD HH:mm:ss'；false → 'YYYY-MM-DD'） */
+  withTime?: boolean
 }
 
 export interface SfSearchFormProps {
@@ -58,8 +72,22 @@ export function SfSearchForm({
     () => (initialValues ?? {}) as Record<string, unknown>,
     [initialValues],
   )
-  /** 字段名序列（字符串化以稳定 effect 依赖：fields 由调用方每次渲染新建数组） */
-  const fieldNamesKey = useMemo(() => fields.map((field) => field.name).join(','), [fields])
+  /**
+   * 字段规格序列（字符串化以稳定 effect 依赖：fields 由调用方每次渲染新建数组）。
+   * dateRange 字段编入其展开规则（`name:fromKey~toKey`），供回填把成对 query 参数
+   * 合成 RangePicker 值、提交时再展开回两个参数。
+   */
+  const fieldNamesKey = useMemo(
+    () =>
+      fields
+        .map((field) =>
+          field.control === 'dateRange'
+            ? `${field.name}:${(field.rangeKeys ?? [`${field.name}_from`, `${field.name}_to`]).join('~')}`
+            : field.name,
+        )
+        .join(','),
+    [fields],
+  )
 
   /**
    * 回填：从 URL / 持久化恢复的筛选变化时同步到表单，使刷新后输入框仍回显当前条件。
@@ -71,8 +99,21 @@ export function SfSearchForm({
     if (!hasInitialValues) return
     const next: Record<string, unknown> = {}
     let applied = 0
-    for (const name of fieldNamesKey.split(',')) {
-      if (!name) continue
+    for (const token of fieldNamesKey.split(',')) {
+      if (!token) continue
+      const [name, rangeSpec] = token.split(':')
+      if (rangeSpec) {
+        // dateRange 字段：由成对参数合成 RangePicker 值（缺一边则半边为空）
+        const [fromKey, toKey] = rangeSpec.split('~')
+        const fromRaw = initialValuesRecord[fromKey]
+        const toRaw = initialValuesRecord[toKey]
+        const hasRange = fromRaw !== undefined || toRaw !== undefined
+        next[name] = hasRange
+          ? [fromRaw ? dayjs(String(fromRaw)) : null, toRaw ? dayjs(String(toRaw)) : null]
+          : undefined
+        if (fromRaw || toRaw) applied += 1
+        continue
+      }
       const value = initialValuesRecord[name]
       next[name] = value
       if (value !== undefined && value !== null && value !== '') applied += 1
@@ -84,8 +125,9 @@ export function SfSearchForm({
   const visibleFields = collapsed ? fields.slice(0, 3) : fields
 
   const handleFinish = (values: Record<string, unknown>) => {
-    const cleaned = cleanValues(values)
-    setAppliedCount(Object.keys(cleaned).length)
+    const cleaned = cleanValues(values, fields)
+    // 计数按「筛选项」而非 query 参数个数：dateRange 展开后是 2 个参数但只算 1 项
+    setAppliedCount(countAppliedFields(cleaned, fieldNamesKey))
     onSearch(cleaned)
   }
 
@@ -117,10 +159,14 @@ export function SfSearchForm({
             style={{
               marginBottom: 0,
               /* basis 220px：3 字段 + 查询/重置 在 1161px 视口（内容区 871px）恰好不折行；
-                 宽屏时自由增长到 --sf-search-field-width 上限，窄屏收缩而不折行。 */
-              flex: '1 1 220px',
-              maxWidth: 'var(--sf-search-field-width)',
-              minWidth: 200,
+                 宽屏时自由增长到 --sf-search-field-width 上限，窄屏收缩而不折行。
+                 时间范围控件更宽（两个日期 + 分隔），单独放宽上限与下限。 */
+              flex: field.control === 'dateRange' ? '1 1 300px' : '1 1 220px',
+              maxWidth:
+                field.control === 'dateRange'
+                  ? 'calc(var(--sf-search-field-width) + 120px)'
+                  : 'var(--sf-search-field-width)',
+              minWidth: field.control === 'dateRange' ? 240 : 200,
             }}
           >
             {field.control === 'select' ? (
@@ -129,6 +175,13 @@ export function SfSearchForm({
                 placeholder={field.placeholder ?? `请选择${field.label}`}
                 allowClear={field.allowClear ?? true}
                 style={{ width: '100%' }}
+              />
+            ) : field.control === 'dateRange' ? (
+              <DatePicker.RangePicker
+                showTime={field.withTime !== false}
+                allowClear={field.allowClear ?? true}
+                style={{ width: '100%' }}
+                placeholder={[field.placeholder ?? '开始时间', '结束时间']}
               />
             ) : (
               <Input
@@ -186,12 +239,52 @@ export function SfSearchForm({
   )
 }
 
-/** 去掉 undefined / 空字符串，避免空筛选污染 QueryKey */
-function cleanValues(values: Record<string, unknown>): Record<string, unknown> {
+/**
+ * 已在效果中的筛选项数（用于「已筛选 N 项」提示）。
+ * 按**字段**计数而非 query 参数：dateRange 展开为 from/to 两个参数但只应算 1 项，
+ * 否则「已筛选 2 项」而表单里只填了一个时间范围，与实际过滤条件不符。
+ */
+function countAppliedFields(cleaned: Record<string, unknown>, fieldNamesKey: string): number {
+  let count = 0
+  for (const token of fieldNamesKey.split(',')) {
+    if (!token) continue
+    const [name, rangeSpec] = token.split(':')
+    if (rangeSpec) {
+      const [fromKey, toKey] = rangeSpec.split('~')
+      if (cleaned[fromKey] !== undefined || cleaned[toKey] !== undefined) count += 1
+      continue
+    }
+    if (cleaned[name] !== undefined) count += 1
+  }
+  return count
+}
+
+/**
+ * 去掉 undefined / 空字符串，避免空筛选污染 QueryKey；
+ * dateRange 控件的 `[Dayjs, Dayjs]` 值展开为成对 query 参数（from/to），
+ * 格式缺省 `YYYY-MM-DD HH:mm:ss`（对齐后端 parseTimeParam），withTime=false 时为 `YYYY-MM-DD`。
+ */
+function cleanValues(
+  values: Record<string, unknown>,
+  fields: SearchField[],
+): Record<string, unknown> {
+  const rangeByName = new Map<string, SearchField>()
+  for (const field of fields) {
+    if (field.control === 'dateRange') rangeByName.set(field.name, field)
+  }
   const result: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(values)) {
-    if (value === undefined || value === null || value === '') continue
     if (key === 'collapsed') continue
+    if (value === undefined || value === null || value === '') continue
+    const rangeField = rangeByName.get(key)
+    if (rangeField && Array.isArray(value)) {
+      const [from, to] = value as Array<Dayjs | null | undefined>
+      const [fromKey, toKey] = rangeField.rangeKeys ?? [`${key}_from`, `${key}_to`]
+      const fmt = rangeField.withTime === false ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'
+      if (from) result[fromKey] = from.format(fmt)
+      if (to) result[toKey] = to.format(fmt)
+      continue
+    }
     result[key] = value
   }
   return result

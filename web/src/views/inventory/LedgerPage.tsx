@@ -257,6 +257,14 @@ export default function LedgerPage() {
         <SfSearchForm
           fields={[
             { name: 'business_no', label: '单据编号', control: 'input', placeholder: '来源单据编号' },
+            /* 时间范围：后端 GET /api/inventory/ledgers 支持 created_from/created_to
+               （internal/inventory/handler.go:365-374，成对参数）——按时间查流水为高频诉求 */
+            {
+              name: 'created',
+              label: '创建时间',
+              control: 'dateRange',
+              rangeKeys: ['created_from', 'created_to'],
+            },
             { name: 'change_type', label: '变更类型', control: 'select', options: CHANGE_TYPE_OPTIONS },
             { name: 'serial_no', label: '序列号', control: 'input', placeholder: '序列号' },
             { name: 'sku_id', label: 'SKU ID', control: 'input', placeholder: 'SKU ID（正整数）' },
