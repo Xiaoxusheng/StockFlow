@@ -1,57 +1,24 @@
 import { Button, Drawer, Flex, List, Typography } from 'antd'
-import {
-  AuditOutlined,
-  CheckOutlined,
-  ClockCircleOutlined,
-  CloseCircleOutlined,
-  InfoCircleOutlined,
-  SyncOutlined,
-  WarningOutlined,
-} from '@ant-design/icons'
+import { CheckOutlined } from '@ant-design/icons'
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
-import type { ReactNode } from 'react'
 import { notificationApi, type NotificationItem } from '@/api/notifications'
 import { resolveErrorMessage } from '@/api/client'
 import { formatDateTime } from '@/utils/format'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
-import { STATUS_SEMANTIC_COLOR } from '@/components/common/SfStatusTag'
-import type { StatusSemantic } from '@/types/status'
 
 const { Text } = Typography
 
 /** 单页条数（后端 ParsePage 单页上限 100，internal/response/response.go MaxPageSize） */
 const PAGE_SIZE = 50
 
-// 通知类型 → 语义色：键为后端值域大写枚举（db/migrations/000014 chk_notifications_type：
-// SYSTEM/APPROVAL/STOCK_ALERT/EXPIRY_ALERT/EXCEPTION/TASK，api/notifications.ts
-// NotificationType）。§24 状态色统一：语义 → SfStatusTag 经 --sf-* Token 派生，
-// 禁 antd 预设色（orange/gold 与 --sf-warning、red 与 --sf-danger 不同相）；
-// 未知类型中性兜底。
-const NOTIFICATION_TYPE_SEMANTIC: Record<string, StatusSemantic> = {
-  APPROVAL: 'processing',
-  STOCK_ALERT: 'warning',
-  EXPIRY_ALERT: 'warning',
-  EXCEPTION: 'danger',
-  TASK: 'processing',
-  SYSTEM: 'neutral',
-}
-
-/**
- * 通知类型 → 图标（frontend.md §15.3：审批 / 库存预警 / 效期预警 / 异常 / 任务 / 系统）。
- * 图标承担「类型识别」职责，颜色取自 STATUS_SEMANTIC_COLOR——与 SfStatusTag 共用同一
- * Token 色源（§24），不另造第二套语义色；未知类型中性兜底。
- */
-const NOTIFICATION_TYPE_ICON: Record<string, ReactNode> = {
-  APPROVAL: <AuditOutlined />,
-  STOCK_ALERT: <WarningOutlined />,
-  EXPIRY_ALERT: <ClockCircleOutlined />,
-  EXCEPTION: <CloseCircleOutlined />,
-  TASK: <SyncOutlined />,
-  SYSTEM: <InfoCircleOutlined />,
-}
+// 通知条目**不使用任何彩色装饰**——无左侧色条、无淡彩底、无彩色图标。
+// 层级完全由排版承担：字重（未读 600 / 已读 400）+ 灰度（--sf-text /
+// --sf-text-secondary / --sf-text-muted）+ 留白；未读仅以 6px 主色圆点指示。
+// 类型识别由标题文案自身承担（「库存异常待处理」「待审批：」等），不额外加图标。
+// 规范见 frontend.md §15.3。
 
 export interface NotificationDrawerProps {
   open: boolean
@@ -131,95 +98,63 @@ export function NotificationDrawer({ open, onClose }: NotificationDrawerProps) {
           <List
             dataSource={items}
             renderItem={(item) => {
-              const semantic = NOTIFICATION_TYPE_SEMANTIC[item.type] ?? 'neutral'
-              const accent = STATUS_SEMANTIC_COLOR[semantic]
               const unread = !item.read
               return (
                 <List.Item
-                  style={{ padding: 0, border: 'none', cursor: unread ? 'pointer' : 'default' }}
+                  style={{ padding: '12px 0', cursor: unread ? 'pointer' : 'default' }}
                   onClick={unread && !markRead.isPending ? () => markRead.mutate(item.id) : undefined}
                 >
-                  {/* 通知卡片（frontend.md §15.3）三级层次：
-                      ① 标题行 = 类型图标 + 标题 + 时间（右对齐弱化）
-                      ② 正文（次级色、行高 1.65，与标题拉开权重）
-                      未读 = 左侧语义色条 + 微染底色 + 标题加粗；已读整卡降级为 muted，
-                      一眼可分且无需额外「未读」文字标签。 */}
-                  <div
-                    style={{
-                      position: 'relative',
-                      width: '100%',
-                      marginBottom: 'var(--sf-space-2)',
-                      padding: 'var(--sf-space-3) var(--sf-space-3) var(--sf-space-3) 16px',
-                      border: '1px solid var(--sf-border-subtle)',
-                      borderRadius: 'var(--sf-radius-md)',
-                      background: unread
-                        ? `color-mix(in srgb, ${accent} 6%, var(--sf-surface))`
-                        : 'var(--sf-surface)',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {unread && (
-                      <span
-                        aria-hidden
+                  {/* 列表式条目（frontend.md §15.3）：无卡片、无底色、无彩色条——
+                      层级只靠「字重 + 灰度 + 留白」承担，条目间为 antd List 默认细分隔线。
+                      未读仅以 6px 主色圆点指示；已读留同宽透明占位，保证标题左缘对齐。 */}
+                  <div style={{ display: 'flex', gap: 10, width: '100%', alignItems: 'flex-start' }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        flex: '0 0 auto',
+                        width: 6,
+                        height: 6,
+                        marginTop: 7,
+                        borderRadius: '50%',
+                        background: unread ? 'var(--sf-primary)' : 'transparent',
+                      }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* 标题独占一行（不截断、不被时间挤折行——单号是定位关键信息） */}
+                      <Text
+                        strong={unread}
+                        type={unread ? undefined : 'secondary'}
+                        style={{ display: 'block', fontSize: 14, lineHeight: '20px' }}
+                      >
+                        {item.title}
+                      </Text>
+                      <Text
+                        type={unread ? undefined : 'secondary'}
                         style={{
-                          position: 'absolute',
-                          insetBlock: 0,
-                          insetInlineStart: 0,
-                          width: 3,
-                          background: accent,
-                        }}
-                      />
-                    )}
-                    <Flex align="flex-start" gap="var(--sf-space-2)">
-                      <span
-                        aria-hidden
-                        style={{
-                          flex: '0 0 auto',
-                          marginTop: 1,
-                          fontSize: 15,
-                          lineHeight: '20px',
-                          color: accent,
+                          display: 'block',
+                          marginTop: 4,
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          color: unread ? 'var(--sf-text-secondary)' : 'var(--sf-text-muted)',
                         }}
                       >
-                        {NOTIFICATION_TYPE_ICON[item.type] ?? <InfoCircleOutlined />}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        {/* ① 标题：完整展示不截断（单号是定位通知的关键信息），未读加粗 */}
-                        <Text
-                          strong={unread}
-                          type={unread ? undefined : 'secondary'}
-                          style={{ display: 'block', fontSize: 14, lineHeight: '20px' }}
-                        >
-                          {item.title}
-                        </Text>
-                        {/* ② 正文：次级色 + 舒展行高，与标题拉开权重差 */}
-                        <Text
-                          type={unread ? undefined : 'secondary'}
-                          style={{
-                            display: 'block',
-                            marginTop: 4,
-                            fontSize: 13,
-                            lineHeight: 1.65,
-                            color: unread ? 'var(--sf-text-secondary)' : 'var(--sf-text-muted)',
-                          }}
-                        >
-                          {item.content}
-                        </Text>
-                        {/* ③ 时间：右对齐作元信息锚点（字号最小、色最弱），不占标题宽度 */}
-                        <Text
-                          type="secondary"
-                          style={{
-                            display: 'block',
-                            marginTop: 6,
-                            textAlign: 'right',
-                            fontSize: 12,
-                            color: 'var(--sf-text-muted)',
-                          }}
-                        >
-                          {formatDateTime(item.created_at)}
-                        </Text>
-                      </div>
-                    </Flex>
+                        {item.content}
+                      </Text>
+                      {/* 时间：末行右对齐作元信息锚点（字号最小、灰度最弱） */}
+                      <Text
+                        type="secondary"
+                        style={{
+                          display: 'block',
+                          marginTop: 6,
+                          textAlign: 'right',
+                          fontSize: 12,
+                          lineHeight: '18px',
+                          color: 'var(--sf-text-muted)',
+                        }}
+                      >
+                        {formatDateTime(item.created_at)}
+                      </Text>
+                    </div>
                   </div>
                 </List.Item>
               )

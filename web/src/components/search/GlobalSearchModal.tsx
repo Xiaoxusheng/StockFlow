@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Empty, Input, Modal, Spin, App } from 'antd'
+import { Button, Empty, Input, Modal, Spin, App } from 'antd'
 import type { InputRef } from 'antd'
+import dayjs from 'dayjs'
 import {
   AppstoreOutlined,
   BarcodeOutlined,
@@ -22,13 +23,16 @@ import { canAccess, type UserInfo } from '@/types/permission'
 import { useAuthStore } from '@/stores/auth'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { toStatusKey } from '@/api/warehouse'
+import { resolveErrorMessage } from '@/api/client'
 import './global-search.css'
 
 // ---------- 全局业务搜索命令面板（计划 §2.1 / frontend.md §15.2） ----------
 // Ctrl/Cmd+K 由 ShortcutProvider 打开（全站唯一 keydown 监听点，本组件不自监听全局键盘）。
 // 防抖 300ms；业务搜索 q≥2 字符才发请求（后端 q<2 返回空 groups 的契约前端同样遵守）；
 // 『页面』分组=菜单名搜索（MENU_TREE+canAccess 过滤，候选降级保留——后端不可达时仍可搜页面）。
-// 键盘：↑↓/Tab 循环导航、Enter 直达；Esc 归 antd Modal；鼠标点击直达。无权限项置灰。
+// 键盘：↑↓ 行间移动、Tab/Shift+Tab 分组切换（组间跳转）、Enter 直达；Esc 归 antd Modal；
+// 鼠标点击直达。无权限项置灰。跳转经 items.navigation（kind+id）权威映射，未知 kind
+// 回退单号前缀/type 映射（searchTargets.ts）。
 
 /** 防抖窗口（计划 §2.1 冻结 300ms） */
 const SEARCH_DEBOUNCE_MS = 300
@@ -53,6 +57,12 @@ const TYPE_ICONS: Record<string, React.ReactNode> = {
   doc: <FileTextOutlined />,
   logistics: <BlockOutlined />,
   page: <AppstoreOutlined />,
+}
+
+/** 最近更新时间压缩展示（高密度 WMS 风格：MM-DD HH:mm；异常串原样回显不抛错） */
+function formatCompactTime(value: string): string {
+  const d = dayjs(value)
+  return d.isValid() ? d.format('MM-DD HH:mm') : value
 }
 
 /** 页面分组候选（MENU_TREE 叶子 + canAccess 过滤：与侧边栏可见性同口径） */
@@ -88,6 +98,8 @@ interface FlatRow {
   subtitle?: string
   status?: string
   summary?: string
+  /** YYYY-MM-DD HH:mm:ss（后端原串，展示压缩为 MM-DD HH:mm，title 保留全量） */
+  updatedAt?: string
   /** 置灰原因（无权限）；有值则不可点 */
   disabledReason?: string
   navigateTo: string | null
@@ -123,7 +135,7 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
 
   // 业务搜索：q≥2 才发（后端 q<2 返回空 groups 的契约，前端不发请求省一跳）
   const searchEnabled = open && debounced.length >= MIN_QUERY_LENGTH
-  const { data, isFetching } = useQuery({
+  const { data, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['global-search', debounced],
     queryFn: () => searchApi.search({ q: debounced, limit: SEARCH_LIMIT }),
     enabled: searchEnabled,
@@ -156,6 +168,7 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
           subtitle: item.code,
           status: item.status,
           summary: item.summary,
+          updatedAt: item.updated_at,
           navigateTo: target && allowed ? target.path : null,
         })
       }
@@ -179,6 +192,19 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
     listRef.current?.scrollTo({ top: 0 })
   }, [rows])
 
+  /** 各分组首条索引（Tab 分组切换的跳转锚点；groupTitle 变化即组界） */
+  const groupStarts = useMemo<number[]>(() => {
+    const starts: number[] = []
+    let prev: string | null = null
+    rows.forEach((row, index) => {
+      if (row.groupTitle !== prev) {
+        starts.push(index)
+        prev = row.groupTitle
+      }
+    })
+    return starts
+  }, [rows])
+
   // 高亮行跟随滚动（键盘导航可见性）
   useEffect(() => {
     listRef.current
@@ -198,12 +224,24 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey)) {
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
       setActiveIndex((i) => (rows.length === 0 ? 0 : (i + 1) % rows.length))
-    } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey)) {
+    } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setActiveIndex((i) => (rows.length === 0 ? 0 : (i - 1 + rows.length) % rows.length))
+    } else if (e.key === 'Tab') {
+      // Tab/Shift+Tab=分组切换：跳到下/上一组首条（循环）；↑↓ 才是逐行移动
+      e.preventDefault()
+      if (groupStarts.length === 0) return
+      let groupIdx = 0
+      groupStarts.forEach((start, i) => {
+        if (start <= activeIndex) groupIdx = i
+      })
+      const next = e.shiftKey
+        ? (groupIdx - 1 + groupStarts.length) % groupStarts.length
+        : (groupIdx + 1) % groupStarts.length
+      setActiveIndex(groupStarts[next])
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const row = rows[activeIndex]
@@ -212,7 +250,7 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
     // Esc 归 antd Modal 自身（计划 §2.9：不双抢）
   }
 
-  const showEmpty = searchEnabled && rows.length === 0 && !isFetching
+  const showEmpty = searchEnabled && rows.length === 0 && !isFetching && !isError
   const hintTooShort = debounced.length > 0 && debounced.length < MIN_QUERY_LENGTH
 
   return (
@@ -239,6 +277,16 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
           suffix={isFetching ? <Spin size="small" /> : null}
         />
         <div className="sf-global-search__list" ref={listRef}>
+          {isError && searchEnabled && (
+            <div className="sf-global-search__error" role="alert">
+              <span className="sf-global-search__error-text">
+                搜索失败：{resolveErrorMessage(error)}
+              </span>
+              <Button size="small" onClick={() => void refetch()}>
+                重试
+              </Button>
+            </div>
+          )}
           {rows.map((row, index) => (
             <button
               type="button"
@@ -258,6 +306,14 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
               </span>
               <span className="sf-global-search__item-side">
                 {row.status && <SfStatusTag status={toStatusKey(row.status)} />}
+                {row.updatedAt && (
+                  <span
+                    className="sf-global-search__item-time"
+                    title={`最近更新：${row.updatedAt}`}
+                  >
+                    {formatCompactTime(row.updatedAt)}
+                  </span>
+                )}
                 <span className="sf-global-search__item-group">
                   {TYPE_ICONS[row.type]}
                   {row.groupTitle}
@@ -277,7 +333,7 @@ export function GlobalSearchModal({ open, onClose }: { open: boolean; onClose: (
               输入至少 {MIN_QUERY_LENGTH} 个字符搜索业务数据；页面名称仍可直接匹配
             </div>
           )}
-          {!showEmpty && !hintTooShort && rows.length === 0 && (
+          {!showEmpty && !hintTooShort && !isError && rows.length === 0 && (
             <div className="sf-global-search__empty">
               输入关键词搜索业务数据，或输入页面名称直达菜单页
             </div>

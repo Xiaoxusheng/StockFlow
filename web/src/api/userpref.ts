@@ -1,7 +1,14 @@
 import { http } from './client'
 
-// ---------- 用户偏好与保存视图（计划 §2.2/§2.3 / api.md §9 效率层节 / apidocs/swagger.json /api/user/*） ----------
+// ---------- 用户偏好（计划 §2.3 / api.md §9 效率层节 / apidocs/swagger.json /api/user/preferences） ----------
 // 统一信封 {code,message,data,request_id}；业务 ID 字符串；时间 YYYY-MM-DD HH:mm:ss。
+//
+// 归属收敛（2026-10-06，本文件原注释「views/preferences 共存」裁定废止）：保存视图 API
+// 单一来源为 **api/savedViews.ts**（F2 交付，useSavedViews/SfViewBar 消费）——本文件原并列的
+// views CRUD（listViews/createView/updateView/deleteView）零消费方，按 savedViews.ts 头注
+// 「勿双轨长期并存」移除，避免同一端点双类型双轨。「最近操作」单一来源为 api/task.ts
+// taskApi.recentOperations（GET /api/workbench/recent-operations）；「最近访问」不设独立
+// activities 端点（计划 §2.5 裁决：属导航态，存偏好 recent_visits，结构见 RecentVisit）。
 
 /**
  * 偏好 key 服务端白名单（internal/userpref 冻结清单）：白名单外后端 400 invalidParam。
@@ -32,33 +39,6 @@ export interface RecentVisit {
 /** 偏好读出参：{key: value} 映射（value 为原始 jsonb，白名单内键均可缺省） */
 export type PreferenceMap = Partial<Record<PreferenceKey, unknown>>
 
-/**
- * 保存视图（计划 §2.2，GET/POST /api/user/views、PUT/DELETE /api/user/views/{id}）。
- * filters_json/columns_json 为 jsonb 原样存取；非本人 404、重名 409（resolveErrorMessage 展示）。
- */
-export interface SavedView {
-  id: string
-  /** 绑定页面键（如 'inventory.stock'，与列表页 storageKey 同源口径） */
-  page_key: string
-  name: string
-  filters_json: unknown
-  columns_json: unknown
-  page_size: number
-  is_default: boolean
-  created_at?: string
-  updated_at?: string
-}
-
-export interface SavedViewPayload {
-  page_key: string
-  name: string
-  filters_json: unknown
-  columns_json: unknown
-  page_size: number
-  /** 设为该页默认视图（同页互斥由后端保证） */
-  is_default?: boolean
-}
-
 export const userprefApi = {
   /**
    * 读取偏好：keys 缺省返回全部白名单键。
@@ -76,25 +56,5 @@ export const userprefApi = {
    */
   setPreference(key: PreferenceKey, value: unknown): Promise<void> {
     return http.put<void>(`/api/user/preferences/${key}`, value)
-  },
-
-  /** 保存视图列表（page_key 必填） */
-  listViews(pageKey: string): Promise<SavedView[]> {
-    return http.get<SavedView[]>('/api/user/views', { params: { page_key: pageKey } })
-  },
-
-  /** 新建保存视图（重名 409） */
-  createView(payload: SavedViewPayload): Promise<SavedView> {
-    return http.post<SavedView>('/api/user/views', payload)
-  },
-
-  /** 更新保存视图（非本人 404、重名 409） */
-  updateView(id: string, payload: SavedViewPayload): Promise<SavedView> {
-    return http.put<SavedView>(`/api/user/views/${id}`, payload)
-  },
-
-  /** 删除保存视图（非本人 404） */
-  deleteView(id: string): Promise<void> {
-    return http.delete<void>(`/api/user/views/${id}`)
   },
 }

@@ -5,6 +5,19 @@ import { http } from './client'
 // q < 2 后端直接返回空 groups 不做 SQL；q 上限 64；limit 缺省 5 上限 20。
 // 前端契约：q ≥ 2 字符才发请求 + 300ms 防抖（GlobalSearchModal 承担）。
 
+/**
+ * 跳转标识（api.md §9 效率层节 B2 补录）：后端不编码前端路由，kind+id 为稳定实体标识，
+ * 路由映射由 config/searchTargets.ts 消费（navigation 优先，type/单号前缀为回退）。
+ * kind 权威值：普通 type 与 type 本值同值（sku/product/barcode/batch/serial/bin/
+ * warehouse/customer/supplier）；doc 组为具体单据 kind（purchase_order/inbound_order/
+ * sales_order/outbound_order/transfer_order/count_order/exception）；logistics→shipment。
+ */
+export interface SearchNavigation {
+  kind: string
+  /** 业务 ID（字符串形态，api.md §2） */
+  id: string
+}
+
 /** 搜索命中项（后端 SearchItem，database.ID 序列化为字符串） */
 export interface SearchHitItem {
   id: string
@@ -19,6 +32,8 @@ export interface SearchHitItem {
   summary?: string
   /** YYYY-MM-DD HH:mm:ss */
   updated_at?: string
+  /** 跳转标识（additive 契约字段；后端恒返回，前端 navigation 优先消费） */
+  navigation?: SearchNavigation
 }
 
 /** 按类型分组的结果组（后端 SearchGroup） */

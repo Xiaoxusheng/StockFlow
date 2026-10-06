@@ -1,8 +1,9 @@
 import { Drawer, Tag, Typography } from 'antd'
-import type { ShortcutItem } from './ShortcutProvider'
+import { isShortcutEnabled, type ShortcutItem } from './ShortcutProvider'
 
-// ---------- 快捷键帮助面板（计划 §2.9） ----------
+// ---------- 快捷键帮助面板（计划 §2.9 / frontend.md §32.4） ----------
 // 按注册表驱动渲染，零手写文档；Esc 归 antd Drawer 自身（ShortcutProvider 不双抢）。
+// 被禁用（enabled=false 或求值为 false）的键位不展示——面板与实际行为一致（§32.4）。
 // 样式走 --sf-* Token，动效仅 antd Drawer 自带进出场（frontend.md §25/§31）。
 
 const SCOPE_TITLES: Record<ShortcutItem['scope'], string> = {
@@ -47,7 +48,7 @@ export function ShortcutHelpDrawer({
       maskClosable
     >
       {scopes.map((scope) => {
-        const group = items.filter((it) => it.scope === scope)
+        const group = items.filter((it) => it.scope === scope && isShortcutEnabled(it))
         if (group.length === 0) return null
         return (
           <section key={scope} style={{ marginBottom: 'var(--sf-space-4)' }}>

@@ -89,6 +89,23 @@ interface ParsedCombo {
   key: string
 }
 
+/** 键名别名归一：注册表用展示形态（→/←/↑/↓），KeyboardEvent.key 为 ArrowRight 等 */
+const KEY_ALIASES: Readonly<Record<string, string>> = {
+  arrowright: 'right',
+  arrowleft: 'left',
+  arrowup: 'up',
+  arrowdown: 'down',
+  '→': 'right',
+  '←': 'left',
+  '↑': 'up',
+  '↓': 'down',
+}
+
+function normalizeKey(key: string): string {
+  const lower = key.toLowerCase()
+  return KEY_ALIASES[lower] ?? lower
+}
+
 function parseCombo(combo: string): ParsedCombo {
   const parts = combo.split('+').map((s) => s.trim().toLowerCase())
   const key = parts[parts.length - 1] ?? ''
@@ -111,7 +128,7 @@ function matchesCombo(item: ShortcutItem, e: KeyboardEvent): boolean {
   if (p.shift && !e.shiftKey) return false
   if (p.alt && !e.altKey) return false
   if (!p.mod && !p.ctrl && !p.shift && !p.alt && (e.ctrlKey || e.metaKey || e.altKey)) return false
-  return e.key.toLowerCase() === p.key
+  return normalizeKey(e.key) === normalizeKey(p.key)
 }
 
 /** 输入态判定（计划 §2.9 冻结规则）：INPUT/TEXTAREA/SELECT/isContentEditable 或扫码输入标记 */
@@ -124,7 +141,8 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return !!el.closest('[data-sf-scan-input]')
 }
 
-function isItemEnabled(item: ShortcutItem): boolean {
+/** 条目是否启用（enabled 支持布尔或求值函数；分发与帮助面板共用同一判定） */
+export function isShortcutEnabled(item: ShortcutItem): boolean {
   return typeof item.enabled === 'function' ? item.enabled() : item.enabled !== false
 }
 
@@ -201,7 +219,7 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
             (it) =>
               it.chordGroup === pending.group &&
               it.chordKey === e.key.toLowerCase() &&
-              isItemEnabled(it),
+              isShortcutEnabled(it),
           )
           if (hit) {
             e.preventDefault()
@@ -214,7 +232,7 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 
       // 2. 进入 chord 窗口：裸 'g' 键（无修饰、非输入态）启动 800ms 序列窗口
       if (!editable && !e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === 'g') {
-        if (list.some((it) => it.chordGroup && isItemEnabled(it))) {
+        if (list.some((it) => it.chordGroup && isShortcutEnabled(it))) {
           pendingChordRef.current = { group: 'g', until: performance.now() + CHORD_WINDOW_MS }
           e.preventDefault()
           return
@@ -223,7 +241,7 @@ export function ShortcutProvider({ children }: { children: ReactNode }) {
 
       // 3. 普通条目匹配：输入态仅 global 生效（页面级快捷键全部禁用）
       for (const item of list) {
-        if (!isItemEnabled(item)) continue
+        if (!isShortcutEnabled(item)) continue
         if (editable && item.scope !== 'global') continue
         if (!matchesCombo(item, e)) continue
         e.preventDefault()
