@@ -5,6 +5,7 @@ import { PictureOutlined } from '@ant-design/icons'
 import type { ExceptionId, ExceptionItem, ExceptionStatus } from '@/api/exception'
 import { EXCEPTION_EXECUTE_PERMISSION, EXCEPTION_STATUS_TAG, exceptionApi } from '@/api/exception'
 import { fetchFileObjectUrl, fileApi } from '@/api/file'
+import { resolveErrorMessage } from '@/api/client'
 
 // ---------- 异常取证图片消费编排（异常域专属消费代码；共享 api 零改动只消费） ----------
 //
@@ -77,21 +78,45 @@ export interface ExceptionImageItem {
   /** 后端 image_refs 原始引用（/api/files/{id}/download） */
   ref: string
   status: 'loading' | 'ready' | 'failed'
-  /** 认证 Blob objectUrl（ready 时存在；变更/卸载时统一 revoke） */
+  /** 认证 Blob objectUrl（ready 时存在；仅在组件卸载时统一 revoke，见下） */
   url?: string
+  /** 取流失败原因（后端 message / 网络错误文案）——如实呈现便于定位（401？404？过期？） */
+  error?: string
+}
+
+export interface ExceptionImageUrlsResult {
+  items: ExceptionImageItem[]
+  /** 重新拉取全部图片（失败占位上的「重试」入口） */
+  reload: () => void
 }
 
 /**
- * image_refs → 认证 objectUrl 列表（并发拉取 + 变更/卸载 revoke）。
- * refs 以 join 键为依赖（引用集合不变不重拉；详情刷新产生新集合时整组重建），
- * 请求失败单项降级 failed 占位（不整组报错，不造假图）。
+ * image_refs → 认证 objectUrl 列表。
+ *
+ * **URL 生命周期**：所有 objectUrl 累积在 ref Set 中，**仅在组件卸载时**统一 revoke。
+ * 不在 refsKey 变化时 revoke —— 详情刷新（自动刷新 / 窗口聚焦 refetch）会产生新的 refs
+ * 数组，此时若立即 revoke 旧 URL，正被 `<img>`/antd 预览层引用的 blob 会失效成破图
+ * （「再次点开图片消失」的成因之一）。代价是刷新期间旧 URL 短暂多占内存，可接受。
+ *
+ * 失败单项降级 failed（带 error 文案）+ 可 reload 重试；不整组报错、不造假图。
  */
-export function useExceptionImageUrls(refs: ReadonlyArray<string>): ExceptionImageItem[] {
+export function useExceptionImageUrls(refs: ReadonlyArray<string>): ExceptionImageUrlsResult {
   const refsKey = useMemo(() => refs.join('\n'), [refs])
   const refsRef = useRef(refs)
   refsRef.current = refs
+  const [reloadToken, setReloadToken] = useState(0)
   const [items, setItems] = useState<ExceptionImageItem[]>(() =>
     refs.filter((ref) => ref.trim() !== '').map((ref) => ({ ref, status: 'loading' as const })),
+  )
+
+  /** 活着的 objectUrl 集合（仅在卸载时统一释放） */
+  const urlsRef = useRef<Set<string>>(new Set())
+  useEffect(
+    () => () => {
+      urlsRef.current.forEach((url) => URL.revokeObjectURL(url))
+      urlsRef.current.clear()
+    },
+    [],
   )
 
   useEffect(() => {
@@ -102,15 +127,14 @@ export function useExceptionImageUrls(refs: ReadonlyArray<string>): ExceptionIma
     }
     setItems(list.map((ref) => ({ ref, status: 'loading' as const })))
     let cancelled = false
-    const created: string[] = []
     void Promise.all(
       list.map(async (ref): Promise<ExceptionImageItem> => {
         try {
           const url = await fetchFileObjectUrl(ref)
-          created.push(url)
+          urlsRef.current.add(url)
           return { ref, status: 'ready', url }
-        } catch {
-          return { ref, status: 'failed' }
+        } catch (error) {
+          return { ref, status: 'failed', error: resolveErrorMessage(error) }
         }
       }),
     ).then((resolved) => {
@@ -118,11 +142,11 @@ export function useExceptionImageUrls(refs: ReadonlyArray<string>): ExceptionIma
     })
     return () => {
       cancelled = true
-      created.forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [refsKey])
+  }, [refsKey, reloadToken])
 
-  return items
+  const reload = useMemo(() => () => setReloadToken((token) => token + 1), [])
+  return { items, reload }
 }
 
 export interface ExceptionImageStripProps {
@@ -137,16 +161,20 @@ export interface ExceptionImageStripProps {
  * refs 为空渲染 null（空态文案由调用方承担）。后端无图片移除端点——不提供假删除。
  */
 export function ExceptionImageStrip({ refs, width = 72, height = 72 }: ExceptionImageStripProps) {
-  const items = useExceptionImageUrls(refs)
+  const { items, reload } = useExceptionImageUrls(refs)
   if (items.length === 0) return null
   const boxStyle: CSSProperties = {
     width,
     height,
     display: 'flex',
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 2,
+    padding: 0,
     borderRadius: 4,
     border: '1px dashed var(--sf-border)',
+    background: 'none',
     color: 'var(--sf-text-muted)',
   }
   return (
@@ -161,18 +189,24 @@ export function ExceptionImageStrip({ refs, width = 72, height = 72 }: Exception
               height={height}
               style={{ objectFit: 'cover', borderRadius: 4 }}
             />
-          ) : (
-            <div
-              key={`${item.ref}-${index}`}
-              style={boxStyle}
-              title={item.status === 'failed' ? `图片加载失败：${item.ref}` : undefined}
-            >
-              {item.status === 'loading' ? (
-                <Spin size="small" />
-              ) : (
-                <PictureOutlined aria-label="图片加载失败" />
-              )}
+          ) : item.status === 'loading' ? (
+            <div key={`${item.ref}-${index}`} style={boxStyle} aria-label="图片加载中">
+              <Spin size="small" />
             </div>
+          ) : (
+            /* 失败态：如实给出**原因**并提供**重试**入口——原实现仅一个图标，
+               用户只看到「图片不见了」却无从判断是权限、过期还是网络问题。 */
+            <button
+              type="button"
+              key={`${item.ref}-${index}`}
+              style={{ ...boxStyle, cursor: 'pointer', font: 'inherit' }}
+              title={`图片加载失败：${item.error ?? '未知原因'}\n引用：${item.ref}\n点击重试`}
+              aria-label="图片加载失败，点击重试"
+              onClick={reload}
+            >
+              <PictureOutlined />
+              <span style={{ fontSize: 11, lineHeight: '14px' }}>失败，重试</span>
+            </button>
           ),
         )}
       </Space>
