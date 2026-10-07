@@ -1,4 +1,3 @@
-import { Tag } from 'antd'
 import { resolveStatus, type StatusSemantic } from '@/types/status'
 
 /**
@@ -31,21 +30,38 @@ export interface SfStatusTagProps {
  * 统一状态标签：所有业务状态一律走这里，禁止页面自己决定颜色。
  * 未知状态兜底为中性灰 + 原始文案，后端新增状态不阻塞页面。
  */
-export function SfStatusTag({ status, label, semantic, bordered }: SfStatusTagProps) {
+/**
+ * 统一状态标签（frontend.md §24，2026-10-06 样式改版）：**色点 + 文字**式——
+ * 无底色、无边框（原彩色 chip 底色/描边样式废弃，用户口径：装饰性彩色底太重）。
+ * 语义仍由「圆点颜色 + 文字颜色」承担（同一 SEMANTIC_COLOR 色源），全站状态观感统一克制。
+ * bordered prop 保留签名兼容（改版后无描边概念，内部忽略）。
+ */
+export function SfStatusTag({ status, label, semantic, bordered: _bordered }: SfStatusTagProps) {
   const meta = resolveStatus(status)
   const text = meta?.label ?? label ?? status ?? '-'
   const color = SEMANTIC_COLOR[meta?.semantic ?? semantic ?? 'neutral']
   return (
-    <Tag
-      bordered={bordered}
+    <span
       style={{
-        marginInlineEnd: 0,
-        color,
-        backgroundColor: `color-mix(in srgb, ${color} 12%, transparent)`,
-        borderColor: `color-mix(in srgb, ${color} 24%, transparent)`,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 13,
+        lineHeight: '20px',
+        whiteSpace: 'nowrap',
       }}
     >
-      {text}
-    </Tag>
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          flex: '0 0 auto',
+        }}
+      />
+      <span style={{ color }}>{text}</span>
+    </span>
   )
 }

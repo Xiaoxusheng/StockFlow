@@ -830,6 +830,8 @@ useIdempotentMutation / utils/idempotency.ts  幂等提交包装（自动附 Ide
 
 状态颜色全局统一：正常、成功、处理中、待处理、警告、危险、禁用、异常。**不要每个页面自己决定颜色**（通过 SfStatusTag + Token 状态色）。
 
+**状态标签样式（2026-10-06 改版，用户口径「彩色底标签不好看」）**：SfStatusTag 由「语义色 12% 底 + 24% 描边的圆角 chip」改为**「语义色圆点（6px）+ 同色文字」**——无底色、无边框，语义仍由圆点与文字颜色承担（同一 SEMANTIC_COLOR 色源）。`bordered` prop 保留签名兼容（改版后无描边概念，内部忽略）。作用域为**全站所有状态展示**（表格状态列、详情页、抽屉、批量结果等）——一处组件改版全站生效，禁止任何页面恢复彩色底样式。
+
 控件高度统一走 ConfigProvider `token.controlHeight: 32` 下限（App.tsx 映射，任务书 §24 Form 控件 32~36px）；状态色取值仅维护于 tokens.css 的 `--sf-*`，SfStatusTag 与侧边栏选中态经 `color-mix(var(--sf-*))` 派生、改 Token 值自动跟随，组件无需回调。
 
 ---
