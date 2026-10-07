@@ -61,3 +61,7 @@ web/public/__urlsync-check.html
 
 # Agent 本地任务状态（TASK_STATE 等，工作状态以 docs/tasks/current.md 为准）
 .agent/
+
+# 构建产物输出到非标准路径（并行会话产生，防误提交）
+out/
+web/out/
