@@ -12,7 +12,64 @@
 
 ---
 
+## [2026-10-07] fix(server)+fix(web)：安全与性能加固第二轮——建议项全量落地 + 三项设计题（计划 docs/plans/2026-10-07-security-perf-hardening-round2.md）
+
+- **安全（后端）**：① JWT 密钥强度——auth 与 devices 令牌密钥统一拒绝 <32 字节或单一字符类别（弱口令式密钥可离线爆破 HS256）；② loginGuard.Fail 改 Redis Lua 原子 INCR+EXPIRE（修「Expire 失败留无 TTL 永久计数键→正常用户一次错密反复锁定」，历史孤儿键自动补窗口）；③ admin 锁定豁免 + 锁定审计——豁免名单默认 `[admin]`（`SF_AUTH_LOCK_EXEMPT` 可覆盖），防对已知账号的低成本定向锁定 DoS（IP 限流与失败计数保留），真实锁定写操作日志（module=auth/action=locked，best-effort）；④ 新增 `middleware.SecureHeaders`（nosniff/X-Frame-Options: DENY/Referrer-Policy；CSP 属前端策略、HSTS 属反代层，注释说明）；⑤ `/api/devices/activate` 免凭证写端点挂 IP 限流（`server.device_activate_rate_per_minute` 默认 30，route-aware 挂载不误伤 resolve/heartbeat）；⑥ `server.public_base_url` 固定设备激活二维码 Host（空=沿用旧行为）。
+- **安全（datax/reports）**：文件中心列表与库存预警 keyword 的 ILIKE 通配符转义（%/_/\，防结果集污染）；上传文件名按字节截断到 255（UTF-8 rune 边界安全，S7 同口径——超列宽会使登记 INSERT 失败连带事务回滚）。
+- **性能（库存核心，并发/一致性）**：① **LED 流水号号段预取**（internal/docnum/prefetch.go，设计题决策 A）——进程内号段缓存 + 独立短事务原子批量预留（多实例安全靠 DB 原子 UPDATE 划分），消除「每条流水取号持计数行锁至事务提交」造成的全系统库存写事务提交尾串行化；**LED 允许跳号（ledger_no 唯一性不变）**，inventory-rules.md §4 同步；② ReleaseLock 与 Deduct/TransferOut 统一锁序（inventory→locks，消除并发发货核销×取消释放的 40P01 死锁窗口）；③ 唯一冲突同事务重试改 SAVEPOINT（ensureRow/writeLedger/writeAdjustment/EnsureBatch/docnum——PG 事务 23505 后 aborted，原重试路径不可达）；④ 序列号读台账加 FOR UPDATE + updateSerial 状态守卫（堵并发双订单核销同一序列号的「一物两卖」台账损坏）。docnum 的 SAVEPOINT 按方言能力检测启用（`gorm.SavePointerDialectorInterface`），测试假方言自动退回旧语义。
+- **性能（其他）**：① **幂等占用行惰性回收**（设计题决策 A）——PROCESSING 超 TTL（3h，与 asynq 显式超时 2h 对齐）原子抢占接管，消除崩溃后同 Idempotency-Key 恒 409 需人工清数；**语义变化：TTL 后同键重放视为新请求**（doc.go 同步）；② asynq 入队显式 `asynq.Timeout`（默认 2h，修「静默吃库默认 30min→超大导出注定超时且 4 倍整文件重生成」）；③ 调拨/盘点/销售明细逐行 INSERT 改多值批量 INSERT...RETURNING（4 处，一次往返）；④ 迁移 000026：operation_logs(username/ip) trgm GIN 索引（审计大表 ILIKE 检索免全表扫），database.md 补录 000025/000026；⑤ 前端批次 options 规范化缓存键 `batchOptionsKey`（去重排序稳定字符串）——修 queryKey 含行序敏感数组导致的重复全量拉取，三个弹窗自造 key 统一收敛。
+- **测试**：go build/vet + go test 28 包全绿（含新增：docnum 号段并发、idempotency 接管/未到期 409、secure_headers、asynq 超时解析）；tsc/eslint（0 error）/前端单测 40 例/vite build 绿；govulncheck 复扫：代码调用面零漏洞。本机缺 gcc 未跑 `-race`（建议 CI 补：auth/idempotency/inventory）。
+- **影响范围**：internal/{auth,middleware,config,router,devices,datax,reports,inventory,docnum,idempotency,asynqx,stockops,sales,printing}、db/migrations/000026、web/src/api/options.ts 及 6 个消费页、config.example.yaml、docs/{inventory-rules,permission,deployment,database,changelog}.md。运维注意：`SF_AUTH_JWT_SECRET`/`SF_DEVICES_JWT_SECRET` 现要求 ≥32 字节且非单一字符类别（旧弱密钥启动即拒绝）；新增 `SF_AUTH_LOCK_EXEMPT`、`SF_SERVER_PUBLIC_BASE_URL`、`SF_SERVER_DEVICE_ACTIVATE_RATE_PER_MINUTE`。
+
+---
+
+## [2026-10-07] feat(server)+feat(web)：登录页高级感重构 + 图像验证码（人机闸）
+
+- **后端（internal/auth/captcha.go，零第三方依赖）**：`GET /api/auth/captcha`（公开端点）签发 4 位 SVG 验证码（易混淆字符剔除 0O1IiLl、随机旋转/错位/配色 + 干扰线噪点，data URL 直出）；答案存 Redis `sf:captcha:{id}`（TTL 默认 3m，`SF_AUTH_CAPTCHA_TTL` 可配）；`POST /api/auth/login` 请求体新增必填 `captcha_id/captcha_code`，handler 层**人机闸先于凭据校验**（校验即消费、一次性防重放、恒定时间比较、大小写归一），错误 400 `AUTH_CAPTCHA_INVALID`。安全口径：验证码是安全闸而非限流计数，Redis 故障签发/校验一律 fail-closed；验证码尝试不计入 loginGuard 失败锁定（该计数只反映凭据尝试）。校验落 handler 层 → 42 处 svc.Login 服务层测试零波及。
+- **前端（LoginPage.tsx 重构 + global.css sf-login-* 节）**：左右分屏——左侧深海军蓝品牌面板（≥1024px，SfLogo+双低饱和径向辉光+「一套系统 管全仓流转」headline+三条产品价值行+版本脚注；渐变仅品牌区豁免使用），右侧表单区（欢迎回来 title + 大号输入 + 验证码行「输入框 + 124×40 SVG 图片（点击刷新/hover 主色描边/加载降透明）」+ 大号主按钮 + 版权脚注）；全部走 --sf-* token，Dark 自适应；<1024px 单列（品牌行紧凑化）。登录失败自动换新验证码并清空输入（服务端一次性消费）。首登强改密流程与 DEV_BYPASS 保留。
+- **测试**：captcha_test.go 5 用例（签发形态/一次性消费/错误即作废/Redis 故障 fail-closed/大小写归一）+ handler_test.go 改造（TestHandlerLogin 表驱动补「缺验证码字段/答案错误」两路 + TestHandlerCaptcha 签发契约 + httpLogin 助手贯穿 refresh/password 用例）；go build/vet + 全 auth 包测试绿；tsc/eslint 绿。
+- **端到端实测**（_diag/ui_check/login_verify.mjs，Light/Dark/900px 三轮）：错误验证码 → 400「验证码错误或已过期」+ 前端自动换新图；Redis 直读当前验证码答案 → 登录成功跳 /dashboard；pageerror=0。antd6 按钮双字自动插空格「登 录」坑已在脚本定位器规避。
+- **影响范围**：internal/auth/{captcha.go,captcha_test.go,handler.go,auth.go,config.go,service_auth.go,errors.go,handler_test.go}、web/src/{api/auth.ts,views/login/LoginPage.tsx,styles/global.css}、docs/api.md §6。login 契约为破坏性变更：旧脚本直连 POST /api/auth/login 必须先取验证码（自动化可经 Redis 读答案）。
+
 ## 文档记录
+
+## [2026-10-07] 修复：安全与性能修复轮——跨仓越权写收口（四域）+ 打印/导入越权读取 + 报表扫描面治理（govulncheck 三依赖补丁升级）
+
+- **依赖升级（f0，govulncheck fixed 版本）**：golang-jwt/jwt/v5 5.2.0→5.2.2（GO-2025-3553 header 解析过量分配，触达 devices.tokenManager.Parse）、quic-go 0.59.0→0.59.1（GO-2026-5676 HTTP/3 QPACK）、golang.org/x/text 0.38.0→0.39.0（GO-2026-5970 无效输入死循环）；`go mod tidy` 完成。
+- **跨仓越权写（IDOR）收口（f16，高危）**：sales/stockops/purchase/returns 四域全部按 :id/:no 直取的写动作端点（拣货/复核领取确认、出库/发货、调拨六动作、盘点六动作、移库、采购单/入库单/上架/质检/退货全链路）在 Service 层加载实体后校验 `auth.WarehouseScope` 快照，越仓一律按不存在处理（与各域详情接口 fail-closed 同口径）。载体：`stock.Actor` 新增 `Scope *WhScope`（各域 actorOf 注入；nil=未注入仅限内部路径/测试，行为与注入前一致）；调拨沿用 `scopeVisibleTransfer`"任一端可见"、盘点/移库/其余单据按单仓判定。建单入口的仓库参数校验不属本轮（与既有 create 口径一致）。
+- **状态机守卫 UPDATE 丢弃影响行数修复（f9）**：transfer.go 审核驳回/审核/出库/到货/收货/取消与 count.go 开始/完成实盘/完成/驳回/取消共 11 处 `n==0` 显式 409 冲突——并发"审核 vs 取消""双人同时完成盘点"不再产生 CANCELLED 单残留 ORDER_HOLD 预占/重复盘盈。
+- **导入预览越权读取收口（f8/f24）**：GET /api/imports/:id/preview 传 `fileScopeOf(c)`，导入任务解析行按冻结规则仅创建人及全量范围用户可见（与错误文件下载 service_errorfile.go 同口径），越界 404 防枚举。
+- **打印中心跨仓装配/读取收口（f20）**：创建任务时 `auth.WarehouseScope` 快照随 context 下传（printing/scope.go），五个单据类 ContentReader（INBOUND/OUTBOUND/PICK/SHIPMENT/COUNT_ORDER）越仓对象按 `PRINT_DATA_NOT_FOUND` failed（Assemble 冻结签名不变）；GET /api/prints/tasks/:id 渲染数据包按"创建人或全量范围"收口（datax 导入任务产物 fileVisible ③ 同规则）。
+- **批量领取上限（f17）**：sales/purchase 两域 batch-claim ids 上限 100（`batchClaimMaxIDs`，超出 400）——逐条独立事务串行执行不再可被十万级 ids 拖垮连接池。
+- **xlsx 解压预算收紧（f15）**：单部件 256MB→32MB、总量 512MB→64MB（excel.go）——预算对 excelize.OpenReader 请求内同步二次全量加载的内存峰值负责，高压缩比 xlsx 放大攻击在预检即拒绝；合法 5000 行量级导入（数 MB）不受影响。
+- **刷新凭证绑定 User-Agent（f3 部分）**：Refresh 校验请求 UA 与会话登记 UA 一致（internal/auth/service_auth.go），被盗凭证跨设备重放不可续期（拒绝但不删会话，正牌用户无感）；不绑 IP（移动办公跨网切换属正常行为）。站点加 CSP 基线 meta（object-src 'none'; base-uri 'self'; form-action 'self'，零破坏风险三项；script/style 等源限制待预览/下载流回归后另行收紧）。access/refresh token 的 httpOnly Cookie 化属协议改造未落地（见本轮 notes）。
+- **HTTP 超时与大产物匹配（f21）**：server.write_timeout 默认 15s→300s、read_timeout 15s→60s——200MB 导出产物（ExportMaxFileBytes）与 inline 同步导出不再被写超时中断。
+- **DB 慢查询闸门（f31）**：新增 `database.statement_timeout`（默认 2m，pgx 启动参数下发，0=关闭）——reports/datax 全链路无应用层超时的兜底，分钟级报表不再无限占住连接池。
+- **报表扫描面治理（f7/f25/f28/f12/f19/f23）**：① dashboard/分析页锚点回推（netAfterByDay/netAfterValueByDay）由 generate_series × 流水非等值 JOIN（代价≈全表×天数）改写为后缀和两查询（尾段标量+窗口逐日净变化，索引范围扫描一遍），数学等价、366 天 custom 档分钟级→秒级；② paged() 首页未满页直接以行数为 total，单页结果的常见场景 DB 开销减半；③ 迁移 000025：inventory_ledgers 补 (change_type,created_at)/(warehouse_id,sku_id,change_type,created_at)/bin/batch/serial 五索引（flowStats/lastm 全历史聚合/流水列表过滤），quality_items.batch_no、quality_orders.source_no、quality_orders.qc_no trgm、scan_logs 三列 trgm（追溯与 PDA 扫描日志检索）。
+- **盘点开始事务治理（f6 部分）**：StartCount 范围行数上限 5000（超限 400 提示按库区/货架拆分，加锁前快速失败）；SKU 开关按 SKU 记忆化；ReplaceCountItems 改分块多行 INSERT（1000 行/批，RETURNING 回填不变）——单事务 SQL 往返从"行数×10"量级收敛，最坏情况有界。
+- **前端缓存/渲染治理（f2/f4）**：① fetchSkuOptions/fetchWarehouseOptions/fetchBinOptions 的 queryKey 统一为 api/options.ts 导出的 `SKU_OPTIONS_KEY`/`WAREHOUSE_OPTIONS_KEY`/`BIN_OPTIONS_KEY`（79 处消费点 codemod 收敛，跨模块浏览同一份主数据只拉一遍；行内 api.list 单页拉取的非同源调用点有意不并入）；② WarehouseMapPage ShelfGrid/ZoneCard memo 化 + onSelect useCallback 稳定引用 + 占用样式按语义模块级缓存——点击库位不再整图 reconcile。
+- **验证**：`go build ./...`、`go vet ./...` 绿；go test 触及包全绿（sales/stockops/purchase/returns/inventory/masterdata/config/datax/printing/reports；auth 单测在并发会话 captcha 在途文件修复前以本轮 UA 绑定合入时的全量绿为准）；web `tsc -b` 绿；reports 夹具同步新查询形态（回推两查询/分页捷径语义断言）。
+- **影响范围**：go.mod/go.sum、internal/{stock,sales,stockops,purchase,returns,auth,datax,printing,reports,config}、db/migrations/000025_*、config.example.yaml、web/src（api/options.ts + 43 个消费文件 + WarehouseMapPage + index.html）、internal/reports 测试夹具。
+
+## [2026-10-07] 修复：表格横向溢出策略二轮定稿——fixed 列钉住 + 库存预警操作列裁切（全站 65 路由审计）
+
+- **背景**：用户报库存预警页 1081px 窗口下操作列「查看库存」被表缘裁切不可点（上午 fc99f39 给提示列补显式 width 280 后，全表 10 列均定宽、总和 1490，窄容器必溢出；本页未声明 scrollX → 无 scroll.x → antd fixed:right 失效不钉住，溢出还沿 .ant-table-content 泄漏到 body 整页横滚）。
+- **max-content 方案废弃**（同日 2502bfd）：真库实测该策略使 antd 表格 table-layout=auto，`<col>` 声明宽度退化为「最小值建议」，长文本列按整段文本撑开——预警表提示列声明 162 实测 478，全表 1537 比声明和更宽，列宽声明全部失效。前端.md §6.2 已写明禁止改回。
+- **定稿策略**（components/table/SfTable.tsx 一处改全站）：全部可见列显式 width 时自动推导 `scroll.x = 列宽和 + 勾选列 48（antd6 实测宽，有 rowSelection 时）+ 10 余量` → table-layout:fixed 列宽严格生效：宽屏 min-width:100% 铺满无滚动条、窄屏表内滚动且 fixed 列钉住常驻；存在弹性列时沿用页面 scrollX 声明（无则维持 auto layout 收缩适应）。页面声明的 scrollX 数字不再决定滚动宽度（与 2502bfd 用户口径一致且更稳健）。
+- **库存预警列宽压缩**（AlertsPage.tsx）：1490 → 1127（预警类型85/SKU100/商品名称130/仓库112/库存78/阈值66/批次112/末次移动132/提示162/操作150），1440 展开侧栏整表无横向滚动条，1081 下表内滚动操作列钉住；文本列补 ellipsis+tooltip。
+- **全站操作列审计**：38 处「操作」列唯一缺 fixed:right 的是 ImportWizardPage（补上）——其余全部已钉住。
+- **审计数据**（_diag/ui_check/table_overflow_audit.mjs，65 路由 × 1081/1440/1920 三档）：1081 下 51 页表内溢出（修复前溢出泄漏 body，现在全部表内滚动+操作钉住、BODY_LEAK=0）；1440 下 35 页（多为 10 列以上作业台，属合理横滚）；1920 下仅 8 页（拣货 2020/复核 1970/库存流水 1862 等真宽表，操作列均 fixed 钉住）。
+- **验证**：tsc/eslint 绿；真库浏览器实测 1081 截图（操作列「查看库存+去补货」逐行完整可见、fixed 左右列带钉住阴影）、1440 零滚动条、/data/exports 宽容器（≥1350）无滚动条口径不变、pageerror=0。
+- **影响范围**：web/src/components/table/SfTable.tsx（scroll 推导重写）、web/src/views/inventory/AlertsPage.tsx（列宽压缩）、web/src/views/data/ImportWizardPage.tsx（操作列补 fixed）、docs/frontend.md §6.2（策略定稿）。不改并行会话在途文件（shipment/quality 两页仅审计报告）。
+
+## [2026-10-07] 修复：草稿编辑采购订单报「系统内部错误」+ 全站商品名称列恒为「-」
+
+- **根因 ①（真库复现确认）**：`ReplacePOItems`/`ReplaceInboundItems`（internal/purchase/repository.go:318/416）用 GORM `Delete(&Model{})` 清理旧明细——BaseModel 携带 `gorm.DeletedAt`，实际执行的是软删（UPDATE deleted_at），软删行物理保留仍占用 `uk_purchase_order_items_po_line (po_id, line_no)` 唯一索引（plain index 未过滤 deleted_at），紧随其后的重插同行号即 23505 → 事务回滚 → 前端「系统内部错误，请稍后重试」。创建路径无旧行所以从不触发，草稿编辑必现。`ReplaceReturnItems` 不受影响（ReturnItem 不嵌 BaseModel 无软删）；stockops 两处 Replace 用 raw DELETE 硬删是正确先例。
+- **修复 ①**：两处改为 `Unscoped().Delete` 硬删——调用面仅 create + 仅草稿可改的 update，行无收货/上架历史，硬删不丢业务事实；审计快照仍留编辑前后全单影。回归测试 `TestIntegrationDraftPOEditReplaceItems` / `TestIntegrationDraftInboundEditReplaceItems`（integration_test.go，真库两轮替换 + 断言无软删行残留）。
+- **根因 ②**：`/api/skus` 列表契约不返回 `product_name`（omitempty 仅详情装配，service_sku.go:49），而采购/入库/销售/库存/PAD 约 30 处消费点依赖 `SkuItem.product_name` 渲染「商品名称」列与下拉文案——详情页商品名称恒为「-」、各表单 SKU 下拉只显示编码。契约冻结（changelog 2026-10-03 口径：列表不装配名称，页面经一次取全数据源按 id 映射兜底）。
+- **修复 ②**（web/src/api/options.ts `fetchSkuOptions`）：集中按 product_id 装配商品名（与 SkuListPage.tsx:166-170 既有口径同源，同一 API 真实数据非前端造数）；商品列表失败时降级仅 code 不阻断 SKU options。PO 详情商品名称列、编辑页 SKU 下拉（`SKU-E011-01 SMT 钢网 420x520`）及全站约 30 处消费点一并修复。
+- **验证**：`go test ./internal/purchase/` 单测绿；新增 2 个集成回归真库 PASS（注：TestIntegrationReceiptIdempotencyUniqueIndex 等 4 个既有集成测试在干净库亦失败——固定幂等键的并发重放路径 23505 未映射为重放，属既有问题与本次无关，git stash 对照证实）；tsc/eslint 绿；重建 server.exe 重启后 curl 复现原失败请求 200（连续两轮替换）；真库浏览器实测详情行 `["1","SKU-E011-01","SMT 钢网 420x520","2,000",…]`、编辑保存成功跳回详情，pageerror=0。
+- **影响范围**：internal/purchase/repository.go（2 处 Unscoped）、internal/purchase/integration_test.go（+2 回归）、web/src/api/options.ts（fetchSkuOptions 装配）。
 
 ## [2026-10-07] 修复：手动创建质检单「请求参数错误」不可定位——SKU 限定来源入库单明细 + 错误 reason 透出
 
