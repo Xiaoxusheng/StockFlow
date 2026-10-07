@@ -12,6 +12,16 @@
 
 ---
 
+## [2026-10-07] fix(server): 质检全链路实测修复——事务内脏读致状态推进永不触发 + 质检执行 23502
+
+- **背景**：用户要求验证「质检流程能否走通」。实走 PO→建入库单→Pad 收货→上架→建质检单→Pad 质检执行全链路，发现**入库/采购单全部状态推进经 API 永不触发**——收货收齐停在 RECEIVING（无法建质检单）、PO 不推进 PARTIAL_RECEIVED、质检完成不推进 AWAITING_PUTAWAY/COMPLETED。演示库状态正常全因种子直插，掩盖了问题。
+- **根因 1（事务内脏读，四处同族）**：`progressAfterReceipt` / `progressPOAfterReceipt` / `progressInboundAfterQC` / `progressInboundAfterTask` 四个推进判定都在写事务内、且刚经 tx 累计了明细数量/完成任务后，用**非事务连接**（`r.db`）回读判定数据面——READ COMMITTED 下只见提交前旧值，`allReceived/settled/任务全完成` 判定恒 false。修复：repo 增 tx 版读方法 `ListInboundItemsTx/ListPOItemsTx/CountTasksByInboundTx`（实现体复用私有函数），四处调用点换用。收货响应的最终状态回读同病同修（`FindInboundByNoTx/FindPOByNoTx`，修响应 inbound_status/po_status 失真）。
+- **根因 2（质检执行 500，23502）**：purchase 域 `StringList.Value()` 对 nil 落 SQL NULL，而 `quality_orders.image_refs` 列 `jsonb NOT NULL DEFAULT '[]'`——ExecuteQC 请求未传 image_refs（前端无照片上传时即如此）整事务回滚。修复：Value() 对齐 masterdata 同名载体口径（len==0 → "[]"）。returns 域独立 jsonb 载体不受影响。
+- **验证**：go build/vet/test 全量绿；重启后端 API 实走全链路——IN-20261007-000014（SKU-E006-01×40）：收货→收齐自动 AWAITING_QC + PO→PARTIAL_RECEIVED；上架 PW-20261007-000011 执行→pending_inspect 库存 40 落账；质检单 QC-20261007-000004（抽检 40）start→execute（30 合格 10 不良）→COMPLETED，库存映射精确（bin 9985 可用+30/不良+10/待检清零），入库单经 AWAITING_PUTAWAY 瞬时推进 COMPLETED，四量闭合（received=inspected=putaway=40）；流水三条幂等键符合构成律（putaway:IN…:PW… / inspect:QC…:1:pass / :defect），状态迁移 pending_inspect→available/defective 正确；追溯链 4 节点完整；UI 质检列表/不合格品页数据一致。修复前对照组：IN-20261007-000013 同操作停留 RECEIVING（留存实证，可后续手工修复状态）。
+- **边界**：ExecuteQC 的 ErrPendingNotPutaway（待检未全部上架先提交质检）分支经代码审查确认，未对种子单 IN-20261006-000003 实测以免将其污染为 INSPECTING 终态（无取消路径）。
+- **已知遗留**：① 质检明细 SKU 维度无逐行批次展示（列表单头无 SKU 列，明细经详情接口承载，既有口径）；② 首批 tx 读方法修复随并行会话 commit 6ad8635 一并落库（其提交扫工作区时带入），本提交为剩余的回读修复 + StringList 修复。
+- **影响范围**：internal/purchase/{repository,service_receipt,value,fakerepo_test}.go；不动前端。
+
 ## [2026-10-07] fix(server)+fix(web)：安全与性能加固第二轮——建议项全量落地 + 三项设计题（计划 docs/plans/2026-10-07-security-perf-hardening-round2.md）
 
 - **安全（后端）**：① JWT 密钥强度——auth 与 devices 令牌密钥统一拒绝 <32 字节或单一字符类别（弱口令式密钥可离线爆破 HS256）；② loginGuard.Fail 改 Redis Lua 原子 INCR+EXPIRE（修「Expire 失败留无 TTL 永久计数键→正常用户一次错密反复锁定」，历史孤儿键自动补窗口）；③ admin 锁定豁免 + 锁定审计——豁免名单默认 `[admin]`（`SF_AUTH_LOCK_EXEMPT` 可覆盖），防对已知账号的低成本定向锁定 DoS（IP 限流与失败计数保留），真实锁定写操作日志（module=auth/action=locked，best-effort）；④ 新增 `middleware.SecureHeaders`（nosniff/X-Frame-Options: DENY/Referrer-Policy；CSP 属前端策略、HSTS 属反代层，注释说明）；⑤ `/api/devices/activate` 免凭证写端点挂 IP 限流（`server.device_activate_rate_per_minute` 默认 30，route-aware 挂载不误伤 resolve/heartbeat）；⑥ `server.public_base_url` 固定设备激活二维码 Host（空=沿用旧行为）。

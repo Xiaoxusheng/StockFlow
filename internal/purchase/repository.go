@@ -25,6 +25,7 @@ type Repository interface {
 	FindPOByID(ctx context.Context, id int64) (*PurchaseOrder, error)
 	FindPOByIDForUpdate(ctx context.Context, tx *gorm.DB, id int64) (*PurchaseOrder, error)
 	FindPOByNo(ctx context.Context, poNo string) (*PurchaseOrder, error)
+	FindPOByNoTx(ctx context.Context, tx *gorm.DB, poNo string) (*PurchaseOrder, error)
 	ListPOs(ctx context.Context, f POListFilter) ([]*PurchaseOrder, int64, error)
 	InsertPO(ctx context.Context, tx *gorm.DB, po *PurchaseOrder) error
 	ReplacePOItems(ctx context.Context, tx *gorm.DB, poID int64, items []*PurchaseOrderItem, by int64) error
@@ -41,6 +42,7 @@ type Repository interface {
 	// —— 入库单 ——
 	FindInboundByID(ctx context.Context, id int64) (*InboundOrder, error)
 	FindInboundByNo(ctx context.Context, no string) (*InboundOrder, error)
+	FindInboundByNoTx(ctx context.Context, tx *gorm.DB, no string) (*InboundOrder, error)
 	ListInbounds(ctx context.Context, f InboundListFilter) ([]*InboundOrder, int64, error)
 	InsertInbound(ctx context.Context, tx *gorm.DB, o *InboundOrder) error
 	ReplaceInboundItems(ctx context.Context, tx *gorm.DB, inboundID int64, items []*InboundItem, by int64) error
@@ -305,6 +307,13 @@ func (r *repo) FindPOByNo(ctx context.Context, poNo string) (*PurchaseOrder, err
 	return firstOrNil(&row, err, "按单号查询采购订单")
 }
 
+// FindPOByNoTx 事务内读：收货确认 tx 内回读最终状态用。
+func (r *repo) FindPOByNoTx(ctx context.Context, tx *gorm.DB, poNo string) (*PurchaseOrder, error) {
+	var row PurchaseOrder
+	err := tx.WithContext(ctx).Where("po_no = ?", poNo).First(&row).Error
+	return firstOrNil(&row, err, "按单号查询采购订单")
+}
+
 func (r *repo) ListPOs(ctx context.Context, f POListFilter) ([]*PurchaseOrder, int64, error) {
 	q := applyScope(withCtx(ctx, r.db).Model(&PurchaseOrder{}), "warehouse_id", f.Scope)
 	if kw := likeEscape(f.Keyword); kw != "" {
@@ -409,6 +418,13 @@ func (r *repo) FindInboundByID(ctx context.Context, id int64) (*InboundOrder, er
 func (r *repo) FindInboundByNo(ctx context.Context, no string) (*InboundOrder, error) {
 	var row InboundOrder
 	err := withCtx(ctx, r.db).Where("inbound_no = ?", no).First(&row).Error
+	return firstOrNil(&row, err, "按单号查询入库单")
+}
+
+// FindInboundByNoTx 事务内读：收货确认 tx 内回读最终状态用（r.db 只见提交前旧值）。
+func (r *repo) FindInboundByNoTx(ctx context.Context, tx *gorm.DB, no string) (*InboundOrder, error) {
+	var row InboundOrder
+	err := tx.WithContext(ctx).Where("inbound_no = ?", no).First(&row).Error
 	return firstOrNil(&row, err, "按单号查询入库单")
 }
 

@@ -18,10 +18,12 @@ import (
 // 仅占位列，不提供上传校验，plan §5/§12）。
 type StringList []string
 
-// Value 实现 driver.Valuer：nil → SQL NULL，其余为已编码 JSON 数组。
+// Value 实现 driver.Valuer：nil/空数组统一落 '[]'（image_refs 列 jsonb NOT NULL
+// DEFAULT '[]'——nil 落 SQL NULL 违反约束，ExecuteQC 未传图片即 23502，2026-10-07
+// 链路实测修复；对齐 masterdata StringList 同名载体口径）。
 func (l StringList) Value() (driver.Value, error) {
-	if l == nil {
-		return nil, nil
+	if len(l) == 0 {
+		return "[]", nil
 	}
 	b, err := json.Marshal([]string(l))
 	if err != nil {

@@ -451,11 +451,13 @@ func (s *Service) confirmReceiptTx(ctx context.Context, tx *gorm.DB, actor Actor
 		result.PONo = po.PONo
 	}
 	// 回读最终状态（收货确认结果展示；plan §6.1/§6.2 迁移留审计）。
-	if fresh, err := s.repo.FindInboundByNo(ctx, inbound.InboundNo); err == nil && fresh != nil {
+	// 必须经 tx 读：回读发生在推进之后、提交之前，r.db 连接 READ COMMITTED 下
+	// 只见旧值（DRAFT/APPROVED），响应状态字段会失真（2026-10-07 链路实测修复）。
+	if fresh, err := s.repo.FindInboundByNoTx(ctx, tx, inbound.InboundNo); err == nil && fresh != nil {
 		result.InboundStatus = fresh.Status
 	}
 	if po != nil {
-		if fresh, err := s.repo.FindPOByNo(ctx, po.PONo); err == nil && fresh != nil {
+		if fresh, err := s.repo.FindPOByNoTx(ctx, tx, po.PONo); err == nil && fresh != nil {
 			result.POStatus = fresh.Status
 		}
 	}

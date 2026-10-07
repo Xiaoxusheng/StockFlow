@@ -181,6 +181,10 @@ func (f *fakeRepo) FindPOByIDForUpdate(_ context.Context, _ *gorm.DB, id int64) 
 	return f.FindPOByID(context.Background(), id)
 }
 
+func (f *fakeRepo) FindPOByNoTx(_ context.Context, _ *gorm.DB, poNo string) (*PurchaseOrder, error) {
+	return f.FindPOByNo(context.Background(), poNo)
+}
+
 func (f *fakeRepo) FindPOByNo(_ context.Context, poNo string) (*PurchaseOrder, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -294,6 +298,10 @@ func (f *fakeRepo) UpdatePOStatus(_ context.Context, _ *gorm.DB, id int64, from,
 	return 1, nil
 }
 
+func (f *fakeRepo) ListPOItemsTx(_ context.Context, _ *gorm.DB, poID int64) ([]*PurchaseOrderItem, error) {
+	return f.ListPOItems(context.Background(), poID)
+}
+
 func (f *fakeRepo) ListPOItems(_ context.Context, poID int64) ([]*PurchaseOrderItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -367,6 +375,10 @@ func (f *fakeRepo) FindInboundByID(_ context.Context, id int64) (*InboundOrder, 
 		return &cp, nil
 	}
 	return nil, nil
+}
+
+func (f *fakeRepo) FindInboundByNoTx(_ context.Context, _ *gorm.DB, no string) (*InboundOrder, error) {
+	return f.FindInboundByNo(context.Background(), no)
 }
 
 func (f *fakeRepo) FindInboundByNo(_ context.Context, no string) (*InboundOrder, error) {
@@ -453,6 +465,10 @@ func (f *fakeRepo) UpdateInboundStatus(_ context.Context, _ *gorm.DB, id int64, 
 	}
 	o.Status = to
 	return 1, nil
+}
+
+func (f *fakeRepo) ListInboundItemsTx(_ context.Context, _ *gorm.DB, inboundID int64) ([]*InboundItem, error) {
+	return f.ListInboundItems(context.Background(), inboundID)
 }
 
 func (f *fakeRepo) ListInboundItems(_ context.Context, inboundID int64) ([]*InboundItem, error) {
@@ -876,6 +892,10 @@ func (f *fakeRepo) SetPutawayTaskPriority(_ context.Context, _ *gorm.DB, id int6
 	t.UpdatedBy = database.ID(by)
 	f.taskPriorities[id] = priority
 	return 1, nil
+}
+
+func (f *fakeRepo) CountTasksByInboundTx(_ context.Context, _ *gorm.DB, inboundNo string) (map[string]int64, error) {
+	return f.CountTasksByInbound(context.Background(), inboundNo)
 }
 
 func (f *fakeRepo) CountTasksByInbound(_ context.Context, inboundNo string) (map[string]int64, error) {
