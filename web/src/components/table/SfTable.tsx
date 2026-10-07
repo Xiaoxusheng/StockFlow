@@ -608,7 +608,11 @@ export function SfTable<T extends object>({
                   }
                 : false
             }
-            scroll={resolvedScrollX !== undefined ? { x: resolvedScrollX } : undefined}
+            /* 横向滚动策略（2026-10-07 改版，用户口径「不要出现滑动框」）：
+               scroll.x 用 'max-content'——列宽自动收缩适应容器（列总宽≤容器宽时
+               表格 width:100% 无滚动条；仅内容强制超宽时才出滚动条），
+               同时 fixed 列照常生效。各页声明的 scrollX 数字不再决定滚动宽度。 */
+            scroll={resolvedScrollX !== undefined ? { x: 'max-content' } : undefined}
             {...rest}
           />
         </ConfigProvider>

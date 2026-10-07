@@ -303,25 +303,25 @@ export default function ExportTaskPage() {
   }
 
   const columns: ColumnsType<DataTask> = [
-    { title: '任务单号', dataIndex: 'task_no', width: 160, ellipsis: true },
+    { title: '任务单号', dataIndex: 'task_no', width: 150, ellipsis: true },
     {
       title: '业务模块',
       key: 'module',
-      width: 120,
+      width: 100,
       render: (_: unknown, record: DataTask) => record.module_name ?? resolveModuleLabel(record.module),
     },
-    { title: '导出范围', dataIndex: 'scope', width: 140, render: (value?: string) => resolveScopeLabel(value) },
-    { title: '文件名', dataIndex: 'file_name', width: 180, ellipsis: true, render: (value?: string) => value ?? '-' },
-    { title: '数量', dataIndex: 'total_rows', width: 90, align: 'right', render: renderCount },
-    { title: '成功', dataIndex: 'success_rows', width: 90, align: 'right', render: renderCount },
-    { title: '失败', dataIndex: 'failed_rows', width: 90, align: 'right', render: renderCount },
+    { title: '导出范围', dataIndex: 'scope', width: 110, render: (value?: string) => resolveScopeLabel(value) },
+    { title: '文件名', dataIndex: 'file_name', width: 150, ellipsis: true, render: (value?: string) => value ?? '-' },
+    { title: '数量', dataIndex: 'total_rows', width: 80, align: 'right', render: renderCount },
+    { title: '成功', dataIndex: 'success_rows', width: 80, align: 'right', render: renderCount },
+    { title: '失败', dataIndex: 'failed_rows', width: 80, align: 'right', render: renderCount },
     {
       title: '进度',
       key: 'progress',
-      width: 140,
+      width: 100,
       render: (_: unknown, record: DataTask) =>
         isTaskInFlight(record.status) && typeof record.progress === 'number' ? (
-          <Progress percent={record.progress} size="small" style={{ width: 110 }} />
+          <Progress percent={record.progress} size="small" style={{ width: 88 }} />
         ) : (
           '-'
         ),
@@ -329,7 +329,7 @@ export default function ExportTaskPage() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 110,
+      width: 100,
       render: (value: string, record: DataTask) =>
         record.error_message ? (
           <Tooltip title={record.error_message}>{renderTaskStatus(value)}</Tooltip>
@@ -337,8 +337,8 @@ export default function ExportTaskPage() {
           renderTaskStatus(value)
         ),
     },
-    { title: '开始时间', dataIndex: 'started_at', width: 160, render: renderDateTime },
-    { title: '结束时间', dataIndex: 'finished_at', width: 160, render: renderDateTime },
+    { title: '开始时间', dataIndex: 'started_at', width: 145, render: renderDateTime },
+    { title: '结束时间', dataIndex: 'finished_at', width: 145, render: renderDateTime },
     {
       title: '操作',
       key: 'actions',
@@ -403,7 +403,6 @@ export default function ExportTaskPage() {
               新建导出任务
             </Button>
           }
-          scrollX={1690}
         />
       </Card>
 
