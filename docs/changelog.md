@@ -14,6 +14,14 @@
 
 ## 文档记录
 
+## [2026-10-07] 修复：库存预警操作列幽灵「…」溢出（td 级 text-overflow 误画省略号）
+
+- **现象**：库存预警列表「操作」列「查看库存/去补货」右侧出现被表缘裁掉半截的「…」，用户误读为「更多」控件溢出；该列 DOM 实际只有两个按钮，无任何更多控件。
+- **根因**（浏览器实测定位）：① global.css 给全站 sf-table td 统一加了 `overflow:hidden + text-overflow:ellipsis`，操作列按钮组（inline-flex 134px）恰好顶满 150 列的内容盒（134px），亚像素溢出 1~2px 即触发 td 画出「…」并被固定列/表缘裁切；② 「提示」列是全表唯一未声明 width 的弹性列，内部 Text 硬编码 `maxWidth:320` 与被压缩后的实际列宽脱节，文本连同省略号越过固定右列，加重右侧脏乱。
+- **修复**：① global.css 操作列兜底——`td.sf-table-actions-cell { text-overflow: clip }`，按钮组永不画假省略号（全站所有表格操作列生效）；② AlertsPage「提示」列显式 `width:280` + Text `maxWidth:'100%'`（随列宽自适应，不再硬编码像素），「商品名称」同步改 100%；操作列 150→170（按钮组 134 + padding 16 + 余量），移除虚高 `scrollX={1390}`（全列显式 width 后由 SfTable 按「列宽总和+10」自动推导 1480）。
+- **验证**：tsc/eslint 绿；playwright+Edge 真库实测 1600/1100 两档视口——操作列幽灵点消失、提示列在自身列内干净截断（tooltip 可用）、pageerror=0。同类隐患（其他页面操作列装不下按钮组时画幽灵点）由 global.css 兜底一并消除。
+- **影响范围**：web/src/views/inventory/AlertsPage.tsx、web/src/styles/global.css；零后端改动。
+
 ## [2026-10-07] 功能：跨模块联动批次二（Dashboard 卡片/行/图表 + 六分析页图表下钻，L4/L8/L10/L11/L13/L14）
 
 - **背景**：联动盘点 15 项中第二批六项（前批 L1/L2/L3/L5/L9 见同日条目）；计划 docs/plans/2026-10-07-linkage-batch2.md，规范续写 frontend.md §33.4。逐图核对「数据字段 → 目标列表筛选白名单」，无真实参数的图明确不接（库存趋势/库存状态环形/三个趋势折线/销售 SKU 排行——清单见 §33.4）。

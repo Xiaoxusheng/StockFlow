@@ -208,6 +208,14 @@ body {
   gap: var(--sf-space-1);
 }
 
+/* 操作列禁用 td 级 text-overflow 省略号（2026-10-07）：actions 内容是原子 inline-flex
+   按钮组，列宽吃紧时上方通用规则会在按钮右侧画出幽灵「…」并被表缘裁切半截，
+   用户误读为「更多」控件溢出。操作列宽度由页面列宽保证装得下按钮组；
+   万一装不下宁可裁切按钮边缘也不画假省略号误导。 */
+.sf-table .ant-table-tbody > tr > td.sf-table-actions-cell {
+  text-overflow: clip;
+}
+
 /* #2/#3：行底色过渡（hover 浅灰 / 选中主色底共用，仅 background-color；行级禁 transform） */
 .sf-table .ant-table-tbody > tr > td {
   transition: background-color var(--sf-motion-fast) var(--sf-motion-ease);

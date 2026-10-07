@@ -46,7 +46,7 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
     dataIndex: 'sku_name',
     width: 200,
     ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 200 }} ellipsis={{ tooltip: v }}>{v}</Text>,
+    render: (v: string) => <Text style={{ maxWidth: '100%' }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
   {
     title: '仓库',
@@ -90,10 +90,15 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
       v ? <DateCell value={v} /> : '-',
   },
   {
+    // 提示列必须显式 width：本表唯一弹性列曾无 width，被 scroll.x 压缩后内部 Text 的
+    // maxWidth:320 与实际列宽（200）脱节，文本连同省略号溢出 td、冒到 fixed 右列
+    // （操作列）右侧——用户可见「更多」样式的溢出点（2026-10-07 修复）。
+    // maxWidth:'100%' 随列宽自适应，不再硬编码像素（column.ellipsis 的 td title 兜底提示）。
     title: '提示',
     dataIndex: 'message',
+    width: 280,
     ellipsis: true,
-    render: (v: string) => <Text style={{ maxWidth: 320 }} ellipsis={{ tooltip: v }}>{v}</Text>,
+    render: (v: string) => <Text style={{ maxWidth: '100%' }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
 ]
 
@@ -134,7 +139,10 @@ export default function AlertsPage() {
             title: '操作',
             key: 'actions',
             fixed: 'right',
-            width: 150,
+            // 170 = 查看库存+去补货（134px inline-flex）+ 左右 padding 16 + 余量。
+            // 150 时 div 恰好顶满内容盒，亚像素溢出触发 td 的 text-overflow 在按钮右侧
+            // 画出幽灵「…」并被表缘裁切（用户误读为「更多」溢出，2026-10-07 修复）。
+            width: 170,
             render: (_, record) => {
               const stockQuery = record.warehouse_id
                 ? `sku_id=${record.sku_id}&warehouse_id=${record.warehouse_id}`
@@ -203,7 +211,6 @@ export default function AlertsPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前没有库存预警"
-          scrollX={1390}
         />
       </Card>
     </div>
