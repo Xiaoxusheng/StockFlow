@@ -441,10 +441,12 @@ func TestDevSeedReferencedCodesExist(t *testing.T) {
 
 // ---- 显式 9xxx 主键 + 白名单表 + 每表 INSERT 条数冻结 ----
 
-// devSeedExpectedCounts 每表 INSERT 条数冻结表（2026-10-06 演示数据补全轮后契约）：
+// devSeedExpectedCounts 每表 INSERT 条数冻结表（2026-10-07 演示数据补全轮二后契约）：
 // §0–§9 基础段每表 1 条；§10 电子厂扩展段对主数据/仓储/库存各追加 1 条；
 // §11 单据链每表 1 条；§12 状态行 + 库存锁定/调整、§13 退货/异常、§14 设备、
-// §15 数据、§16 运维、§17 各单据状态补全各追加 1 条（退货单 §13.1/§13.2 两条）。
+// §15 数据、§16 运维、§17 各单据状态补全各追加 1 条（退货单 §13.1/§13.2 两条）；
+// §18 补全轮二（效期批次+超储行/待复核/净零演示流水）对 batches/inventory/
+// inventory_ledgers/check_tasks/doc_number_counters 各追加 1 条。
 // 任何增删都必须有意识地改本表（防漏写/误写双份——与 routes 冻结端点集同思路）。
 var devSeedExpectedCounts = map[string]int{
 	// 基础段（单条）
@@ -452,31 +454,31 @@ var devSeedExpectedCounts = map[string]int{
 	// 基础段 + §10 电子厂扩展段（各 1 条）
 	"warehouses": 2, "zones": 2, "shelves": 2, "bins": 2,
 	"product_categories": 2, "units": 2, "products": 2, "skus": 2, "barcodes": 2,
-	"suppliers": 2, "customers": 2, "batches": 2,
-	// 期初段 ×2 + §12.1 状态行 ×1
-	"inventory": 3, "serial_numbers": 2,
-	// 期初成对 ×3 段 + 演示出库补影 ×2 段
-	"inventory_ledgers": 5,
-	// §11 单据链（自然键幂等，每表 1 条）+ §17 状态补全（每表 1 条）
-	"purchase_orders": 2, "purchase_order_items": 2,
+	"suppliers": 2, "customers": 2, "batches": 3,
+	// 期初段 ×2 + §12.1 状态行 ×1 + §18.2 效期/超储行 ×1
+	"inventory": 4, "serial_numbers": 2,
+	// 期初成对 ×3 段 + 演示出库补影 ×2 段 + §18 期初成对 ×1 + §18.4 净零演示流水 ×1
+	"inventory_ledgers": 7,
+	// §11 单据链（自然键幂等，每表 1 条）+ §17 状态补全（每表 1 条）+ §18.6 状态补漏（各 1 条）
+	"purchase_orders": 3, "purchase_order_items": 3,
 	"inbound_orders": 2, "inbound_items": 2,
 	"receipts": 1, "receipt_items": 1,
 	"quality_orders": 2, "quality_items": 2,
-	"putaway_tasks": 2,
+	"putaway_tasks": 3,
 	"sales_orders":  2, "sales_order_items": 2,
 	"outbound_orders": 2, "outbound_items": 2,
-	"allocation_records": 1, "pick_tasks": 2, "check_tasks": 2,
+	"allocation_records": 1, "pick_tasks": 2, "check_tasks": 3,
 	"packing_records": 1, "packing_items": 1, "shipments": 2,
 	"transfer_orders": 2, "transfer_items": 2,
-	"count_orders": 2, "count_items": 2, "count_differences": 2,
+	"count_orders": 3, "count_items": 2, "count_differences": 2,
 	"print_templates": 1, "print_tasks": 1, "print_task_rows": 1,
-	"doc_number_counters": 2, "document_approvals": 2,
-	// §12 演示数据补全轮新增表（各 1 条，除 return_orders 销售/采购两条）
+	"doc_number_counters": 3, "document_approvals": 2,
+	// §12 演示数据补全轮新增表（各 1 条，除 return_orders 销售/采购两条）+ §18.5 数据域状态补全
 	"inventory_locks": 1, "inventory_adjustments": 1,
 	"return_orders": 2, "return_items": 1,
 	"exceptions": 1,
 	"devices":    1, "device_configs": 1, "device_logs": 1, "scan_logs": 1, "app_versions": 1,
-	"files": 1, "import_tasks": 1, "import_task_rows": 1, "export_tasks": 1,
+	"files": 1, "import_tasks": 2, "import_task_rows": 2, "export_tasks": 2,
 	"scheduled_job_runs": 1, "notifications": 1, "backup_records": 1,
 }
 
@@ -781,7 +783,7 @@ func TestDevSeedMasterdataCoverage(t *testing.T) {
 	if len(sups.tuples) < 3 || len(cuss.tuples) < 3 {
 		t.Fatalf("供应商应 ≥3（实际 %d）、客户应 ≥3（实际 %d）", len(sups.tuples), len(cuss.tuples))
 	}
-	bats := mergedInsertsOf(t, ins, "batches", 2)
+	bats := mergedInsertsOf(t, ins, "batches", 3)
 	if len(bats.tuples) < 5 {
 		t.Fatalf("演示批次应 ≥5，实际 %d", len(bats.tuples))
 	}
@@ -807,8 +809,8 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 			invOpening = append(invOpening, s)
 		}
 	}
-	if len(invOpening) != 2 || len(invStatus) != 1 {
-		t.Fatalf("期初库存 INSERT 应 2 条（§8+§10）、状态行 INSERT 应 1 条（§12.1），实际 %d/%d",
+	if len(invOpening) != 3 || len(invStatus) != 1 {
+		t.Fatalf("期初库存 INSERT 应 3 条（§8+§10+§18.2）、状态行 INSERT 应 1 条（§12.1），实际 %d/%d",
 			len(invOpening), len(invStatus))
 	}
 	inv := mergeInserts(t, invOpening, "期初库存")
@@ -868,8 +870,8 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 		}
 	}
 
-	// 流水分段：'期初' 三条（§8+§10+§12.1 各 1），补影两条（business_type='演示'，
-	// 含 '期初' 之外的段——净零对，不改现存量锚点）。
+	// 流水分段：'期初' 四条（§8+§10+§12.1+§18.2 各 1），补影三条（business_type='演示'，
+	// 含 '期初' 之外的段——净零对，不改现存量锚点；§10 联调轮 ×2 + §18.4 净零演示流水 ×1）。
 	var ledOpening, shadows []seedInsert
 	for _, s := range insertsOf(ins, "inventory_ledgers") {
 		if strings.Contains(s.text, "'期初'") {
@@ -878,11 +880,11 @@ func TestDevSeedOpeningInventoryPairedWithLedger(t *testing.T) {
 			shadows = append(shadows, s)
 		}
 	}
-	if len(ledOpening) != 3 {
-		t.Fatalf("期初流水 INSERT 应为 3 条（§8+§10+§12.1），实际 %d", len(ledOpening))
+	if len(ledOpening) != 4 {
+		t.Fatalf("期初流水 INSERT 应为 4 条（§8+§10+§12.1+§18.2），实际 %d", len(ledOpening))
 	}
-	if len(shadows) != 2 {
-		t.Fatalf("补影流水 INSERT 应为 2 条（基础段+电子厂段），实际 %d", len(shadows))
+	if len(shadows) != 3 {
+		t.Fatalf("补影流水 INSERT 应为 3 条（基础段+电子厂段+§18.4 净零演示流水），实际 %d", len(shadows))
 	}
 	// 补影段逐条净零对：Σ qty_change = 0（不改任何现存量锚点）；
 	// qty_change 列按 AS v(...) 别名定位（§8 与 §10 段元组宽度不同：§10 增加 batch_no）

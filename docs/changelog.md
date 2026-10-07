@@ -14,6 +14,15 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：演示数据补全轮二（§18——效期预警/待复核/超储/流水类型/数据域与单据状态收口）
+
+- **背景**：用户要求「整个系统加上测试数据，还没有数据的都加上」。真库盘点：§0–§17 后主数据与单据状态分布已齐，仍剩页面级空数据点——效期批次为零（临期/过期预警页与工作台临期组全空）、待复核队列空（check_tasks 全 DONE）、超储零候选、流水缺 TRANSFER_*/MOVE/ADJUST 等类型、verify §14/§16 断言的导入/导出/单据状态域有缺口。计划见 docs/plans/2026-10-07-demo-data-round2.md。
+- **§18 交付**（db/seed/dev_seed.sql，INSERT-only 幂等、单事务）：①效期批次 6（批次+效期双开非序列号 SKU——序列号管理 SKU 灌普通库存违反一物一行守卫；到期日 `CURRENT_DATE ± n` 相对表达式，灌数时点不腐烂：+5/+29/+12/+45/+25/−3 覆盖临期三档与过期）+ 配套库存 7 行（含超储行 WH-D02×SKU-D001-02 520，仓合计 530>max 500）+ 期初流水 1:1 成对；②PENDING 复核任务挂 PICKED 出库单（复核中心待处理/工作台待复核组）；③净零演示流水 8 行（TRANSFER_OUT/IN、MOVE、ADJUST、LOCK/RELEASE，Σqty_change=0 不动现存量锚点）；④数据域状态补全（导入 EXECUTING/PARTIAL_SUCCESS、导出 PROCESSING）；⑤单据状态补漏（APPROVED 采购单/PENDING 上架/DRAFT 盘点单——§17 同状态行曾被运行期同号单据 ON CONFLICT 静默跳过，改用全新 20261007 段+计数器推进）。
+- **契约同步**：dev_seed_test.go 冻结表（batches 3/inventory 4/ledgers 7/check_tasks 3/counters 3/导入导出 ×2/单据 ×3）与成对断言（期初库存 3 条、期初流水 4 条、补影 3 条）；dev_seed_verify.sql 新增 §17 断言（效期三档/待复核/超储触发/流水六类型/净零）。
+- **验证**：`go test ./internal/database -run TestDevSeed` 全绿 + `go build/vet/test ./...` 全绿；psql 灌库 COMMIT + verify 自检通过（期初库存与流水 55:55 成对）；API 实测——alerts near_expiry=4/expired=1/overstock=2、workbench/priorities 四组 {超时1/异常6/临期4/待复核1}、checks?status=PENDING 命中 CH-20261007-000001；浏览器目检库存预警页临期列表渲染正常。
+- **不做什么**：不写 system_configs（TestDevSeedNoProductionInitPollution 硬性禁止，runtime 专职且 ensureSystemConfigKeys 现无调用方、功能侧走代码缺省不受影响）；不写审计表；不做 UPDATE/DELETE（11 条 NULL 效期批次挂非效期 SKU 属合理形状）；不动 §0–§17 既有行。
+- **影响范围**：db/seed/dev_seed.sql、db/seed/dev_seed_verify.sql、internal/database/dev_seed_test.go、docs/plans/2026-10-07-demo-data-round2.md、docs/changelog.md。
+
 ## [2026-10-07] 修复：全局搜索面板「关不了」（触发器 onFocus × antd focusTriggerAfterClose 死循环）
 
 - **现象**：Ctrl+K/点击呼出的全局搜索命令面板 Esc、点外部均关不掉；且弹层无遮罩变暗（截图中背景全亮）、点外部失效。

@@ -1980,6 +1980,185 @@ WHERE NOT EXISTS (
     WHERE da.target_type = v.target_type AND da.target_no = v.target_no
       AND da.action = v.action AND da.created_at = v.created_at);
 
+-- ============ 18) 演示数据补全轮二（2026-10-07：效期预警 / 待复核 / 超储 / 流水类型） ============
+--
+-- 目的（docs/plans/2026-10-07-demo-data-round2.md）：§0–§17 后仍空的四个页面级数据点——
+--   ①效期批次为零（临期/过期预警页、工作台临期组全空）；②待复核队列为空（check_tasks 全 DONE）；
+--   ③超储预警零候选；④流水仅 INBOUND/OUTBOUND/INSPECT_PASS（按 TRANSFER_*/MOVE/ADJUST 筛选全空）。
+-- 幂等口径沿 §8/§10/§11：显式 9xxx 主键或自然键 ON CONFLICT DO NOTHING、单事务内、
+--   与既有数据零冲突（新批次号 / 新五维键 / 新 check_no / 空闲 id 段——现库 max：
+--   batches 9617 / inventory 9848 / ledger 9906）。
+-- 效期三档日期用 CURRENT_DATE ± n 相对表达式：灌数时点相对计算，演示数据不随时间腐烂
+--   （+5/+29 落 30 天临期窗内、+45 窗外正常对照、−3 已过期；窗口 = inventory.alert.expiry_days
+--   最大档，运行期缺省 30——sysops configSeeds 同源）。
+
+-- ---- 18.1 效期批次 6（挂批次+效期双开且非序列号的 SKU；生产/入库/到期日全相对化）----
+-- 序列号管理 SKU（D005-01 等）不可灌普通库存（一物一行守卫），过期档改用 D008-01。
+INSERT INTO batches (id, sku_id, batch_no, supplier_id, production_date, inbound_date, expiry_date, cost_price, remark, created_by)
+VALUES (9621, 9433, 'B20260928-E010', 9504, (CURRENT_DATE - 9)::date,  (CURRENT_DATE - 4)::date,  (CURRENT_DATE + 5)::date,  28.0000::numeric(18, 4), 'DEV SEED 临期演示（剩余约 5 天）', 0),
+       (9622, 9433, 'B20260910-E010', 9504, (CURRENT_DATE - 27)::date, (CURRENT_DATE - 20)::date, (CURRENT_DATE + 29)::date, 28.0000::numeric(18, 4), 'DEV SEED 临期演示（30 天窗口边缘）', 0),
+       (9623, 9425, 'B20261001-E003', 9504, (CURRENT_DATE - 16)::date, (CURRENT_DATE - 6)::date,  (CURRENT_DATE + 12)::date, 12.6000::numeric(18, 4), 'DEV SEED 临期演示 MSL3 湿敏（剩余约 12 天）', 0),
+       (9624, 9425, 'B20260825-E003', 9504, (CURRENT_DATE - 40)::date, (CURRENT_DATE - 30)::date, (CURRENT_DATE + 45)::date, 12.6000::numeric(18, 4), 'DEV SEED 效期正常批次（窗口外对照）', 0),
+       (9625, 9407, 'B20260912-D004', 9503, (CURRENT_DATE - 25)::date, (CURRENT_DATE - 12)::date, (CURRENT_DATE + 25)::date, 8.0000::numeric(18, 4),  'DEV SEED 临期演示（剩余约 25 天）', 0),
+       (9626, 9415, 'B20260710-D008', 9502, (CURRENT_DATE - 90)::date, (CURRENT_DATE - 45)::date, (CURRENT_DATE - 3)::date,  22.0000::numeric(18, 4), 'DEV SEED 已过期演示（expired 预警档）', 0)
+ON CONFLICT (sku_id, batch_no) DO NOTHING;
+
+-- ---- 18.2 效期批次期初库存 7 行（6 效期 + 1 超储；§8 口径只写 total/available）与期初流水 1:1 成对 ----
+-- 超储行：SKU-D001-02（批次/效期/序列号三关全关）WH-D02 合计 10+520=530 > max_stock 500
+--   → 库存预警 overstock 档有命中（不可选序列号管理 SKU——一物一行与灌数守卫冲突）。
+INSERT INTO inventory (id, warehouse_id, zone_id, shelf_id, bin_id, sku_id, batch_id,
+                       total_qty, available_qty, created_by)
+SELECT v.id, w.id, z.id, s.id, b.id, sku.id, COALESCE(bat.id, 0),
+       v.qty, v.qty, 0
+FROM (VALUES (9851, 'WH-E01', 'REEL-02-21', 'SKU-E010-01', 'B20260928-E010', 40.0000::numeric(18, 4)),
+             (9852, 'WH-E01', 'REEL-02-22', 'SKU-E010-01', 'B20260910-E010', 25.0000::numeric(18, 4)),
+             (9853, 'WH-E01', 'REEL-02-12', 'SKU-E003-01', 'B20261001-E003', 60.0000::numeric(18, 4)),
+             (9854, 'WH-E01', 'IC-01-12',   'SKU-E003-01', 'B20260825-E003', 30.0000::numeric(18, 4)),
+             (9855, 'WH-D01', 'S-01-22',    'SKU-D004-01', 'B20260912-D004', 150.0000::numeric(18, 4)),
+             (9856, 'WH-D01', 'P-02-12',    'SKU-D008-01', 'B20260710-D008', 45.0000::numeric(18, 4)),
+             (9857, 'WH-D02', 'S-01-22',    'SKU-D001-02', NULL, 520.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (warehouse_id, bin_id, sku_id, batch_id) DO NOTHING;
+
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, COALESCE(bat.id, 0),
+       'INBOUND', '期初', 'DEV-SEED-OPEN-' || v.id::text, 'available', 'available',
+       0, v.qty, v.qty,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED', '2026-10-05 09:00:00+08'::timestamptz
+FROM (VALUES (9911, 'WH-E01', 'REEL-02-21', 'SKU-E010-01', 'B20260928-E010', 40.0000::numeric(18, 4)),
+             (9912, 'WH-E01', 'REEL-02-22', 'SKU-E010-01', 'B20260910-E010', 25.0000::numeric(18, 4)),
+             (9913, 'WH-E01', 'REEL-02-12', 'SKU-E003-01', 'B20261001-E003', 60.0000::numeric(18, 4)),
+             (9914, 'WH-E01', 'IC-01-12',   'SKU-E003-01', 'B20260825-E003', 30.0000::numeric(18, 4)),
+             (9915, 'WH-D01', 'S-01-22',    'SKU-D004-01', 'B20260912-D004', 150.0000::numeric(18, 4)),
+             (9916, 'WH-D01', 'P-02-12',    'SKU-D008-01', 'B20260710-D008', 45.0000::numeric(18, 4)),
+             (9917, 'WH-D02', 'S-01-22',    'SKU-D001-02', NULL, 520.0000::numeric(18, 4))) AS v(id, wh_code, bin_code, sku_code, batch_no, qty)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (ledger_no) DO NOTHING;
+
+-- ---- 18.3 待复核任务（PENDING 挂唯一 PICKED 出库单；复核中心待处理队列 / 工作台待复核组）----
+INSERT INTO check_tasks (check_no, outbound_no, outbound_line_no, sku_id, batch_id, serial_no, qty, status,
+                         result, assignee_id, assignee_name, claimed_at, done_at, warehouse_id, remark, created_at, created_by)
+SELECT v.check_no, v.outbound_no, v.line_no, sku.id, COALESCE(bat.id, 0), '', v.qty, 'PENDING', '',
+       0, '', NULL::timestamptz, NULL::timestamptz, w.id, 'DEV SEED', v.created_at, 9903
+FROM (VALUES ('CH-20261007-000001', 'OUT-20261006-000004', 1, 'SKU-E013-01', NULL, 12.0000::numeric(18, 4), '2026-10-07 09:30:00+08'::timestamptz)) AS v(check_no, outbound_no, line_no, sku_code, batch_no, qty, created_at)
+JOIN outbound_orders o ON o.outbound_no = v.outbound_no
+JOIN warehouses w ON w.id = o.warehouse_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (check_no) DO NOTHING;
+
+INSERT INTO doc_number_counters (prefix, period, next_no, created_at, updated_at, created_by)
+VALUES ('CH', '20261007', 2, now(), now(), 0),
+       ('IMP', '20261007', 3, now(), now(), 0),
+       ('EXP', '20261007', 2, now(), now(), 0),
+       ('PO', '20261007', 2, now(), now(), 0),
+       ('PW', '20261007', 2, now(), now(), 0),
+       ('CK', '20261007', 2, now(), now(), 0)
+ON CONFLICT (prefix, period) DO UPDATE SET next_no = GREATEST(doc_number_counters.next_no, EXCLUDED.next_no);
+
+-- ---- 18.4 演示流水（净零对，§10 补影红线：Σ qty_change = 0 不改现存量锚点）----
+-- 覆盖 TRANSFER_OUT/TRANSFER_IN（回指真实调拨单 TR-20261006-000003）、MOVE（库位间移位）、
+-- ADJUST（盘盈/盘亏，回指真实调整单）、LOCK/RELEASE（锁定/释放对）——流水页各类型筛选有命中。
+INSERT INTO inventory_ledgers (id, ledger_no, sku_id, warehouse_id, zone_id, shelf_id, bin_id, batch_id,
+                               change_type, business_type, business_no, status_from, status_to,
+                               qty_before, qty_change, qty_after,
+                               operator_id, operator_name, request_id, remark, created_at)
+SELECT v.id, 'LED-DEV-' || v.id::text, sku.id, w.id, z.id, s.id, b.id, 0,
+       v.ctype, '演示', 'DEV-SEED-FLOW-' || v.id::text, v.st_from, v.st_to,
+       v.q_before, v.q_change, v.q_after,
+       0, 'dev-seed', 'dev-seed', 'DEV SEED', v.at
+FROM (VALUES (9921, 'WH-E01', 'IC-01-11', 'SKU-E004-01', 'TRANSFER_OUT', 'available', 'available', 500.0000::numeric(18, 4),  -30.0000::numeric(18, 4), 470.0000::numeric(18, 4), '2026-10-06 10:20:00+08'::timestamptz),
+             (9922, 'WH-E02', 'SB-01-11', 'SKU-E004-01', 'TRANSFER_IN',  'available', 'available', 0.0000::numeric(18, 4),    30.0000::numeric(18, 4),  30.0000::numeric(18, 4), '2026-10-06 14:40:00+08'::timestamptz),
+             (9923, 'WH-E01', 'REEL-01-11', 'SKU-E001-01', 'MOVE', 'available', 'available', 30.0000::numeric(18, 4),  -10.0000::numeric(18, 4), 20.0000::numeric(18, 4), '2026-10-06 16:10:00+08'::timestamptz),
+             (9924, 'WH-E01', 'REEL-01-12', 'SKU-E001-01', 'MOVE', 'available', 'available', 10.0000::numeric(18, 4),   10.0000::numeric(18, 4), 20.0000::numeric(18, 4), '2026-10-06 16:10:30+08'::timestamptz),
+             (9925, 'WH-D01', 'S-01-11', 'SKU-D001-01', 'ADJUST', 'available', 'available', 12.0000::numeric(18, 4),   2.0000::numeric(18, 4),  14.0000::numeric(18, 4), '2026-10-06 17:30:00+08'::timestamptz),
+             (9926, 'WH-D01', 'R-01-12', 'SKU-D009-01', 'ADJUST', 'available', 'available', 300.0000::numeric(18, 4), -2.0000::numeric(18, 4), 298.0000::numeric(18, 4), '2026-10-06 17:35:00+08'::timestamptz),
+             (9927, 'WH-E01', 'REEL-02-11', 'SKU-E002-01', 'LOCK',    'available', 'locked',    25.0000::numeric(18, 4),  -5.0000::numeric(18, 4), 20.0000::numeric(18, 4), '2026-10-07 09:00:00+08'::timestamptz),
+             (9928, 'WH-E01', 'REEL-02-11', 'SKU-E002-01', 'RELEASE', 'locked',    'available', 20.0000::numeric(18, 4),   5.0000::numeric(18, 4), 25.0000::numeric(18, 4), '2026-10-07 09:40:00+08'::timestamptz)) AS v(id, wh_code, bin_code, sku_code, ctype, st_from, st_to, q_before, q_change, q_after, at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN zones z ON z.id = b.zone_id
+JOIN shelves s ON s.id = b.shelf_id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT (ledger_no) DO NOTHING;
+
+-- ---- 18.5 数据域状态补全（§15 既有导入缺 EXECUTING/PARTIAL_SUCCESS 态、导出缺 PROCESSING 态
+--      —— 导入/导出任务列表页状态筛选与 verify §14 断言的全值域收口）----
+INSERT INTO import_tasks (id, import_no, import_type, status, source_file_id, total_rows, valid_rows, error_rows,
+                          success_rows, failed_rows, started_at, finished_at, created_at, created_by)
+VALUES (9011, 'IMP-20261007-000001', 'SKU', 'EXECUTING', 9008, 40, 40, 0, 18, 0,
+        '2026-10-07 10:00:00+08'::timestamptz, NULL::timestamptz, '2026-10-07 09:58:00+08'::timestamptz, 9903),
+       (9012, 'IMP-20261007-000002', 'SUPPLIER', 'PARTIAL_SUCCESS', 9008, 20, 20, 3, 17, 3,
+        '2026-10-07 11:00:00+08'::timestamptz, '2026-10-07 11:01:00+08'::timestamptz, '2026-10-07 10:58:00+08'::timestamptz, 9901)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO import_task_rows (id, task_id, row_no, raw, parsed, status, errors, batch_no, created_at, created_by, updated_by)
+VALUES (9015, 9011, 1, '{"code": "SKU-NEW-010", "product": "P-NEW-001"}'::jsonb, '{"code": "SKU-NEW-010"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-07 10:00:00+08', 9903, 9903),
+       (9016, 9011, 2, '{"code": "SKU-NEW-011", "product": "P-NEW-001"}'::jsonb, '{"code": "SKU-NEW-011"}'::jsonb, 'QUEUED', NULL, 1, '2026-10-07 10:00:00+08', 9903, 9903),
+       (9017, 9012, 1, '{"code": "SUP-NEW-002", "name": "演示供应商乙"}'::jsonb, '{"code": "SUP-NEW-002", "name": "演示供应商乙"}'::jsonb, 'INVALID', '[{"row": 1, "column": "code", "message": "供应商编码已存在"}]'::jsonb, 1, '2026-10-07 11:00:00+08', 9901, 9901),
+       (9018, 9012, 2, '{"code": "SUP-NEW-003", "name": "演示供应商丙"}'::jsonb, '{"code": "SUP-NEW-003", "name": "演示供应商丙"}'::jsonb, 'SUCCESS', NULL, 1, '2026-10-07 11:00:00+08', 9901, 9901)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO export_tasks (id, export_no, module, scope, params, status, progress, total_rows, file_id,
+                          error_message, started_at, created_at, created_by)
+VALUES (9013, 'EXP-20261007-000001', 'INVENTORY_LEDGER', 'TIME_RANGE',
+        '{"time_from": "2026-10-01 00:00:00", "time_to": "2026-10-07 23:59:59"}'::jsonb,
+        'PROCESSING', 40, 0, 9003, '', '2026-10-07 12:00:00+08'::timestamptz, '2026-10-07 11:59:00+08'::timestamptz, 9901)
+ON CONFLICT DO NOTHING;
+
+-- ---- 18.6 单据状态补漏（verify §16 断言缺口：§17 的 APPROVED 采购单 / §11 的 PENDING 上架 /
+--      §17.9 的 DRAFT 盘点单曾被运行期同号单据 ON CONFLICT 静默跳过——改用全新 20261007 段）----
+INSERT INTO purchase_orders (po_no, supplier_id, warehouse_id, total_amount, status, approved_by, approved_at,
+                             remark, created_at, created_by, updated_by)
+SELECT v.po_no, sup.id, w.id, v.total, v.status, 9901, v.approved_at, v.remark, v.created_at, 9901, 9901
+FROM (VALUES ('PO-20261007-000001', 'SUP-E002', 'WH-E01', 4300.0000::numeric(18, 4), 'APPROVED',
+              '2026-10-07 09:05:00+08'::timestamptz, '已审核待收货：连接器补库（演示补漏）', '2026-10-07 09:00:00+08'::timestamptz)) AS v(po_no, sup_code, wh_code, total, status, approved_at, remark, created_at)
+JOIN suppliers sup ON sup.code = v.sup_code AND sup.deleted_at IS NULL
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (po_no) DO NOTHING;
+
+INSERT INTO purchase_order_items (po_id, line_no, sku_id, qty_ordered, qty_received, qty_rejected, qty_putaway,
+                                  price, amount, remark, created_at, created_by)
+SELECT p.id, v.line_no, sku.id, v.qty, 0, 0, 0, v.price, v.qty * v.price, '', v.created_at, 9901
+FROM (VALUES ('PO-20261007-000001', 1, 'SKU-E006-01', 2000.0000::numeric(18, 4), 0.8500::numeric(18, 4), '2026-10-07 09:00:00+08'::timestamptz)) AS v(po_no, line_no, sku_code, qty, price, created_at)
+JOIN purchase_orders p ON p.po_no = v.po_no
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+ON CONFLICT DO NOTHING;
+
+INSERT INTO putaway_tasks (putaway_no, inbound_no, receipt_no, sku_id, batch_id, serial_no, qty, from_state,
+                           target_warehouse_id, target_zone_id, target_shelf_id, target_bin_id, status,
+                           claimed_by, claimed_at, completed_at, remark, created_at, created_by)
+SELECT v.putaway_no, v.inbound_no, v.receipt_no, sku.id, COALESCE(bat.id, 0), '',
+       v.qty, 'available', w.id, b.zone_id, b.shelf_id, b.id, v.status,
+       0, NULL::timestamptz, NULL::timestamptz, v.remark, v.created_at, 9902
+FROM (VALUES ('PW-20261007-000001', 'IN-20261003-000002', 'RC-20261003-000001', 'SKU-E006-01', 'B20260926-E006', 100.0000::numeric(18, 4), 'PENDING', 'WH-E01', 'IC-01-12', 'DEV SEED 待领取上架', '2026-10-07 08:30:00+08'::timestamptz)) AS v(putaway_no, inbound_no, receipt_no, sku_code, batch_no, qty, status, wh_code, bin_code, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+JOIN bins b ON b.code = v.bin_code AND b.warehouse_id = w.id
+JOIN skus sku ON sku.code = v.sku_code AND sku.deleted_at IS NULL
+LEFT JOIN batches bat ON bat.sku_id = sku.id AND bat.batch_no = v.batch_no
+ON CONFLICT (putaway_no) DO NOTHING;
+
+INSERT INTO count_orders (count_no, warehouse_id, scope, status, frozen_at, reviewed_at, completed_at,
+                          cancelled_at, remark, created_at, created_by)
+SELECT v.count_no, w.id, v.scope, v.status, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz, NULL::timestamptz,
+       v.remark, v.created_at, 9904
+FROM (VALUES ('CK-20261007-000001', 'WH-E01', '{"type": "WAREHOUSE"}'::jsonb, 'DRAFT', '电子仓全盘计划草稿（演示补漏）', '2026-10-07 08:00:00+08'::timestamptz)) AS v(count_no, wh_code, scope, status, remark, created_at)
+JOIN warehouses w ON w.code = v.wh_code AND w.deleted_at IS NULL
+ON CONFLICT (count_no) DO NOTHING;
+
 COMMIT;
 
 \echo '>>> dev_seed.sql：演示数据注入完成（幂等，可重复执行；请执行 make seed-demo-verify 自检）。'

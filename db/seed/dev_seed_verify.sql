@@ -350,6 +350,39 @@ BEGIN
 END
 $$;
 
+-- ---- 17) 补全轮二（§18）：效期三档 / 待复核队列 / 超储触发 / 流水类型与净零段 ----
+DO $$
+DECLARE n int; net numeric;
+BEGIN
+    -- 效期批次（batches 9621-9626，到期日相对 CURRENT_DATE）：过期 / 30 天窗内 / 窗外对照齐备
+    SELECT count(*) INTO n FROM batches WHERE id BETWEEN 9621 AND 9626 AND expiry_date <= CURRENT_DATE;
+    IF n < 1 THEN RAISE EXCEPTION '[效期] 已过期演示批次应 ≥1（expired 预警档），实际 %', n; END IF;
+    SELECT count(*) INTO n FROM batches WHERE id BETWEEN 9621 AND 9626
+      AND expiry_date > CURRENT_DATE AND expiry_date <= CURRENT_DATE + 30;
+    IF n < 4 THEN RAISE EXCEPTION '[效期] 30 天临期窗内演示批次应 ≥4，实际 %', n; END IF;
+    SELECT count(*) INTO n FROM batches WHERE id BETWEEN 9621 AND 9626 AND expiry_date > CURRENT_DATE + 30;
+    IF n < 1 THEN RAISE EXCEPTION '[效期] 窗口外正常效期对照批次应 ≥1，实际 %', n; END IF;
+    -- 待复核队列：PENDING 任务在（复核中心 ?status=PENDING / 工作台待复核组数据源）
+    SELECT count(*) INTO n FROM check_tasks WHERE check_no = 'CH-20261007-000001' AND status = 'PENDING';
+    IF n <> 1 THEN RAISE EXCEPTION '[待复核] CH-20261007-000001 应恰有 1 条 PENDING，实际 %', n; END IF;
+    -- 超储触发：WH-D02 × SKU-D001-02 仓级合计 available > max_stock
+    SELECT count(*) INTO n FROM (
+        SELECT SUM(i.available_qty) AS avail, MAX(s.max_stock) AS max_stock
+        FROM inventory i
+        JOIN skus s ON s.id = i.sku_id
+        JOIN warehouses w ON w.id = i.warehouse_id
+        WHERE w.code = 'WH-D02' AND s.code = 'SKU-D001-02'
+    ) t WHERE t.avail > t.max_stock;
+    IF n <> 1 THEN RAISE EXCEPTION '[超储] WH-D02/SKU-D001-02 合计应 > max_stock（overstock 预警档）'; END IF;
+    -- 流水类型：§18.4 覆盖 6 种此前缺失的 change_type
+    SELECT count(DISTINCT change_type) INTO n FROM inventory_ledgers WHERE id BETWEEN 9921 AND 9928;
+    IF n < 6 THEN RAISE EXCEPTION '[流水] §18.4 应覆盖 ≥6 种 change_type（TRANSFER_*/MOVE/ADJUST/LOCK/RELEASE），实际 %', n; END IF;
+    -- 净零红线：§18.4 演示段 Σ qty_change = 0（不改现存量锚点）
+    SELECT COALESCE(SUM(qty_change), 0) INTO net FROM inventory_ledgers WHERE id BETWEEN 9921 AND 9928;
+    IF net <> 0 THEN RAISE EXCEPTION '[流水] §18.4 净零段 Σ qty_change 应为 0，实际 %', net; END IF;
+END
+$$;
+
 -- ---- 自检通过：输出演示集摘要 ----
 \echo '>>> 自检通过。演示集摘要：'
 SELECT (SELECT count(*) FROM users WHERE username LIKE 'dev\_%')            AS "测试账号",
