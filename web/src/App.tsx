@@ -36,10 +36,10 @@ export function App() {
         colorSuccess: dark ? '#3fb950' : '#16a34a',
         colorWarning: dark ? '#e8a33d' : '#d97706',
         colorError: dark ? '#e8564f' : '#dc2626',
-        // 表面 ↔ --sf-bg / --sf-surface（2026-10-06 二次调整：Light 页面背景 #f2f3f5，
-        // 与纯白卡片拉开一级可感知色阶（用户口径：卡片更白、层次更清晰）；
+        // 表面 ↔ --sf-bg / --sf-surface（2026-10-07 三次调整：Light 页面背景**纯白**
+        // （用户口径「页面更白更干净」），卡片层次靠 --sf-shadow-card 阴影 + 边框区分；
         // Dark 页面 #101418 与卡片白两级分层不变）
-        colorBgLayout: dark ? '#101418' : '#f2f3f5',
+        colorBgLayout: dark ? '#101418' : '#ffffff',
         colorBgContainer: dark ? '#171b21' : '#ffffff',
         // 边框 ↔ --sf-border / --sf-border-subtle
         colorBorder: dark ? 'rgba(255, 255, 255, 0.08)' : '#e5e7eb',

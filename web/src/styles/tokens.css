@@ -13,10 +13,10 @@
      卡片/面板恒纯白——分层 = 底色微色阶 + 既有边框；比原 #f6f7f9 更亮、比纯白低半档。
      深浅只调这一枚 token，App.tsx colorBgLayout 同 commit 同步；
      Dark 维持 #101418 与 Surface 两级分层不变） ===== */
-  --sf-bg: #f2f3f5;
+  --sf-bg: #ffffff;
   --sf-surface: #ffffff;
   --sf-surface-elevated: #ffffff;
-  /* 卡片浮起阴影（页面背景加深后增强层次；极淡，克制不浮夸） */
+  /* 卡片浮起阴影（全白背景下卡片层次靠阴影+边框区分；极淡，克制不浮夸） */
   --sf-shadow-card: 0 1px 2px rgba(16, 24, 40, 0.04), 0 1px 3px rgba(16, 24, 40, 0.03);
   /* hover 表面档（表格行 / 侧边栏菜单 hover） */
   --sf-surface-hover: #f8fafc;

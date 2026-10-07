@@ -81,7 +81,7 @@ AI 风格 Dashboard、大量渐变、玻璃拟态、大面积彩色卡片
 统一 Design Token（业务层 `--sf-*` 变量，唯一定义于 `web/src/styles/tokens.css`；通过 ConfigProvider theme 与 antd Token 映射（`App.tsx`，映射改动必须与 tokens.css 同 commit 同步）；禁止页面绕过 Token 直接写死样式值）：
 
 ```text
---sf-bg                页面背景（Light #f2f3f5——2026-10-06 自 #f9fafb 加深一档，与纯白卡片拉开可感知色阶）
+--sf-bg                页面背景（Light #ffffff——2026-10-07 用户口径「页面更白更干净」：全白背景，卡片层次靠 --sf-shadow-card 阴影与边框区分）
 --sf-surface           卡片/面板表面
 --sf-surface-elevated  浮层表面
 --sf-surface-hover     hover 表面档（表格行 / 侧边栏菜单 hover）
