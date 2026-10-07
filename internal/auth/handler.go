@@ -76,10 +76,32 @@ func queryID(c *gin.Context, name string) (int64, bool) {
 
 // ---- /api/auth 公开接口（api.md §6.1 豁免名单）----
 
-// LoginRequest 登录请求体。
+// handleCaptcha GET /api/auth/captcha：签发登录图像验证码（captcha.go）。
+// @Summary GET /api/auth/captcha
+// @Tags 认证与用户
+// @Produce json
+// @Success 200 {object} response.Envelope "统一响应信封（captcha_id/image/expires_in）"
+// @Router /api/auth/captcha [get]
+func handleCaptcha(c *gin.Context) {
+	svc, ok := svcOf()
+	if !ok {
+		abortUnwired(c)
+		return
+	}
+	res, err := svc.IssueLoginCaptcha(c.Request.Context())
+	if err != nil {
+		response.Err(c, err)
+		return
+	}
+	response.OK(c, res)
+}
+
+// LoginRequest 登录请求体（验证码先于凭据校验：captcha.go 人机闸）。
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username    string `json:"username" binding:"required"`
+	Password    string `json:"password" binding:"required"`
+	CaptchaID   string `json:"captcha_id" binding:"required"`
+	CaptchaCode string `json:"captcha_code" binding:"required"`
 }
 
 // handleLogin POST /api/auth/login。
@@ -100,6 +122,12 @@ func handleLogin(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
+		return
+	}
+	// 人机闸先于凭据校验（captcha.go）：验证码错误/过期即拒绝，不计入 loginGuard
+	// 失败数（该计数只应反映凭据尝试），验证码一次性消费在 Verify 内完成。
+	if err := svc.VerifyLoginCaptcha(c.Request.Context(), req.CaptchaID, req.CaptchaCode); err != nil {
+		response.Err(c, err)
 		return
 	}
 	res, err := svc.Login(c.Request.Context(), LoginInput{

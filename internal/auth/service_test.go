@@ -102,6 +102,54 @@ func TestLoginWrongPasswordCountsAndLocks(t *testing.T) {
 	require.Equal(t, "AUTH_CREDENTIALS_INVALID", codeOf(t, err))
 }
 
+// TestLoginLockExemptUsernameSkipsAccountLock 豁免用户名（默认 bootstrap 管理员）达阈值
+// 不落账户行锁（安全渗透修复：admin 必建且不可删，可被用户名维度锁定即给攻击者留下
+// "每窗口错密几次无限维持锁定"的拒绝服务面）；IP 维度失败计数与限流保持不变。
+func TestLoginLockExemptUsernameSkipsAccountLock(t *testing.T) {
+	svc, repo, _ := newServiceFixture(t)
+	uid := repo.seedUser(database.AdminUsername, testPassword, nil)
+	ctx := context.Background()
+
+	for i := 0; i < svc.cfg.maxLoginFailures; i++ {
+		_, err := svc.Login(ctx, LoginInput{Username: database.AdminUsername, Password: "wrong1", IP: "1.2.3.4", UserAgent: "ua"})
+		require.Equal(t, "AUTH_CREDENTIALS_INVALID", codeOf(t, err))
+	}
+	u, err := repo.FindUserByID(ctx, uid)
+	require.NoError(t, err)
+	require.True(t, u.LockedUntil.IsZero(), "豁免用户名达阈值不落账户行锁")
+	require.Equal(t, 0, repo.lockCalls, "LockUser 不应被调用")
+}
+
+// TestLoginLockExemptOverride SF_AUTH_LOCK_EXEMPT 覆盖语义：清单换成其他用户名后，
+// admin 恢复用户名维度锁定；且真正 LockUser 时写 auth.user.locked 审计（operation_logs）。
+func TestLoginLockExemptOverride(t *testing.T) {
+	rdb := newFakeRedis()
+	repo := newFakeRepo()
+	cfg := testCfg()
+	cfg.lockExempt = []string{"supervisor"} // 模拟 SF_AUTH_LOCK_EXEMPT=supervisor 覆盖默认
+	resetWiredForTest()
+	t.Cleanup(resetWiredForTest)
+	setWiredForTest(cfg, repo, rdb)
+	_, _, _, _, svc, _, ok := snapshotWired()
+	require.True(t, ok)
+
+	uid := repo.seedUser(database.AdminUsername, testPassword, nil)
+	ctx := context.Background()
+	resetSQLCapture()
+	for i := 0; i < cfg.maxLoginFailures; i++ {
+		_, err := svc.Login(ctx, LoginInput{Username: database.AdminUsername, Password: "wrong1", IP: "2.3.4.5", UserAgent: "ua"})
+		require.Equal(t, "AUTH_CREDENTIALS_INVALID", codeOf(t, err))
+	}
+	u, err := repo.FindUserByID(ctx, uid)
+	require.NoError(t, err)
+	require.False(t, u.LockedUntil.IsZero(), "清单覆盖后 admin 恢复用户名维度锁定")
+	require.Equal(t, 1, repo.lockCalls)
+	require.True(t, sqlCaptured("operation_logs", "login_failures_exceeded"),
+		"锁定事件必须写 operation_logs 审计（auth.user.locked）")
+	require.True(t, sqlCaptured("operation_logs", database.AdminUsername),
+		"审计快照应含被锁用户名")
+}
+
 func TestLoginLockExpiryAllowsRetry(t *testing.T) {
 	svc, repo, _ := newServiceFixture(t)
 	// 锁定已过期（locked_until 为过去时刻）→ 允许再次尝试。

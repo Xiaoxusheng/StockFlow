@@ -127,6 +127,35 @@ func TestLoginGuardCounting(t *testing.T) {
 	require.Equal(t, int64(0), rdb.intVal(failKey("alice")))
 }
 
+func TestLoginGuardFailAtomicWindowTTL(t *testing.T) {
+	rdb := newFakeRedis()
+	guard := &loginGuard{rdb: rdb, maxFailures: 5, window: 15 * time.Minute}
+	ctx := context.Background()
+
+	// INCR 与窗口 TTL 经 Lua 原子执行（安全渗透修复）：不存在"INCR 成功、EXPIRE 单独
+	// 失败"的中间态——首笔失败即带窗口 TTL，不再可能产生无 TTL 的永久计数键。
+	n, err := guard.Fail(ctx, "carol")
+	require.NoError(t, err)
+	require.Equal(t, int64(1), n)
+	require.Equal(t, guard.window, rdb.ttl[failKey("carol")])
+
+	// 等价验证（Expire 不再可能失败留下无 TTL 键）：旧版本故障产物——有计数、无 TTL
+	// 的孤儿键，经 Eval 脚本的 TTL==-1 修复分支在继续累计的同时补设窗口 TTL。
+	rdb.mu.Lock()
+	rdb.str[failKey("dave")] = "4" // 模拟遗留孤儿键（绕过 Set/Expire，不落 ttl 表）
+	rdb.mu.Unlock()
+	n, err = guard.Fail(ctx, "dave")
+	require.NoError(t, err)
+	require.Equal(t, int64(5), n)
+	require.Equal(t, guard.window, rdb.ttl[failKey("dave")], "孤儿键必须被补设窗口 TTL")
+
+	// 窗口 TTL 只在首笔/修复时设置一次，后续累计不重置（窗口语义不变）。
+	_, err = guard.Fail(ctx, "carol")
+	require.NoError(t, err)
+	require.Equal(t, 1, rdb.expired[failKey("carol")])
+	require.Equal(t, guard.window, rdb.ttl[failKey("carol")])
+}
+
 func TestPermsCacheRoundtrip(t *testing.T) {
 	rdb := newFakeRedis()
 	store := newSessionStore(rdb, testCfg())

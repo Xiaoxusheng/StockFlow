@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 	"gorm.io/gorm"
 
 	"github.com/stockflow/server/internal/database"
@@ -24,6 +25,7 @@ type Service struct {
 	store   *sessionStore
 	guard   *loginGuard
 	pwGuard *loginGuard // S15：改密原密码失败保护（与登录保护独立阈值/窗口/键前缀）
+	rdb     redisStore  // 登录验证码存取（captcha.go；与 guard 同一 Redis 实例）
 	cfg     runtimeConfig
 	checker WarehouseChecker // plan §4.3：用户绑定仓库的存在性校验（router 装配注入）
 }
@@ -35,6 +37,8 @@ func NewService(repo Repository, store *sessionStore, guard *loginGuard, cfg run
 		// S15：改密失败保护与登录保护共用 Redis，但阈值/窗口/键前缀独立（互不干扰）。
 		svc.pwGuard = &loginGuard{rdb: guard.rdb, maxFailures: changePwMaxFailures,
 			window: changePwWindow, prefix: "pwdfail"}
+		// 登录验证码（captcha.go）与失败保护共用同一 Redis 实例（窄接口 redisStore）。
+		svc.rdb = guard.rdb
 	}
 	return svc
 }
@@ -267,11 +271,16 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (*LoginResult, error
 			count = 0
 		}
 		_, _ = s.guard.Fail(ctx, failIPDim(in.IP)) // IP 维度计数由入口预检消费；计数失败 fail-open
-		if count >= int64(s.cfg.maxLoginFailures) {
+		// 豁免用户名（SF_AUTH_LOCK_EXEMPT，默认 bootstrap 管理员）跳过用户名维度的账户行锁：
+		// admin 必建且不可删，若可被锁，攻击者每窗口 maxLoginFailures 次错密即可无限维持
+		// 锁定（拒绝服务）。IP 维度限流与失败计数全部保留——防喷洒防线不受豁免影响。
+		if count >= int64(s.cfg.maxLoginFailures) && !s.cfg.isLockExempt(username) {
 			until := time.Now().Add(s.cfg.lockDuration)
 			if lerr := s.repo.LockUser(ctx, u.ID.Int64(), until); lerr != nil {
 				return nil, lerr
 			}
+			// 锁定审计（安全渗透修复：锁定事件必须可追溯）。
+			s.auditUserLocked(ctx, u, until, in)
 		}
 		s.writeLoginLog(ctx, logEntry, "AUTH_CREDENTIALS_INVALID", in.RequestID)
 		return nil, response.NewError(ErrCredentialsInvalid, nil)
@@ -364,6 +373,18 @@ func (s *Service) Refresh(ctx context.Context, in RefreshInput) (*LoginResult, e
 		return nil, response.NewError(ErrRefreshInvalid, nil)
 	}
 	logEntry.UserID = old.UserID
+
+	// 刷新凭证绑定 User-Agent（f3：被盗凭证跨设备重放防护）。会话创建时已登记
+	// 登录 UA；刷新请求 UA 与登记不一致 = 凭证离开原设备的强特征——拒绝刷新
+	// （ErrRefreshInvalid，不泄漏区分性信息），但不删除会话：正牌用户不受影响
+	// （其后续请求 UA 一致仍可刷新），盗用者持有的凭证在本服务不可续期。
+	// 仅绑定 UA 不绑定 IP——移动办公跨网切换属正常行为，IP 绑定会误伤；
+	// 登记端 UA 为空（历史会话/特殊客户端）时跳过校验保持兼容。
+	if old.UserAgent != "" && strings.TrimSpace(in.UserAgent) != old.UserAgent {
+		logEntry.Username = old.Username
+		s.writeLoginLog(ctx, logEntry, "AUTH_REFRESH_INVALID", in.RequestID)
+		return nil, response.NewError(ErrRefreshInvalid, nil)
+	}
 
 	u, err := s.repo.FindUserByID(ctx, old.UserID)
 	if err != nil {
@@ -666,6 +687,43 @@ func (s *Service) writeLoginLog(ctx context.Context, e middleware.LoginLogEntry,
 	e.FailReason = reason
 	if err := middleware.WriteLoginLog(s.repo.DB(), e); err != nil {
 		logLoginLogWriteFailed(err, e, reason, requestID)
+	}
+}
+
+// auditUserLocked 账户锁定审计事件（operation_logs：module=auth / object_type=user /
+// action=locked，即 auth.user.locked；安全渗透修复：锁定事件必须可追溯）。
+// 复用 middleware.Audit 统一审计通道（audit.go 冻结契约：禁止任何包另建第二套审计写入；
+// kick/change-password 同款经 database.Tx 落库）。
+// 落位说明：LockUser 为独立短路径更新（repository.go，不经事务参数），审计无法与其
+// 同事务——锁定是已生效的保护动作，审计缺位不应回滚锁本身，故与 login_logs 写失败
+// 同口径（S7）：失败记 error 日志供完整性排查，不改变本次认证结论。
+// After 快照仅含用户名/截止时间/原因，不含密码与 Token（architecture.md §6 日志红线）。
+func (s *Service) auditUserLocked(ctx context.Context, u *User, until time.Time, in LoginInput) {
+	e := middleware.AuditEntry{
+		Module:     "auth",
+		ObjectType: "user",
+		Action:     "locked",
+		ObjectID:   u.ID.Int64(),
+		IP:         in.IP,
+		UserAgent:  in.UserAgent,
+		RequestID:  in.RequestID,
+		Success:    true,
+		After: map[string]any{
+			"username":     u.Username,
+			"locked_until": until.Format(time.RFC3339),
+			"reason":       "login_failures_exceeded",
+		},
+	}
+	err := database.Tx(ctx, s.repo.DB(), func(tx *gorm.DB) error {
+		return middleware.Audit(tx, e)
+	})
+	if err != nil {
+		businessLogger().Error("operation_logs 账户锁定审计写入失败（审计缺位，需完整性排查）",
+			zap.Error(err),
+			zap.String("request_id", in.RequestID),
+			zap.String("username", u.Username),
+			zap.String("locked_until", until.Format(time.RFC3339)),
+		)
 	}
 }
 

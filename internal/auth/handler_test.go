@@ -137,12 +137,26 @@ func envItems(t *testing.T, body string) []any {
 	return d["items"].([]any)
 }
 
-// ---- POST /api/auth/login（handleLogin）----
+// ---- POST /api/auth/login（handleLogin；captcha.go 人机闸在凭据校验之前）----
+
+// captchaFields 签发一条验证码并返回请求体片段；answer 传 "" 时取真答案（fakeRedis 直读），
+// 传其他值模拟错误答案。验证码一次性消费，每条用例必须独立签发。
+func (f *handlerFixture) captchaFields(t *testing.T, answer string) string {
+	t.Helper()
+	ch, err := f.svc.IssueLoginCaptcha(context.Background())
+	require.NoError(t, err)
+	code := answer
+	if code == "" {
+		code = f.rdb.val(captchaKey(ch.CaptchaID))
+	}
+	return fmt.Sprintf(`"captcha_id":%q,"captcha_code":%q`, ch.CaptchaID, code)
+}
 
 func TestHandlerLogin(t *testing.T) {
 	f := newHandlerFixture(t)
 	uid := f.repo.seedUser("alice", testPassword, nil)
 
+	okCaptcha := f.captchaFields(t, "")
 	tests := []struct {
 		name     string
 		body     string
@@ -157,7 +171,15 @@ func TestHandlerLogin(t *testing.T) {
 			name: "非JSON体_绑定失败", body: `not-json`, wantHTTP: 400, wantCode: "COMMON_INVALID_PARAM",
 		},
 		{
-			name: "成功", body: `{"username":"alice","password":"Passw0rd"}`,
+			name: "缺验证码字段_绑定失败", body: `{"username":"alice","password":"Passw0rd"}`,
+			wantHTTP: 400, wantCode: "COMMON_INVALID_PARAM",
+		},
+		{
+			name: "验证码答案错误", body: fmt.Sprintf(`{"username":"alice","password":"Passw0rd",%s}`, f.captchaFields(t, "XXXX")),
+			wantHTTP: 400, wantCode: "AUTH_CAPTCHA_INVALID",
+		},
+		{
+			name: "成功", body: fmt.Sprintf(`{"username":"alice","password":"Passw0rd",%s}`, okCaptcha),
 			wantHTTP: 200, wantCode: "0",
 			check: func(t *testing.T, body string) {
 				d := envData(t, body)
@@ -171,11 +193,11 @@ func TestHandlerLogin(t *testing.T) {
 			},
 		},
 		{
-			name: "密码错误", body: `{"username":"alice","password":"wrongPass1"}`,
+			name: "密码错误_验证码已过闸", body: fmt.Sprintf(`{"username":"alice","password":"wrongPass1",%s}`, f.captchaFields(t, "")),
 			wantHTTP: 401, wantCode: "AUTH_CREDENTIALS_INVALID",
 		},
 		{
-			name: "未知用户_防枚举统一文案", body: `{"username":"ghost","password":"whatever1"}`,
+			name: "未知用户_防枚举统一文案", body: fmt.Sprintf(`{"username":"ghost","password":"whatever1",%s}`, f.captchaFields(t, "")),
 			wantHTTP: 401, wantCode: "AUTH_CREDENTIALS_INVALID",
 		},
 	}
@@ -191,15 +213,35 @@ func TestHandlerLogin(t *testing.T) {
 	}
 }
 
+// TestHandlerCaptcha GET /api/auth/captcha 签发形态（captcha.go CaptchaChallenge 契约）。
+func TestHandlerCaptcha(t *testing.T) {
+	f := newHandlerFixture(t)
+	rec := doJSON(f.r, http.MethodGet, "/api/auth/captcha", "", "")
+	require.Equal(t, 200, rec.Code)
+	require.Equal(t, "0", envCode(t, rec.Body.String()))
+	d := envData(t, rec.Body.String())
+	require.NotEmpty(t, d["captcha_id"])
+	require.True(t, strings.HasPrefix(d["image"].(string), "data:image/svg+xml;base64,"))
+	require.Positive(t, d["expires_in"].(float64))
+}
+
+// httpLogin 经公开路由完成带验证码的登录（HTTP 全路径），返回成功信封 data。
+func (f *handlerFixture) httpLogin(t *testing.T, username string) map[string]any {
+	t.Helper()
+	body := fmt.Sprintf(`{"username":%q,"password":%q,%s}`, username, testPassword, f.captchaFields(t, ""))
+	rec := doJSON(f.r, http.MethodPost, "/api/auth/login", "", body)
+	require.Equal(t, http.StatusOK, rec.Code, "HTTP 登录应成功: %s", rec.Body.String())
+	require.Equal(t, "0", envCode(t, rec.Body.String()))
+	return envData(t, rec.Body.String())
+}
+
 // ---- POST /api/auth/refresh（handleRefresh）----
 
 func TestHandlerRefresh(t *testing.T) {
 	f := newHandlerFixture(t)
 	f.repo.seedUser("alice", testPassword, nil)
 
-	rec := doJSON(f.r, http.MethodPost, "/api/auth/login", "", `{"username":"alice","password":"Passw0rd"}`)
-	require.Equal(t, http.StatusOK, rec.Code)
-	old := envData(t, rec.Body.String())
+	old := f.httpLogin(t, "alice")
 
 	tests := []struct {
 		name     string
@@ -345,11 +387,11 @@ func TestHandlerPassword(t *testing.T) {
 		require.Equal(t, true, envData(t, rec.Body.String())["changed"])
 
 		// 旧密码登录被拒、新密码登录成功（permission.md §3.2）。
-		rec = doJSON(f.r, http.MethodPost, "/api/auth/login", "",
-			`{"username":"gina","password":"Passw0rd"}`)
+		oldLogin := fmt.Sprintf(`{"username":"gina","password":"Passw0rd",%s}`, f.captchaFields(t, ""))
+		rec = doJSON(f.r, http.MethodPost, "/api/auth/login", "", oldLogin)
 		require.Equal(t, http.StatusUnauthorized, rec.Code)
-		rec = doJSON(f.r, http.MethodPost, "/api/auth/login", "",
-			`{"username":"gina","password":"NewPassw0rd"}`)
+		newLogin := fmt.Sprintf(`{"username":"gina","password":"NewPassw0rd",%s}`, f.captchaFields(t, ""))
+		rec = doJSON(f.r, http.MethodPost, "/api/auth/login", "", newLogin)
 		require.Equal(t, http.StatusOK, rec.Code)
 	})
 }

@@ -80,6 +80,13 @@ type ServerConfig struct {
 	TrustedProxies []string `mapstructure:"trusted_proxies"`
 	// MaxBodyBytes 全局请求体上限（字节，http.MaxBytesReader；安全审查 S6）。
 	MaxBodyBytes int64 `mapstructure:"max_body_bytes"`
+	// DeviceActivateRatePerMinute /api/devices/activate 免凭证写端点的 IP 维度滑动窗口
+	// 限流（次/分钟；安全渗透修复——一次性激活码即凭证，属可暴力尝试的暴露面）。
+	DeviceActivateRatePerMinute int `mapstructure:"device_activate_rate_per_minute"`
+	// PublicBaseURL 对外公布的服务基础地址（如 https://wms.example.com；安全渗透修复）。
+	// 非空时固定设备激活二维码的 server_url——缺省按请求 scheme://host 推导可被伪造
+	// Host 操纵，使设备扫码指向攻击者端点；空 = 完全沿用请求推导（本机/直连部署）。
+	PublicBaseURL string `mapstructure:"public_base_url"`
 }
 
 // AuthConfig 认证入口防护（限流中间件实现于 internal/middleware，用户名维度的
@@ -108,13 +115,24 @@ type DatabaseConfig struct {
 	MaxIdleConns    int           `mapstructure:"max_idle_conns"`
 	ConnMaxLifetime time.Duration `mapstructure:"conn_max_lifetime"`
 	ConnMaxIdleTime time.Duration `mapstructure:"conn_max_idle_time"`
+	// StatementTimeout 单条 SQL 服务端执行超时（f31 慢查询闸门；pgx 启动参数
+	// statement_timeout，毫秒）。默认 2 分钟：正常 OLTP 远低于此值；无超时的慢报表
+	// 查询此前可无限占住连接池直至拖垮全站。0 = 关闭（显式禁用口）。
+	StatementTimeout time.Duration `mapstructure:"statement_timeout"`
 }
 
 // DSN pgx keyword/value 连接串。gorm.io/driver/postgres 默认即 pgx/v5 驱动；
 // password/dbname 单引号包裹，允许包含空格等特殊字符。
+// StatementTimeout>0 时追加 statement_timeout 启动参数（pgx 将未知键作为服务端
+// 会话参数下发，PG 对每条语句到时取消并回滚——reports/datax 全链路无应用层
+// context 超时的兜底闸门）。
 func (d DatabaseConfig) DSN() string {
-	return fmt.Sprintf("host=%s port=%d user='%s' password='%s' dbname='%s' sslmode=%s TimeZone=UTC",
+	dsn := fmt.Sprintf("host=%s port=%d user='%s' password='%s' dbname='%s' sslmode=%s TimeZone=UTC",
 		d.Host, d.Port, d.User, d.Password, d.Name, d.SSLMode)
+	if d.StatementTimeout > 0 {
+		dsn += fmt.Sprintf(" statement_timeout=%d", d.StatementTimeout.Milliseconds())
+	}
+	return dsn
 }
 
 // RedisConfig go-redis v9 连接与连接池。
@@ -138,34 +156,42 @@ func defaults() map[string]any {
 	return map[string]any{
 		// server.mode 默认 release（安全审查 S2）：gin 默认值收紧，本地开发请显式设
 		// SF_SERVER_MODE=debug；release 下 auth 的 JWT 密钥缺失 fail-fast 自然生效。
-		"server.mode":                   "release",
-		"server.port":                   8080,
-		"server.read_timeout":           15 * time.Second,
-		"server.write_timeout":          15 * time.Second,
-		"server.shutdown_timeout":       10 * time.Second,
-		"server.trusted_proxies":        []string{},     // 空 = 不信任任何代理（安全审查 S5）
-		"server.max_body_bytes":         int64(1) << 20, // 1MB（安全审查 S6）
-		"auth.rate_limit_ip_per_minute": 30,             // /api/auth 公开组 IP 限流（安全审查 S4）
-		"log.level":                     "info",
-		"log.format":                    "json",
-		"database.host":                 "127.0.0.1",
-		"database.port":                 5432,
-		"database.user":                 "postgres",
-		"database.password":             "",
-		"database.name":                 "stockflow",
-		"database.sslmode":              "disable",
-		"database.auto_migrate":         false,
-		"database.max_open_conns":       50,
-		"database.max_idle_conns":       10,
-		"database.conn_max_lifetime":    time.Hour,
-		"database.conn_max_idle_time":   10 * time.Minute,
-		"redis.enabled":                 true,
-		"redis.addr":                    "127.0.0.1:6379",
-		"redis.password":                "",
-		"redis.db":                      0,
-		"redis.pool_size":               50,
-		"redis.min_idle_conns":          5,
-		"cors.allowed_origins":          []string{"http://localhost:5173"},
+		"server.mode": "release",
+		"server.port": 8080,
+		// f21：WriteTimeout 覆盖整个响应体写出——200MB 导出产物（datax.ExportMaxFileBytes）
+		// 与 inline 同步导出在常规带宽下需 8~80s+，15s 会强制中断下载/导出；
+		// ReadTimeout 给 ≤20MB 上传留出弱网余量。
+		"server.read_timeout":     60 * time.Second,
+		"server.write_timeout":    300 * time.Second,
+		"server.shutdown_timeout": 10 * time.Second,
+		"server.trusted_proxies":  []string{},     // 空 = 不信任任何代理（安全审查 S5）
+		"server.max_body_bytes":   int64(1) << 20, // 1MB（安全审查 S6）
+		// /api/devices/activate 免凭证写端点 IP 限流（安全渗透修复，middleware.AuthIPRateLimit）
+		"server.device_activate_rate_per_minute": 30,
+		"server.public_base_url":                 "", // 空 = 激活二维码 server_url 沿用请求 Host 推导（旧行为）
+		"auth.rate_limit_ip_per_minute":          30, // /api/auth 公开组 IP 限流（安全审查 S4）
+		"log.level":                              "info",
+		"log.format":                             "json",
+		"database.host":                          "127.0.0.1",
+		"database.port":                          5432,
+		"database.user":                          "postgres",
+		"database.password":                      "",
+		"database.name":                          "stockflow",
+		"database.sslmode":                       "disable",
+		"database.auto_migrate":                  false,
+		"database.max_open_conns":                50,
+		"database.max_idle_conns":                10,
+		"database.conn_max_lifetime":             time.Hour,
+		"database.conn_max_idle_time":            10 * time.Minute,
+		// f31：单条 SQL 服务端超时（2 分钟）——慢报表/慢查询占住连接池的兜底闸门。
+		"database.statement_timeout": 2 * time.Minute,
+		"redis.enabled":              true,
+		"redis.addr":                 "127.0.0.1:6379",
+		"redis.password":             "",
+		"redis.db":                   0,
+		"redis.pool_size":            50,
+		"redis.min_idle_conns":       5,
+		"cors.allowed_origins":       []string{"http://localhost:5173"},
 		// M3 平台基座键（backend-m3-plan §3.2 冻结清单）
 		"storage.root":                 "./data/files",
 		"storage.upload_max_bytes":     int64(20971520), // 20MB（api.md §5 文件大小上限）
@@ -259,6 +285,17 @@ func (c *Config) Validate() error {
 	}
 	if c.Auth.RateLimitIPPerMinute < 1 {
 		errs = append(errs, fmt.Errorf("auth.rate_limit_ip_per_minute 必须 >= 1，当前 %d", c.Auth.RateLimitIPPerMinute))
+	}
+	if c.Server.DeviceActivateRatePerMinute < 1 {
+		errs = append(errs, fmt.Errorf("server.device_activate_rate_per_minute 必须 >= 1，当前 %d", c.Server.DeviceActivateRatePerMinute))
+	}
+	if c.Server.PublicBaseURL != "" {
+		// 非空即要求形如 scheme://host 的合法基础地址（激活二维码 server_url 的固定值，
+		// 拼错会使设备扫码指向不可达/错误端点）。
+		u, err := url.Parse(c.Server.PublicBaseURL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			errs = append(errs, fmt.Errorf("server.public_base_url 非法 %q（需形如 https://wms.example.com）", c.Server.PublicBaseURL))
+		}
 	}
 
 	switch c.Log.Level {

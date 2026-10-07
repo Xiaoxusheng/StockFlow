@@ -25,6 +25,9 @@ var (
 	ErrCannotDisableSelf       = response.Register("AUTH_SELF_OPERATION_FORBIDDEN", "不能对当前登录账户执行该操作", http.StatusForbidden)
 	ErrWarehouseCheckerMissing = response.Register("AUTH_WAREHOUSE_CHECKER_MISSING", "仓库校验服务未装配", http.StatusInternalServerError)
 
+	// ErrCaptchaInvalid 登录验证码错误（captcha.go：不存在/已消费/过期/答案不符）。
+	ErrCaptchaInvalid = response.Register("AUTH_CAPTCHA_INVALID", "验证码错误或已过期", http.StatusBadRequest)
+
 	// 授予侧特权边界（安全审查 S1）：非超管操作者授予越界角色/权限点/数据范围时拒绝。
 	// details 说明被拒对象（role_id / permission_codes / warehouse_ids 等）。
 	ErrRoleEscalationDenied  = response.Register("AUTH_ROLE_ESCALATION_DENIED", "不允许授予该角色：超出操作者权限边界", http.StatusForbidden)

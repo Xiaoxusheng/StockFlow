@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -32,8 +33,9 @@ const (
 	TokenTTL = 365 * 24 * time.Hour
 	// TokenIssuer 设备令牌签发方（与 auth.jwtIssuer 隔离）。
 	TokenIssuer = "stockflow-devices"
-	// tokenMinSecretLen 最低密钥长度（对齐 auth minJWTSecretLen）。
-	tokenMinSecretLen = 16
+	// tokenMinSecretLen 最低密钥长度（对齐 auth minJWTSecretLen=32，安全渗透修复：
+	// 16 字节弱密钥可离线爆破，HS256 破出后可伪造任意设备令牌）。
+	tokenMinSecretLen = 32
 	// envTokenSecret 设备令牌签名密钥环境变量（SF_ 前缀与 viper 约定一致）。
 	envTokenSecret = "SF_DEVICES_JWT_SECRET"
 )
@@ -54,6 +56,29 @@ type tokenManager struct {
 	ttl    time.Duration
 }
 
+// tokenSecretClassCount 密钥字符类别数（字母/数字/符号；口径对齐 internal/auth
+// jwtSecretClassCount——单一类别即使长度达标也属弱口令式密钥）。
+func tokenSecretClassCount(secret string) int {
+	var letter, digit, symbol bool
+	for _, r := range secret {
+		switch {
+		case unicode.IsLetter(r):
+			letter = true
+		case unicode.IsDigit(r):
+			digit = true
+		default:
+			symbol = true
+		}
+	}
+	n := 0
+	for _, hit := range []bool{letter, digit, symbol} {
+		if hit {
+			n++
+		}
+	}
+	return n
+}
+
 // resolveTokenSecret 解析设备令牌签名密钥（模式对齐 internal/auth/config.go:97-113：
 // 弱密钥拒绝；release 缺失 fail-fast；debug/test 进程内随机——重启即全部设备令牌失效，
 // 设备经重新激活恢复）。
@@ -63,6 +88,11 @@ func resolveTokenSecret() ([]byte, error) {
 	case len(s) > 0 && len(s) < tokenMinSecretLen:
 		return nil, fmt.Errorf("%s 长度不足 %d 字节，拒绝弱密钥启动", envTokenSecret, tokenMinSecretLen)
 	case len(s) >= tokenMinSecretLen:
+		// 字符类别校验对齐 internal/auth/config.go jwtSecretClassCount：单一类别密钥
+		// 即使长度达标也属弱口令式密钥，拒绝启动。
+		if tokenSecretClassCount(s) < 2 {
+			return nil, fmt.Errorf("%s 仅含单一字符类别（字母/数字/符号），拒绝弱密钥启动", envTokenSecret)
+		}
 		return []byte(s), nil
 	case gin.Mode() == gin.ReleaseMode:
 		return nil, fmt.Errorf("%s 未设置：release 模式禁止以未知密钥启动（deployment.md §1/§3；debug 模式才降级为进程内随机密钥）", envTokenSecret)

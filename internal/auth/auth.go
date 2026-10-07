@@ -35,11 +35,12 @@ func WithWarehouseChecker(c WarehouseChecker) Option {
 	return func(o *options) { o.checker = c }
 }
 
-// RegisterPublicRoutes 公开路由：POST /login、POST /refresh（api.md §6.1 豁免名单之内）。
+// RegisterPublicRoutes 公开路由：GET /captcha、POST /login、POST /refresh（api.md §6.1 豁免名单之内）。
 // 同时完成本域依赖装配（配置解析 fail-fast：release 模式缺 SF_AUTH_JWT_SECRET、
 // 非法时长/弱密钥直接 panic，deployment.md §3 禁止带病启动）。
 func RegisterPublicRoutes(rg *gin.RouterGroup, db *gorm.DB, rdb *redis.Client) {
 	ensureWired(db, rdb)
+	rg.GET("/captcha", handleCaptcha)
 	rg.POST("/login", handleLogin)
 	rg.POST("/refresh", handleRefresh)
 }

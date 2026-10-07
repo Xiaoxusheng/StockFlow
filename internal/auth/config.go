@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
+
+	"github.com/stockflow/server/internal/database"
 )
 
 // 运行时配置（plan §7.2/§7.3 默认值，环境变量可覆盖）。
@@ -31,7 +35,9 @@ type runtimeConfig struct {
 	refreshTTL       time.Duration // Refresh Token/会话滑动 TTL（plan §7.2 默认 7d）
 	maxLoginFailures int           // 连续失败锁定阈值（plan §7.3 默认 5）
 	lockDuration     time.Duration // 锁定时长（plan §7.3 默认 15 分钟）
+	lockExempt       []string      // 用户名维度账户锁定的豁免清单（bootstrap 管理员防拒绝服务）
 	permsCacheTTL    time.Duration // 权限缓存 TTL（失效由 RBAC 写路径主动清除兜底）
+	captchaTTL       time.Duration // 登录验证码有效期（captcha.go 默认 3m）
 }
 
 // 环境变量名（SF_AUTH_ 前缀；与 viper 的 SF_ 约定一致但独立解析——auth 不 import config）。
@@ -41,6 +47,8 @@ const (
 	envRefreshTTL    = "SF_AUTH_REFRESH_TTL"
 	envMaxLoginFails = "SF_AUTH_MAX_LOGIN_FAILURES"
 	envLockDuration  = "SF_AUTH_LOCK_DURATION"
+	envLockExempt    = "SF_AUTH_LOCK_EXEMPT"
+	envCaptchaTTL    = "SF_AUTH_CAPTCHA_TTL"
 )
 
 // plan 冻结默认值（backend-m1-plan §7.2/§7.3）。
@@ -50,9 +58,17 @@ const (
 	defaultMaxLoginFails = 5
 	defaultLockDuration  = 15 * time.Minute
 	defaultPermsCacheTTL = 10 * time.Minute
+	defaultCaptchaTTL    = 3 * time.Minute
 	jwtIssuer            = "stockflow-auth"
-	minJWTSecretLen      = 16
+	// minJWTSecretLen HS256 密钥最小长度（安全渗透修复：16 字节弱密钥可离线爆破，
+	// 收紧为 32 字节 ≈ 256bit，与随机降级密钥长度对齐）。
+	minJWTSecretLen = 32
 )
+
+// defaultLockExemptUsers 用户名维度锁定的默认豁免清单：bootstrap 管理员（必建且不可删，
+// database.AdminUsername）。豁免仅跳过账户行锁——IP 维度限流与失败计数全部保留，
+// 防喷洒防线不受影响；SF_AUTH_LOCK_EXEMPT（逗号分隔用户名）可覆盖。
+var defaultLockExemptUsers = []string{database.AdminUsername}
 
 // resolveRuntimeConfig 解析运行时配置：环境变量 > plan 默认值。
 func resolveRuntimeConfig() (runtimeConfig, error) {
@@ -63,6 +79,7 @@ func resolveRuntimeConfig() (runtimeConfig, error) {
 		maxLoginFailures: defaultMaxLoginFails,
 		lockDuration:     defaultLockDuration,
 		permsCacheTTL:    defaultPermsCacheTTL,
+		captchaTTL:       defaultCaptchaTTL,
 	}
 
 	if v := os.Getenv(envAccessTTL); v != "" {
@@ -93,12 +110,41 @@ func resolveRuntimeConfig() (runtimeConfig, error) {
 		}
 		cfg.lockDuration = d
 	}
+	if v := os.Getenv(envCaptchaTTL); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return cfg, fmt.Errorf("%s 必须为正时长（如 3m）: %q", envCaptchaTTL, v)
+		}
+		cfg.captchaTTL = d
+	}
+
+	// 锁定豁免清单（安全渗透修复）：默认豁免 bootstrap 管理员——admin 必建且不可删，
+	// 若可被用户名维度锁定，攻击者每窗口 maxLoginFailures 次错密即可无限维持锁定
+	// （拒绝服务）。SF_AUTH_LOCK_EXEMPT（逗号分隔用户名）覆盖默认值；IP 维度限流
+	// 与失败计数不受豁免影响。
+	cfg.lockExempt = append([]string(nil), defaultLockExemptUsers...)
+	if v := os.Getenv(envLockExempt); v != "" {
+		exempt := make([]string, 0, 4)
+		for _, name := range strings.Split(v, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				exempt = append(exempt, name)
+			}
+		}
+		cfg.lockExempt = exempt
+	}
 
 	secret := os.Getenv(envJWTSecret)
 	switch {
-	case len(secret) > 0 && len(secret) < minJWTSecretLen:
-		return cfg, fmt.Errorf("%s 长度不足 %d 字节，拒绝弱密钥启动", envJWTSecret, minJWTSecretLen)
-	case len(secret) >= minJWTSecretLen:
+	case len(secret) > 0:
+		// 弱密钥双重拒绝（安全渗透修复：HS256 密钥可被离线爆破，长度与熵都要把关）：
+		// ① 长度 < minJWTSecretLen；② 仅含单一字符类别（字母/数字/符号三类中只含一类，
+		// 如纯字母重复串）——该形态实质熵远低于长度暗示，一并拒绝。
+		if len(secret) < minJWTSecretLen {
+			return cfg, fmt.Errorf("%s 长度不足 %d 字节，拒绝弱密钥启动", envJWTSecret, minJWTSecretLen)
+		}
+		if jwtSecretClassCount(secret) < 2 {
+			return cfg, fmt.Errorf("%s 仅含单一字符类别（字母/数字/符号），拒绝弱密钥启动", envJWTSecret)
+		}
 		cfg.jwtSecret = []byte(secret)
 	case gin.Mode() == gin.ReleaseMode:
 		return cfg, fmt.Errorf("%s 未设置：release 模式禁止以未知密钥启动（deployment.md §1/§3；debug 模式才会降级为进程内随机密钥）", envJWTSecret)
@@ -111,6 +157,40 @@ func resolveRuntimeConfig() (runtimeConfig, error) {
 		cfg.jwtSecret = []byte(base64.RawURLEncoding.EncodeToString(raw))
 	}
 	return cfg, nil
+}
+
+// jwtSecretClassCount 统计密钥覆盖的字符类别数（字母/数字/符号三类）。
+// 弱密钥判据（安全渗透修复）：类别数 < 2 即"单一字符类别"（如全字母/全数字）。
+func jwtSecretClassCount(secret string) int {
+	var letter, digit, symbol bool
+	for _, r := range secret {
+		switch {
+		case unicode.IsLetter(r):
+			letter = true
+		case unicode.IsDigit(r):
+			digit = true
+		default:
+			symbol = true
+		}
+	}
+	n := 0
+	for _, hit := range []bool{letter, digit, symbol} {
+		if hit {
+			n++
+		}
+	}
+	return n
+}
+
+// isLockExempt 用户名是否豁免用户名维度账户锁定（SF_AUTH_LOCK_EXEMPT 可覆盖默认清单）。
+// 仅豁免账户行锁（LockUser）；IP 维度限流与失败计数全部保留（S4 防喷洒不受影响）。
+func (c runtimeConfig) isLockExempt(username string) bool {
+	for _, name := range c.lockExempt {
+		if name == username {
+			return true
+		}
+	}
+	return false
 }
 
 // deps 包级装配态：Register* 写入，冻结签名的 AuthRequired/RequirePermission 读取。

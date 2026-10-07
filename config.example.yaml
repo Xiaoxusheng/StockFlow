@@ -16,6 +16,13 @@ server:
                          # 空 = 不信任任何代理、客户端 IP 取直连 RemoteAddr（S5，防 XFF 伪造）；
                          # 使用反代时必填，如同机 nginx：[ "127.0.0.1/32" ]，跨机再加 "10.0.0.0/8"
   max_body_bytes: 1048576  # 全局请求体上限 1MB，超限返回 413（S6）；SF_SERVER_MAX_BODY_BYTES 可覆盖
+  device_activate_rate_per_minute: 30  # /api/devices/activate 免凭证写端点 IP 限流（次/分钟）；
+                                       # 一次性激活码即凭证，暴力尝试会耗尽激活码预算（Redis 计数，
+                                       # Redis 故障 fail-open）；SF_SERVER_DEVICE_ACTIVATE_RATE_PER_MINUTE 可覆盖
+  public_base_url: ""    # 对外公布的服务基础地址，如 https://wms.example.com；非空时固定设备
+                         # 激活二维码的 server_url（反代/多域名生产部署必填——缺省按请求 Host
+                         # 推导可被伪造 Host 操纵）；空 = 按请求 scheme://host 推导（仅限本机/
+                         # 直连部署）；SF_SERVER_PUBLIC_BASE_URL 可覆盖
 
 log:
   level: info            # debug | info | warn | error
@@ -35,6 +42,9 @@ database:
   max_idle_conns: 10
   conn_max_lifetime: 1h
   conn_max_idle_time: 10m
+  # 单条 SQL 服务端超时（pgx statement_timeout，默认 2m）：慢查询/慢报表占住
+  # 连接池的兜底闸门；到时语句被服务端取消并回滚。0 表示关闭。
+  statement_timeout: 2m
 
 redis:
   enabled: true          # 可配置开关；false 时 /ready 的 redis 项计 DISABLED（且认证/限流不可用）

@@ -55,12 +55,14 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 	// 上传路由 body 上限局部放宽清单（plan §12.1：storage.upload_max_bytes 覆盖全局 1MB），
 	// 装配完成后 verifyRelaxedRoutes 核验路由存在。
 	uploadLimits := uploadRelaxedRoutes(cfg.Storage.UploadMaxBytes)
-	// 全局中间件链（plan §5.3 冻结形态）：Recovery → RequestID → MaxBody → AccessLog → CORS。
-	// MaxBody（安全审查 S6）置于 Recovery 之后、RequestID 之后——413 统一信封携带
-	// request_id，且超限请求同样留下访问日志；M3 起为 route-aware（m3_bridges.go），
+	// 全局中间件链（plan §5.3 冻结形态）：Recovery → RequestID → MaxBody → AccessLog → CORS
+	// → SecureHeaders。MaxBody（安全审查 S6）置于 Recovery 之后、RequestID 之后——413 统一
+	// 信封携带 request_id，且超限请求同样留下访问日志；M3 起为 route-aware（m3_bridges.go），
 	// 非上传路由维持全局上限，命中上传路由放宽至 storage.upload_max_bytes。
+	// SecureHeaders（安全渗透修复）置于链尾（CORS 之后）：安全响应头对全部响应生效，
+	// 与响应封装顺序无关（仅设 header，不干预 body）。
 	r.Use(middleware.Recovery(), middleware.RequestID(), bodyLimit(cfg.Server.MaxBodyBytes, uploadLimits),
-		middleware.AccessLog(cfg), middleware.CORS(cfg.CORS.AllowedOrigins))
+		middleware.AccessLog(cfg), middleware.CORS(cfg.CORS.AllowedOrigins), middleware.SecureHeaders())
 
 	// 探针（免认证：api.md §6.1 豁免名单）；/ready 含文件中心存储根可写探测
 	//（backend-m3-plan §6.4，M1 §12 挂账销项）。
@@ -85,7 +87,11 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 
 	// 设备端挂载组：不含 auth.AuthRequired——设备令牌（DeviceAuthRequired）与用户 JWT
 	// 并行，activate 以一次性激活码即凭证（plan §8.2；设备域对缺位启动期 fail-fast）。
+	// activate 免凭证写端点单独挂 IP 限流（安全渗透修复，server.device_activate_rate_per_minute
+	// 默认 30）：deviceActivateRateLimit 为 route-aware（bodyLimit 同款，FullPath 精确匹配
+	// 单路由）——组级限流会误伤 NAT 后多设备的高频 heartbeat/self/resolve 端点。
 	deviceAPI := api.Group("")
+	deviceAPI.Use(deviceActivateRateLimit(int64(cfg.Server.DeviceActivateRatePerMinute), rdb))
 
 	// 公开组：认证登录/刷新（api.md §6.1 豁免；plan §5.3）。
 	// IP 维度组级滑动窗口限流（安全审查 S4，auth.rate_limit_ip_per_minute 默认 30）：
@@ -227,6 +233,10 @@ func New(cfg *config.Config, db *gorm.DB, rdb *redis.Client, rt *asynqx.Runtime)
 		devices.WithStockopsDocs(stockops.NewDocResolveFinder(db)),
 		devices.WithReturnsDocs(returns.NewDocResolveFinder(db)),
 		devices.WithDeviceAPI(deviceAPI),
+		// 激活二维码 server_url 固定（安全渗透修复）：server.public_base_url 非空时固定
+		// 二维码 Host，防缺省按请求 Host 推导被伪造 Host 操纵；空串注入与零值等价 =
+		// 完全沿用请求推导（Service.activationPayload 的缺省分支，devices.md §6.2）。
+		devices.WithServerURL(cfg.Server.PublicBaseURL),
 	)
 
 	// 报表与智能能力：/api/reports/* + /api/inventory/summary|alerts（§9.1：reports 实现、
@@ -394,4 +404,21 @@ func newInventoryService(db *gorm.DB, rdb *redis.Client) *inventory.Service {
 	return inventory.NewService(db, rdb,
 		inventory.WithSKUChecker(masterdata.NewSKUChecker(db)),
 		inventory.WithBinChecker(warehouse.NewBinChecker(db)))
+}
+
+// deviceActivateRateLimit /api/devices/activate 专用 IP 限流（安全渗透修复）：
+// activate 是免凭证写端点（一次性激活码即凭证，plan §8.2），不设限流即可被暴力尝试。
+// devices.RegisterRoutes 为冻结三参+Option 签名（plan §3.1），无限流入参，故按
+// bodyLimit 同款 route-aware 模式挂 deviceAPI 组、FullPath 精确匹配单路由——
+// heartbeat/self/resolve 等设备令牌端点（resolve 尤其高频，且 NAT 后多设备共享出口 IP）
+// 不受组级限流误伤。rdb 为 nil（redis.enabled=false）时 AuthIPRateLimit 自行降级放行。
+func deviceActivateRateLimit(limit int64, rdb *redis.Client) gin.HandlerFunc {
+	limiter := middleware.AuthIPRateLimit(limit, rdb)
+	return func(c *gin.Context) {
+		if c.FullPath() == "/api/devices/activate" {
+			limiter(c)
+			return
+		}
+		c.Next()
+	}
 }

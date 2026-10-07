@@ -45,7 +45,7 @@ JWT（密钥、有效期）
 
 | 环境变量 | 作用 | 默认值 | 是否必填 | 生成方式 / 取值说明 |
 |---|---|---|---|---|
-| `SF_AUTH_JWT_SECRET` | Access JWT 的 HS256 签名密钥（internal/auth/config.go，长度 ≥16 字节，过短拒绝启动） | 无——release 模式缺失即启动失败；debug/test 缺失时降级进程内随机密钥（重启全部 Token 失效，仅限本地冒烟） | **release 必填** | `openssl rand -base64 32`；经 Secret 注入，不入仓库；轮换会使全部会话/Token 失效 |
+| `SF_AUTH_JWT_SECRET` | Access JWT 的 HS256 签名密钥（internal/auth/config.go，长度 ≥32 字节，且不得仅含单一字符类别（字母/数字/符号）；过短或单类别拒绝启动——HS256 弱密钥可被离线爆破） | 无——release 模式缺失即启动失败；debug/test 缺失时降级进程内随机密钥（重启全部 Token 失效，仅限本地冒烟） | **release 必填** | `openssl rand -base64 32`；经 Secret 注入，不入仓库；轮换会使全部会话/Token 失效 |
 | `SF_DEVICES_JWT_SECRET` | 设备令牌的 HS256 签名密钥（M3 设备域，internal/devices/token.go，与用户 JWT 密钥隔离的另一凭证族，issuer=stockflow-devices） | 无——release 模式缺失即启动失败（≥16 字节，弱密钥拒绝）；debug/test 降级进程内随机密钥（重启全部设备令牌失效，设备重新激活恢复，仅限本地） | **release 必填** | `openssl rand -base64 32`；与 `SF_AUTH_JWT_SECRET` 分别生成、不得复用；经 Secret 注入，不入仓库；轮换使全部设备令牌失效（设备重新激活恢复） |
 | `SF_ADMIN_INITIAL_PASSWORD` | 空库首次启动时默认管理员（admin）的初始密码（internal/database/seed.go） | 无——需要创建管理员而缺失或弱密码时启动失败；已初始化的库不消费该值 | **空库首启必填** | ≥12 位且至少含 大写字母/小写字母/数字/符号 中三类（2026-10-03 由"≥8 位字母+数字"收紧）；建议随机生成；绝不写入日志/配置文件；首登强制改密（§6） |
 | `SF_SERVER_MODE` | Gin 运行模式 debug/release/test（透传 gin.SetMode） | `release`（2026-10-03 由 debug 收紧；本地开发请显式设 `SF_SERVER_MODE=debug`） | **生产必填 release** | release 下生产校验生效：JWT 密钥缺失 fail-fast、`sslmode=disable` 启动告警等 |
@@ -65,8 +65,9 @@ JWT（密钥、有效期）
 | `SF_AUTH_REFRESH_TTL` | Refresh Token / Redis 会话滑动 TTL | `168h`（7d） | 可选 | Go duration，正时长 |
 | `SF_AUTH_MAX_LOGIN_FAILURES` | 连续登录失败锁定阈值（username+IP 双键计数，任一键达阈即锁） | `5` | 可选 | 整数 ≥1 |
 | `SF_AUTH_LOCK_DURATION` | 登录锁定时长 | `15m` | 可选 | Go duration，正时长 |
+| `SF_AUTH_LOCK_EXEMPT` | 用户名维度**账户行锁**的豁免清单（逗号分隔用户名；仅跳过 `users.locked_until` 落库，IP 维度限流与失败计数全部保留） | `admin` | 可选 | 默认豁免 bootstrap 管理员（必建且不可删，防攻击者以错密每窗口几次无限维持管理员锁定——拒绝服务）；设为其他清单即整体覆盖默认（如 `supervisor,root`），锁定事件经 operation_logs 审计（auth.user.locked） |
 
-**其余配置项**（默认值与 config.example.yaml 一致，按环境覆盖）：`SF_SERVER_PORT`（8080，与前端 Vite 代理对齐）、`SF_SERVER_READ_TIMEOUT`/`SF_SERVER_WRITE_TIMEOUT`（15s）、`SF_SERVER_SHUTDOWN_TIMEOUT`（10s）、`SF_LOG_LEVEL`（info）、`SF_LOG_FORMAT`（json）、`SF_DATABASE_HOST`（127.0.0.1）、`SF_DATABASE_PORT`（5432）、`SF_DATABASE_USER`（postgres）、`SF_DATABASE_NAME`（stockflow）、`SF_DATABASE_AUTO_MIGRATE`（false，**生产禁止 true**，§2.1）、连接池 `SF_DATABASE_MAX_OPEN_CONNS`（50）/`SF_DATABASE_MAX_IDLE_CONNS`（10）/`SF_DATABASE_CONN_MAX_LIFETIME`（1h）/`SF_DATABASE_CONN_MAX_IDLE_TIME`（10m）、`SF_REDIS_ENABLED`（true）/`SF_REDIS_ADDR`（127.0.0.1:6379）/`SF_REDIS_DB`（0）/`SF_REDIS_POOL_SIZE`（50）/`SF_REDIS_MIN_IDLE_CONNS`（5）。
+**其余配置项**（默认值与 config.example.yaml 一致，按环境覆盖）：`SF_SERVER_PORT`（8080，与前端 Vite 代理对齐）、`SF_SERVER_READ_TIMEOUT`/`SF_SERVER_WRITE_TIMEOUT`（15s）、`SF_SERVER_SHUTDOWN_TIMEOUT`（10s）、`SF_SERVER_DEVICE_ACTIVATE_RATE_PER_MINUTE`（30，/api/devices/activate 免凭证写端点 IP 限流）、`SF_SERVER_PUBLIC_BASE_URL`（空，非空时固定设备激活二维码 server_url——反代/多域名部署必填，防伪造 Host 操纵）、`SF_LOG_LEVEL`（info）、`SF_LOG_FORMAT`（json）、`SF_DATABASE_HOST`（127.0.0.1）、`SF_DATABASE_PORT`（5432）、`SF_DATABASE_USER`（postgres）、`SF_DATABASE_NAME`（stockflow）、`SF_DATABASE_AUTO_MIGRATE`（false，**生产禁止 true**，§2.1）、连接池 `SF_DATABASE_MAX_OPEN_CONNS`（50）/`SF_DATABASE_MAX_IDLE_CONNS`（10）/`SF_DATABASE_CONN_MAX_LIFETIME`（1h）/`SF_DATABASE_CONN_MAX_IDLE_TIME`（10m）、`SF_REDIS_ENABLED`（true）/`SF_REDIS_ADDR`（127.0.0.1:6379）/`SF_REDIS_DB`（0）/`SF_REDIS_POOL_SIZE`（50）/`SF_REDIS_MIN_IDLE_CONNS`（5）。
 
 > 新增/改名配置项必须三处同步：internal/config 结构体字段 + `defaults()` + config.example.yaml（config.go 包注释约定）；auth 域独立解析的 `SF_AUTH_*` 常量见 internal/auth/config.go（auth 不 import config）。
 

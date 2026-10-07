@@ -28,6 +28,16 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M9 11h10a3 3 0 0 1 0 6H11a3 3 0 0 0 0 6h12' stroke='%23fff' stroke-width='2.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      CSP 基线（f3 缓解：站点此前无任何 CSP）。本轮只启用零破坏风险的三项基线：
+      object-src 禁插件、base-uri 防 <base> 劫持、form-action 阻外发表单外带凭证。
+      script-src/style-src/img-src 等源限制需与文件预览（blob:）/导出下载/富文本
+      逐一回归后另行收紧，避免误伤既有业务流（frontend.md 遗留项）。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
     <meta name="description" content="StockFlow 库流智能仓储管理系统" />
     <title>StockFlow 库流智能仓储管理系统</title>
   </head>

@@ -71,6 +71,14 @@ Token 过期与刷新
 密码修改
 ```
 
+锁定策略（2026-10-07 安全修复轮口径）：用户名维度连续失败达阈值即锁定（默认 5 次 / 15 分钟，
+`SF_AUTH_MAX_LOGIN_FAILURES` / `SF_AUTH_LOCK_DURATION`）；**豁免名单内的账号不做用户名维度
+锁定**（默认 `admin`，`SF_AUTH_LOCK_EXEMPT` 逗号分隔可覆盖）——防止对固定已知账号的低成本
+定向锁定 DoS，豁免账号仍受 IP 维度限流与失败计数约束。真实发生锁定时写一条操作日志
+（module=auth / action=locked，含用户名与锁定截止时间，best-effort 不阻断）。
+登录失败计数窗口由 Redis Lua 原子设置 TTL（INCR+EXPIRE 单脚本），历史遗留的无 TTL
+计数键在下次失败时自动补窗口。
+
 ### 3.3 登录记录
 
 每次登录记录：

@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/stockflow/server/internal/database"
 	"github.com/stockflow/server/internal/response"
 )
 
@@ -19,6 +20,7 @@ func init() {
 }
 
 // testCfg 固定密钥与时长（不读环境变量，避免用例间串扰）。
+// lockExempt 镜像 resolveRuntimeConfig 默认值（bootstrap 管理员豁免，安全渗透修复）。
 func testCfg() runtimeConfig {
 	return runtimeConfig{
 		jwtSecret:        []byte("unit-test-secret-0123456789abcdef"),
@@ -27,6 +29,7 @@ func testCfg() runtimeConfig {
 		refreshTTL:       7 * 24 * time.Hour,
 		maxLoginFailures: 5,
 		lockDuration:     15 * time.Minute,
+		lockExempt:       []string{database.AdminUsername},
 		permsCacheTTL:    10 * time.Minute,
 	}
 }

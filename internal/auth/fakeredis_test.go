@@ -1,7 +1,7 @@
 package auth
 
 // 测试替身：内存版 redisStore（ask 约束：单测不依赖 Redis/网络，用接口替身）。
-// 仅实现本域用到的六条命令语义：GET/SET/DEL/INCR/EXPIRE/SCAN。
+// 仅实现本域用到的七条命令语义：GET/SET/DEL/INCR/EXPIRE/SCAN/EVAL。
 
 import (
 	"context"
@@ -144,6 +144,43 @@ func pathMatch(pattern, s string) (bool, error) {
 		return strings.HasPrefix(s, strings.TrimSuffix(pattern, "*")), nil
 	}
 	return pattern == s, nil
+}
+
+// Eval 内存版脚本执行：不解释 Lua，仅镜像 failCounterScript 的语义（INCR + 首笔
+// n==1 或键无 TTL 时 PEXPIRE，原子返回累计值）——loginGuard.Fail 是本域唯一 Eval
+// 消费方，脚本不一致直接报错暴露（防替身与真实脚本语义漂移）。
+// errIncr 故障注入沿用：计数已收敛到本命令（INCR 内嵌于脚本），注入即模拟脚本整体失败。
+func (f *fakeRedis) Eval(_ context.Context, script string, keys []string, args ...any) *redis.Cmd {
+	cmd := redis.NewCmd(context.Background())
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errIncr {
+		cmd.SetErr(fmt.Errorf("fake redis: incr 故障注入"))
+		return cmd
+	}
+	if script != failCounterScript || len(keys) != 1 || len(args) != 1 {
+		cmd.SetErr(fmt.Errorf("fake redis: 未支持的 Eval 脚本/参数"))
+		return cmd
+	}
+	ms, ok := args[0].(int64)
+	if !ok {
+		cmd.SetErr(fmt.Errorf("fake redis: PEXPIRE 参数须为 int64 毫秒"))
+		return cmd
+	}
+	key := keys[0]
+	cur := int64(0)
+	if v, ok := f.str[key]; ok {
+		fmt.Sscanf(v, "%d", &cur)
+	}
+	cur++
+	f.str[key] = fmt.Sprintf("%d", cur)
+	// n==1（窗口首笔）或键无 TTL（f.ttl 零值=未设置，对应真实 Redis TTL=-1）→ 设置窗口。
+	if cur == 1 || f.ttl[key] == 0 {
+		f.ttl[key] = time.Duration(ms) * time.Millisecond
+		f.expired[key]++
+	}
+	cmd.SetVal(cur)
+	return cmd
 }
 
 // ---- 断言辅助 ----

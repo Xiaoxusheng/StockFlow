@@ -5,6 +5,19 @@ import type { UserInfo } from '@/types/permission'
 export interface LoginPayload {
   username: string
   password: string
+  /** 图像验证码 id（GET /api/auth/captcha 签发，一次性消费） */
+  captcha_id: string
+  /** 图像验证码答案（不区分大小写，后端规范化比对） */
+  captcha_code: string
+}
+
+/** GET /api/auth/captcha 响应（后端 CaptchaChallenge，internal/auth/captcha.go） */
+export interface CaptchaChallenge {
+  captcha_id: string
+  /** data:image/svg+xml;base64,...，<img src> 直用；点击刷新重新签发 */
+  image: string
+  /** 有效期（秒），默认 180 */
+  expires_in: number
 }
 
 /** 登录/刷新结果（后端 LoginResult，internal/auth/service_auth.go：access_token/refresh_token
@@ -81,11 +94,15 @@ export interface AuthSession {
 
 /**
  * 认证域（后端已交付，internal/auth/handler.go）：
- * - 公开：POST /api/auth/login、POST /api/auth/refresh（静默续期入口，client.ts 401 拦截单飞调用）
+ * - 公开：GET /api/auth/captcha（登录验证码签发）、POST /api/auth/login（携带 captcha_id/
+ *   captcha_code，人机闸先于凭据校验，internal/auth/captcha.go）、POST /api/auth/refresh
+ *   （静默续期入口，client.ts 401 拦截单飞调用）
  * - 受保护：POST /api/auth/logout、GET /api/auth/me、PUT /api/auth/password、
  *   GET/DELETE /api/auth/sessions
  */
 export const authApi = {
+  /** GET /api/auth/captcha（登录验证码签发，答案存 Redis TTL 默认 3m，一次性消费） */
+  captcha: () => http.get<CaptchaChallenge>('/api/auth/captcha'),
   /** POST /api/auth/login */
   login: (payload: LoginPayload) => http.post<LoginResult>('/api/auth/login', payload),
   /** POST /api/auth/logout */

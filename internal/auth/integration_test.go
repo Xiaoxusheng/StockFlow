@@ -90,14 +90,33 @@ func TestIntegrationAuthFlow(t *testing.T) {
 	require.False(t, res2.MustChangePassword)
 
 	// 登录保护：连续失败 5 次后锁定（真实 Redis 计数 + users.locked_until 落库）。
+	// admin 默认在锁定豁免清单（SF_AUTH_LOCK_EXEMPT，安全渗透修复：防错密维持管理员
+	// 锁定的拒绝服务），锁定路径用普通用户验证。
+	actorAdmin := testActor(res2.User.ID.Int64(), database.AdminUsername, true)
+	_, err = svc.CreateUser(ctx, actorAdmin, UserCreateInput{
+		Username: "lockprobe", Password: "LockProbe2026!", RealName: "锁定探针", DataScope: DataScopeSelf,
+	})
+	require.NoError(t, err)
 	for i := 0; i < cfg.maxLoginFailures; i++ {
-		_, err = svc.Login(ctx, LoginInput{Username: database.AdminUsername, Password: "wrong-only-1"})
+		_, err = svc.Login(ctx, LoginInput{Username: "lockprobe", Password: "wrong-only-1", IP: "10.9.0.1"})
 		require.Error(t, err)
 	}
-	_, err = svc.Login(ctx, LoginInput{Username: database.AdminUsername, Password: newPw})
+	_, err = svc.Login(ctx, LoginInput{Username: "lockprobe", Password: "LockProbe2026!", IP: "10.9.0.1"})
 	// S8/S4：锁定（且 IP 维度同达阈值）对客户端统一凭证错误文案，不再回显 AUTH_ACCOUNT_LOCKED。
 	require.Equal(t, "AUTH_CREDENTIALS_INVALID", codeOf(t, err))
-	require.NoError(t, svc.UnlockUser(ctx, testActor(res2.User.ID.Int64(), "admin", true), res2.User.ID.Int64()))
+	// 豁免对照：admin 同样连续错密达阈值（独立 IP，计满用户名维度），不落账户行锁。
+	for i := 0; i < cfg.maxLoginFailures; i++ {
+		_, err = svc.Login(ctx, LoginInput{Username: database.AdminUsername, Password: "wrong-only-1", IP: "10.9.0.2"})
+		require.Error(t, err)
+	}
+	var adminRow struct {
+		LockedUntil database.JSONTime
+	}
+	require.NoError(t, db.WithContext(ctx).Raw(
+		`SELECT locked_until FROM users WHERE username = ?`, database.AdminUsername,
+	).Scan(&adminRow).Error)
+	require.True(t, adminRow.LockedUntil.IsZero(), "豁免用户名（admin）不落账户行锁")
+	require.NoError(t, svc.UnlockUser(ctx, actorAdmin, res2.User.ID.Int64()))
 
 	// 踢下线：DELETE 会话后 token 立即失效（plan §7.2）。
 	sid2 := sidOfToken(t, cfg, res2.AccessToken)

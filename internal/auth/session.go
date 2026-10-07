@@ -24,6 +24,7 @@ type redisStore interface {
 	Incr(ctx context.Context, key string) *redis.IntCmd
 	Expire(ctx context.Context, key string, expiration time.Duration) *redis.BoolCmd
 	Scan(ctx context.Context, cursor uint64, match string, count int64) *redis.ScanCmd
+	Eval(ctx context.Context, script string, keys []string, args ...any) *redis.Cmd
 }
 
 // 会话键规范 sf:{module}:{key}（cache 包规范；plan §7.2/§7.3）。
@@ -208,17 +209,25 @@ func (g *loginGuard) key(dim string) string {
 	return cache.Key(p, dim)
 }
 
-// Fail 记一次失败，返回累计次数。首个计数设置窗口 TTL。
+// failCounterScript 失败计数原子脚本（安全渗透修复）：旧实现 INCR 与条件 EXPIRE 两步
+// 非原子，EXPIRE 失败会留下无 TTL 的永久计数键——历史失败跨窗口累计，正常用户一次
+// 错密即被反复锁定。改为单脚本原子执行：INCR 后 n==1（窗口首笔）或键无 TTL（修复
+// 旧版本遗留的孤儿键）时设置窗口过期，任何一步失败整体失败，不再产生无 TTL 中间态。
+// ARGV[1] 为毫秒数（PEXPIRE，与 go-redis Expire 对亚秒时长的处理一致）。
+const failCounterScript = `
+local n = redis.call('INCR', KEYS[1])
+if n == 1 or redis.call('TTL', KEYS[1]) == -1 then
+	redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+return n
+`
+
+// Fail 记一次失败，返回累计次数。INCR 与窗口 TTL 设置经 Lua 原子完成（首个计数
+// 或无 TTL 键修复时设置窗口，见 failCounterScript）。
 func (g *loginGuard) Fail(ctx context.Context, dim string) (int64, error) {
-	n, err := g.rdb.Incr(ctx, g.key(dim)).Result()
+	n, err := g.rdb.Eval(ctx, failCounterScript, []string{g.key(dim)}, g.window.Milliseconds()).Int64()
 	if err != nil {
 		return 0, fmt.Errorf("累加登录失败计数失败: %w", err)
-	}
-	if n == 1 {
-		// TTL=锁定窗口（plan §7.3）：窗口内的连续失败累计，窗口自然滑过即清零。
-		if err := g.rdb.Expire(ctx, g.key(dim), g.window).Err(); err != nil {
-			return n, fmt.Errorf("设置失败计数窗口失败: %w", err)
-		}
 	}
 	return n, nil
 }
