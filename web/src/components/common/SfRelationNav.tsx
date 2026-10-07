@@ -60,26 +60,40 @@ export function SfRelationNav({ entity, context, extra, emptyText = '暂无可�
     )
   }
 
+  // 关联按钮配色（用户口径：不同颜色边框区分业务，与系统按钮同尺寸）：
+  // 色板轮转——同页按钮颜色错开、同一业务入口颜色稳定（index 由注册表顺序决定）；
+  // 边框/文字同色、白底，不引入底色填充（克制口径）。
+  const PALETTE = [
+    'var(--sf-primary)',
+    'var(--sf-success)',
+    'var(--sf-info)',
+    'var(--sf-warning)',
+    'var(--sf-danger)',
+  ]
+
   return (
     <>
-      <Space size={4} wrap>
-        {resolved.map(({ item, to, list }) => (
-          <Tooltip key={item.key} title={item.hint}>
-            <Button
-              size="small"
-              onClick={() => {
-                if (list) {
-                  // 优先 Drawer 内嵌：不离开当前页（ask 冻结口径）
-                  setActive({ key: item.key, spec: list })
-                  return
-                }
-                if (to) navigate(to)
-              }}
-            >
-              {item.label}
-            </Button>
-          </Tooltip>
-        ))}
+      <Space size={8} wrap>
+        {resolved.map(({ item, to, list }, index) => {
+          const color = PALETTE[index % PALETTE.length]
+          return (
+            <Tooltip key={item.key} title={item.hint}>
+              <Button
+                style={{ borderColor: color, color, background: 'transparent' }}
+                onClick={() => {
+                  if (list) {
+                    // 优先 Drawer 内嵌：不离开当前页（ask 冻结口径）
+                    setActive({ key: item.key, spec: list })
+                    return
+                  }
+                  if (to) navigate(to)
+                }}
+              >
+                {item.label}
+              </Button>
+            </Tooltip>
+          )
+        })}
       </Space>
       <SfRelationListDrawer
         key={active?.key ?? 'closed'}
