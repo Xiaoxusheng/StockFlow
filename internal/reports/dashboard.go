@@ -80,7 +80,10 @@ type trendPointDTO struct {
 
 // warehouseStockDTO GET /api/reports/dashboard/warehouse-stock 行（snake_case，前端
 // DashboardWarehouseStock 契约；bin_utilization 为 0~100 百分数，前端 Progress percent 直用）。
+// warehouse_id 供前端图表/列表下钻预筛（frontend.md §33.4：/inventory/stock?warehouse_id=、
+// /bins?warehouseId=，2026-10-07 联动批次二）。
 type warehouseStockDTO struct {
+	WarehouseID    int64   `json:"warehouse_id"`
 	WarehouseCode  string  `json:"warehouse_code"`
 	WarehouseName  string  `json:"warehouse_name"`
 	SKUCount       int64   `json:"sku_count"`
@@ -385,7 +388,7 @@ GROUP BY 1`
 func (r *repository) dashboardWarehouseStockRepo(ctx context.Context, sc Scope) ([]warehouseStockDTO, error) {
 	scCond, scArgs := sc.cond("i.warehouse_id")
 	binCond, binArgs := sc.cond("b.warehouse_id")
-	sql := `SELECT w.code AS warehouse_code, w.name AS warehouse_name,
+	sql := `SELECT w.id AS warehouse_id, w.code AS warehouse_code, w.name AS warehouse_name,
        COUNT(DISTINCT i.sku_id) AS sku_count,
        COALESCE(SUM(i.total_qty), 0)::float8 AS total_qty,
        COALESCE(bin.util, 0)::float8 AS bin_utilization
@@ -633,13 +636,16 @@ func (s *Service) dashboardTodayBundle(ctx context.Context, sc Scope, dayStart t
 		PendingShipmentCount:  &t.ship,
 		PendingCountCount:     &t.count_,
 	}
+	// Link 状态预筛（frontend.md §33.4，2026-10-07 联动批次二）：仅追加目标列表筛选
+	// 白名单内、且与计数口径对得上的键值；收货列表无 status 参数、盘点/异常为多态计数
+	// 单值筛不覆盖、审批无对应筛参数——四者保持裸路径（诚实不硬筛）。
 	tasks := []taskItemDTO{
 		{Type: "receive", Label: "待收货", Count: t.receive, Link: "/purchases/receipts"},
-		{Type: "putaway", Label: "待上架", Count: t.putaway, Link: "/inbound"},
-		{Type: "pick", Label: "待拣货", Count: t.pick, Link: "/picking"},
-		{Type: "check", Label: "待复核", Count: t.check, Link: "/checking"},
+		{Type: "putaway", Label: "待上架", Count: t.putaway, Link: "/inbound?status=AWAITING_PUTAWAY"},
+		{Type: "pick", Label: "待拣货", Count: t.pick, Link: "/picking?status=PENDING"},
+		{Type: "check", Label: "待复核", Count: t.check, Link: "/checking?status=PENDING"},
 		{Type: "pack", Label: "待打包", Count: t.pack, Link: "/packing"},
-		{Type: "ship", Label: "待发货", Count: t.ship, Link: "/shipment"},
+		{Type: "ship", Label: "待发货", Count: t.ship, Link: "/shipment?status=PENDING"},
 		{Type: "count", Label: "待盘点", Count: t.count_, Link: "/counts"},
 		{Type: "approval", Label: "待审核单据", Count: t.approval, Link: "/tasks"},
 		{Type: "exception", Label: "待处理异常", Count: t.exception, Link: "/exceptions"},

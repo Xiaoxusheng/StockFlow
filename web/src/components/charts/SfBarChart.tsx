@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { SfChart } from './SfChart'
+import { SfChart, type SfChartProps } from './SfChart'
 import { dayLabel, SF_CHART_BAR_RADIUS, type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
@@ -23,6 +23,8 @@ export interface SfBarChartProps extends SfChartStatusProps {
   series?: SfChartSeries[]
   /** 柱最大宽度，默认 32px */
   barMaxWidth?: number
+  /** 图元点击（frontend.md §33.4 图表下钻，透传内核） */
+  onPointClick?: SfChartProps['onPointClick']
 }
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
@@ -94,6 +96,7 @@ export function SfBarChart({
   onRetry,
   emptyText = DEFAULT_EMPTY_TEXT,
   className,
+  onPointClick,
 }: SfBarChartProps) {
   const { theme, palette } = useSfChartTheme()
   const empty = !Array.isArray(data) || data.length === 0
@@ -112,6 +115,7 @@ export function SfBarChart({
       empty={empty}
       emptyText={emptyText}
       className={className}
+      onPointClick={onPointClick}
     />
   )
 }

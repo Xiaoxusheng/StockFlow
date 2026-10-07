@@ -6,7 +6,7 @@
  */
 import { useMemo } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { SfChart } from './SfChart'
+import { SfChart, type SfChartProps } from './SfChart'
 import { SF_CHART_BAR_RADIUS, type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
@@ -26,6 +26,8 @@ export interface SfHBarChartProps extends SfChartStatusProps {
   topN?: number
   /** 单序列语义色键，缺省取主题色板主色 */
   color?: SfChartColorKey
+  /** 图元点击（frontend.md §33.4 图表下钻，透传内核） */
+  onPointClick?: SfChartProps['onPointClick']
 }
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
@@ -56,7 +58,10 @@ export function buildHBarOptions(params: {
 
   // echarts 类目轴自下而上：反转让最大值在顶部
   const ascending = [...ranked].reverse()
-  const categories = ascending.map((row) => truncateLabel(row[categoryField]))
+  // 类目值保留全名——点击回调（frontend.md §33.4 onPointClick）拿到的 params.name
+  // 必须能反查回数据行；截断只做在轴标签显示层（axisLabel.formatter + width/overflow），
+  // 不进类目值（2026-10-07：截断值曾致长名类目（供应商名（编码））点击反查失败）
+  const categories = ascending.map((row) => String(row[categoryField] ?? ''))
   const values = ascending.map((row) => Number(row[valueField] ?? 0))
 
   return {
@@ -72,7 +77,13 @@ export function buildHBarOptions(params: {
       data: categories,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: theme.axisText, fontSize: 12, width: 88, overflow: 'truncate' },
+      axisLabel: {
+        color: theme.axisText,
+        fontSize: 12,
+        width: 88,
+        overflow: 'truncate',
+        formatter: (value: string) => truncateLabel(value),
+      },
     },
     series: [
       {
@@ -97,6 +108,7 @@ export function SfHBarChart({
   onRetry,
   emptyText = DEFAULT_EMPTY_TEXT,
   className,
+  onPointClick,
 }: SfHBarChartProps) {
   const { theme, palette } = useSfChartTheme()
   const empty = !Array.isArray(data) || data.length === 0
@@ -115,6 +127,7 @@ export function SfHBarChart({
       empty={empty}
       emptyText={emptyText}
       className={className}
+      onPointClick={onPointClick}
     />
   )
 }

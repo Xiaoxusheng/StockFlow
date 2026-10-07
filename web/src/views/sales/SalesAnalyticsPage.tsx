@@ -4,9 +4,12 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { analyticsApi } from '@/api/analytics'
 import type { SalesOrderStatus } from '@/api/sales'
 import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import {
   SfChartCard,
@@ -102,6 +105,11 @@ export default function SalesAnalyticsPage() {
   const [range, setRange] = useState<RangeKey>('30d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [sort, setSort] = useState<RankSort>('qty')
+  // 联动批次二 L14：趋势/状态构成点击下钻（frontend.md §33.4；sales 列表白名单含
+  // status/created_from/created_to——handler.go:113-125）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillSales = canAccess(user, 'sales:view')
 
   // 自定义档：RangePicker 选定后才发请求（OutboundAnalyticsPage 同款交互），
   // 未就绪时以空串占位（请求 enabled=false 不发出，卡脚显示「待选择」）
@@ -206,6 +214,15 @@ export default function SalesAnalyticsPage() {
               error={trend.error}
               onRetry={() => void trend.refetch()}
               emptyText="所选时间范围内没有销售订单落账"
+              onPointClick={
+                canDrillSales && ready && timeFrom && timeTo
+                  ? () => {
+                      navigate(
+                        `/sales?created_from=${encodeURIComponent(timeFrom)}&created_to=${encodeURIComponent(timeTo)}`,
+                      )
+                    }
+                  : undefined
+              }
             />
             {/* 卡脚口径披露（§54）：订单金额口径 ≠ 流水估值，如实标注 */}
             <Flex justify="space-between" wrap="wrap">
@@ -233,6 +250,17 @@ export default function SalesAnalyticsPage() {
               error={composition.error}
               onRetry={() => void composition.refetch()}
               emptyText="暂无销售单，状态构成不可展示"
+              onPointClick={
+                canDrillSales
+                  ? ({ name }) => {
+                      // 图例中文名反查原始状态码（salesStatusName 的逆映射）；「其他」折叠片无码不跳
+                      const status = (composition.data?.items ?? []).find(
+                        (item) => salesStatusName(item.status) === name,
+                      )?.status
+                      if (status) navigate(`/sales?status=${status}`)
+                    }
+                  : undefined
+              }
             />
             <Flex justify="space-between" wrap="wrap">
               {/* total 为后端 StatusComposition 原值字段（前端不求和，规则 8） */}

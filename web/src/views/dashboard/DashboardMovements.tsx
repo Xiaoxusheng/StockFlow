@@ -8,9 +8,12 @@
  */
 import { Typography } from 'antd'
 import { ArrowDownOutlined, ArrowUpOutlined, MinusOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
 import { inventoryApi, type InventoryChangeType, type LedgerItem, type LedgerQuery } from '@/api/inventory'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfTable } from '@/components/table/SfTable'
 import { formatNumber } from '@/utils/format'
@@ -104,8 +107,13 @@ const COLUMNS: ColumnsType<LedgerItem> = [
 
 const NO_FILTER: LedgerQuery = {}
 
-/** 紧凑预览：固定 pageSize 10（SfTable 分页翻页真实请求后端） */
+/** 紧凑预览：固定 pageSize 10（SfTable 分页翻页真实请求后端）。
+ * 联动批次二 L10：行点击（business_no 非空）→ /inventory/ledger?business_no= 预筛
+ * （frontend.md §33.4；inventory:stock:view 门控，无权限不可点）。 */
 export function DashboardMovements() {
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const clickable = canAccess(user, 'inventory:stock:view')
   const list = usePagedList<LedgerItem, LedgerQuery>({
     queryKey: ['dashboard', 'movements'],
     fetch: (q) => inventoryApi.ledger(q),
@@ -127,6 +135,16 @@ export function DashboardMovements() {
       showToolbar={false}
       emptyText="当前没有库存异动记录"
       scrollX={750}
+      onRow={
+        clickable
+          ? (record) => ({
+              onClick: () => {
+                if (record.business_no) navigate(`/inventory/ledger?business_no=${encodeURIComponent(record.business_no)}`)
+              },
+              style: { cursor: record.business_no ? 'pointer' : 'default' },
+            })
+          : undefined
+      }
     />
   )
 }

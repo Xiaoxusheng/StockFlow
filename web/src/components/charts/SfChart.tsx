@@ -30,6 +30,13 @@ echarts.use([LineChart, BarChart, PieChart, GridComponent, TooltipComponent, Leg
 /** 图型语义标记（echarts 单实例通吃，type 仅保留业务可读性，不再分发内核） */
 export type SfChartType = 'Line' | 'Area' | 'Column' | 'Bar' | 'Pie'
 
+export interface SfChartPoint {
+  /** 类目名（echarts params.name：柱/条类目、饼片名、折线数据点 x 值） */
+  name: string
+  /** 序列名（echarts params.seriesName，单序列图为序列 key） */
+  seriesName: string
+}
+
 export interface SfChartProps {
   /** 图型语义标记（Line/Area/Column/Bar/Pie） */
   type: SfChartType
@@ -43,6 +50,9 @@ export interface SfChartProps {
   empty?: boolean
   emptyText?: string
   className?: string
+  /** 图元点击（frontend.md §33.4 图表下钻）：echarts click 事件收敛为 {name, seriesName}；
+   * 内核仅注册一次，回调经 ref 取最新值（切换跳转目标无需重建实例） */
+  onPointClick?: (params: SfChartPoint) => void
 }
 
 export function SfChart({
@@ -55,12 +65,16 @@ export function SfChart({
   empty = false,
   emptyText,
   className,
+  onPointClick,
 }: SfChartProps) {
   void type
   const { reducedMotion } = useSfChartTheme()
   const wrapRef = useRef<HTMLDivElement | null>(null)
   const chartElRef = useRef<HTMLDivElement | null>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
+  // 点击回调走 ref：实例只注册一次监听，页面侧跳转目标变化无需摘挂重注册
+  const onPointClickRef = useRef<SfChartProps['onPointClick']>(undefined)
+  onPointClickRef.current = onPointClick
 
   // 实例生命周期：init 一次，dispose 清理（§48）。
   // 关键：echarts 挂在专用子 div（chartElRef）——React 从不管理它的子节点，
@@ -70,6 +84,16 @@ export function SfChart({
     if (!el) return undefined
     const chart = echarts.init(el)
     chartRef.current = chart
+    // init 后下一帧强制对齐一次容器尺寸：懒加载图表（React.lazy 分包晚于首帧）与
+    // 网格布局未及算好时 echarts 会按 0 宽回退 100px 画布，而 ResizeObserver 只在
+    // 「变化」时触发——init 后若无尺寸变化则永远停在回退宽度（2026-10-07 Dashboard
+    // 实测 625px 容器挂 100px 画布）。一次 resize 对齐即恢复，观察器仍管后续变化。
+    requestAnimationFrame(() => chartRef.current?.resize())
+    chart.on('click', (params) => {
+      const cb = onPointClickRef.current
+      if (!cb) return
+      cb({ name: String(params.name ?? ''), seriesName: String(params.seriesName ?? '') })
+    })
     // 容器尺寸变化（侧边栏折叠/抽屉/窗口/消隐重现）→ resize 兜底（rAF 节流）
     let raf = 0
     const observer = new ResizeObserver(() => {

@@ -1171,3 +1171,26 @@ purchase:inbound:create；后端 CreateInbound 强校验来源单号与仓库一
   「来源单号」（PO 号），单号本身必须走 `keyword`（匹配 inbound_no/source_no，
   internal/purchase/repository.go:133）；出库列表 `outbound_no` 即出库单号本身。
 - 预警行「查看库存」：`/inventory/stock?sku_id=<id>&warehouse_id=<id>`（inventory:stock:view）。
+
+### 33.4 图表下钻（2026-10-07 批次二）
+
+图表图元点击由图表内核统一承接：`SfChart` 只注册一次 echarts click（回调走 ref 取最新值），
+收敛为 `onPointClick({ name, seriesName })` 透传五个业务图表组件（SfLine/Area/Bar/Donut/HBarChart）；
+页面侧在 onPointClick 内按 name 反查原始数据行并 navigate 到预筛选列表（§33 原则全部适用）。
+
+- **横向条形图类目值保留全名**：截断只做在轴标签显示层（axisLabel.formatter + width/overflow），
+  不进类目值——params.name 必须能反查回数据行（截断值曾致长名类目反查失败，2026-10-07 修复）；
+- 状态构成环形/趋势图的图例中文名经「标签 ↔ 状态码」逆映射反查（INBOUND_STATUS_LABEL /
+  poStatusName / salesStatusName）；「其他」折叠片无码不跳；
+- **已接入**：Dashboard 出入库趋势（→`/inventory/ledger?change_type=&created_from=&created_to=`，
+  ledger 白名单含三参）、仓库排行（→`/inventory/stock?warehouse_id=`，warehouse-stock DTO 已补
+  warehouse_id）、SKU TOP（→`/inventory/stock?sku_id=`）、仓库分析容量/作业量（→stock / inbound /
+  outbound 按 warehouse_id）、入库分析状态构成（→`/inbound?status=`）与供应商排行
+  （→`/purchases?supplier_id=`，入库列表无 supplier 参数，落点取来源 PO 列表）、出库分析 SKU
+  排行（→ledger?sku_id=&change_type=OUTBOUND&同时间范围）、采购分析供应商/状态、销售分析趋势
+  （→`/sales?created_from=&created_to=`，sales 白名单含日期）与状态；
+- **明确不接**（目标列表无对应筛选参数，禁止硬造）：库存趋势（存量快照无逐日筛选）、库存状态
+  环形（stock 列表无 status 参数）、入库/出库/采购分析趋势（目标列表无日期参数）、销售分析 SKU
+  排行（销售列表无 sku 参数且流水口径不齐）；
+- Dashboard 九计数卡链接由后端下发（internal/reports/dashboard.go），仅追加目标列表白名单内
+  且与计数口径相配的状态键值；无相配参数的卡保持裸路径（待收货/待打包/待盘点/待审核/待处理异常）。

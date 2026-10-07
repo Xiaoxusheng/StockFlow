@@ -12,10 +12,13 @@ import {
   Typography,
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { analyticsApi, type InventorySkuTopRow } from '@/api/analytics'
 import { dashboardApi, type DashboardWarehouseStock } from '@/api/dashboard'
 import { inventoryApi, type StockSummary } from '@/api/inventory'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import {
@@ -113,6 +116,10 @@ function buildSkuTopData(rows: InventorySkuTopRow[]) {
 export default function AnalyticsPage() {
   const [range, setRange] = useState(DEFAULT_RANGE)
   const [skuMetric, setSkuMetric] = useState<SkuTopMetric>('qty')
+  // 联动批次二 L14：排行图元点击下钻（frontend.md §33.4；inventory:stock:view 门控）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillStock = canAccess(user, 'inventory:stock:view')
   const analytics = useQuery({
     queryKey: ['inventory', 'analytics', range],
     queryFn: () => inventoryApi.analytics({ days: Number(range) }),
@@ -320,6 +327,14 @@ export default function AnalyticsPage() {
                 error={warehouseStock.error}
                 onRetry={() => void warehouseStock.refetch()}
                 emptyText="当前没有仓库库存数据"
+                onPointClick={
+                  canDrillStock
+                    ? ({ name }) => {
+                        const hit = (warehouseStock.data ?? []).find((w) => w.warehouse_name === name)
+                        if (hit) navigate(`/inventory/stock?warehouse_id=${hit.warehouse_id}`)
+                      }
+                    : undefined
+                }
               />
             </SfChartCard>
           </Col>
@@ -355,6 +370,14 @@ export default function AnalyticsPage() {
                 error={skuTop.error}
                 onRetry={() => void skuTop.refetch()}
                 emptyText="当前没有在库 SKU 库存数据"
+                onPointClick={
+                  canDrillStock
+                    ? ({ name }) => {
+                        const hit = (skuTop.data ?? []).find((row) => row.sku_code === name)
+                        if (hit) navigate(`/inventory/stock?sku_id=${hit.sku_id}`)
+                      }
+                    : undefined
+                }
               />
             </SfChartCard>
           </Col>

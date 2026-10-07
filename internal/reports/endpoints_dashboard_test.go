@@ -218,11 +218,11 @@ func TestDashboardTasksEndpoint(t *testing.T) {
 		count            int64
 	}{
 		{"receive", "待收货", "/purchases/receipts", 3},
-		{"putaway", "待上架", "/inbound", 2},
-		{"pick", "待拣货", "/picking", 5},
-		{"check", "待复核", "/checking", 4},
+		{"putaway", "待上架", "/inbound?status=AWAITING_PUTAWAY", 2},
+		{"pick", "待拣货", "/picking?status=PENDING", 5},
+		{"check", "待复核", "/checking?status=PENDING", 4},
 		{"pack", "待打包", "/packing", 2},
-		{"ship", "待发货", "/shipment", 1},
+		{"ship", "待发货", "/shipment?status=PENDING", 1},
 		{"count", "待盘点", "/counts", 1},
 		{"approval", "待审核单据", "/tasks", 7},
 		{"exception", "待处理异常", "/exceptions", 4},

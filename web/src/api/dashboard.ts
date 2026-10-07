@@ -84,8 +84,10 @@ export interface DashboardAlertItem {
   created_at: string | null
 }
 
-/** 仓库库存分析（frontend.md §5 第四层；字段按后端 snake_case 口径对齐） */
+/** 仓库库存分析（frontend.md §5 第四层；字段按后端 snake_case 口径对齐）。
+ * warehouse_id 供图表/列表下钻预筛（frontend.md §33.4，2026-10-07 联动批次二）。 */
 export interface DashboardWarehouseStock {
+  warehouse_id: number
   warehouse_code: string
   warehouse_name: string
   sku_count: number

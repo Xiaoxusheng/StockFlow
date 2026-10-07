@@ -4,7 +4,7 @@
  * 面积透明度固定 0.12（0.08~0.15 区间内），同色纯色低透明填充——禁高饱和渐变（§33/§64）。
  */
 import { useMemo } from 'react'
-import { SfChart } from './SfChart'
+import { SfChart, type SfChartProps } from './SfChart'
 import { SF_CHART_AREA_OPACITY, type SfChartTheme } from './sfChartTheme'
 import { SF_CHART_DEFAULT_HEIGHT, type SfChartSeries, type SfChartStatusProps } from './types'
 import { useSfChartTheme } from './useSfChartTheme'
@@ -16,6 +16,8 @@ export interface SfAreaChartProps extends SfChartStatusProps {
   series: SfChartSeries[]
   /** 平滑曲线，默认 true（面积图常用于趋势带，§33） */
   smooth?: boolean
+  /** 图元点击（frontend.md §33.4 图表下钻，透传内核） */
+  onPointClick?: SfChartProps['onPointClick']
 }
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
@@ -47,6 +49,7 @@ export function SfAreaChart({
   onRetry,
   emptyText = DEFAULT_EMPTY_TEXT,
   className,
+  onPointClick,
 }: SfAreaChartProps) {
   const { theme, palette } = useSfChartTheme()
   const empty = !Array.isArray(data) || data.length === 0 || series.length === 0
@@ -65,6 +68,7 @@ export function SfAreaChart({
       empty={empty}
       emptyText={emptyText}
       className={className}
+      onPointClick={onPointClick}
     />
   )
 }

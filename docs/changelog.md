@@ -14,6 +14,17 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：跨模块联动批次二（Dashboard 卡片/行/图表 + 六分析页图表下钻，L4/L8/L10/L11/L13/L14）
+
+- **背景**：联动盘点 15 项中第二批六项（前批 L1/L2/L3/L5/L9 见同日条目）；计划 docs/plans/2026-10-07-linkage-batch2.md，规范续写 frontend.md §33.4。逐图核对「数据字段 → 目标列表筛选白名单」，无真实参数的图明确不接（库存趋势/库存状态环形/三个趋势折线/销售 SKU 排行——清单见 §33.4）。
+- **L4 Dashboard 九计数卡（后端）**：internal/reports/dashboard.go 九卡 Link 追加状态预筛——待上架→/inbound?status=AWAITING_PUTAWAY、待拣货→/picking?status=PENDING、待复核→/checking?status=PENDING、待发货→/shipment?status=PENDING（计数口径 :166-187 与状态值逐一核对）；待收货/待打包/待盘点/待审核/待处理异常保持裸路径（目标列表无 status 参数或多态计数单值筛不覆盖，诚实不硬筛）；endpoints_dashboard_test.go 断言同步新契约。
+- **L8/L10/L11 行点击**：预警行→/inventory/alerts?level=&keyword=<SKU>；异动行（business_no 非空）→/inventory/ledger?business_no=；库位利用率行→/bins?warehouseId=（camelCase 实证 warehouse/handler.go:320）。均 canAccess 门控（inventory:stock:view / warehouse:bin:view）。
+- **图表内核**：SfChart 增 `onPointClick({name, seriesName})`——echarts click 只注册一次、回调走 ref；五业务图表组件透传。顺手修两个内核层问题：①init 后 rAF 强制对齐一次容器尺寸（懒加载图表 init 时容器未及算宽，echarts 按回退 100px 画布且 ResizeObserver 不再触发——Dashboard 实测 625px 容器挂 100px 画布）；②SfHBarChart 类目值保留全名、截断只做轴标签显示层（截断值曾致长名类目点击反查失败）。
+- **L13 Dashboard 两图**：出入库趋势点击日柱→/inventory/ledger?change_type=INBOUND|OUTBOUND&created_from=&created_to=（ledger 白名单三参）；仓库排行点击仓条→/inventory/stock?warehouse_id=（warehouseStockDTO/SQL 补 warehouse_id，前端类型同步）。
+- **L14 六分析页**：库存分析 SKU TOP→stock?sku_id=；仓库分析容量/作业量→stock / inbound / outbound?warehouse_id= + 利用率行→bins；入库分析状态构成→inbound?status=（图例中文逆映射）+ 供应商排行→purchases?supplier_id=（入库列表无 supplier 参数落点取来源 PO）；出库分析 SKU 排行→ledger?sku_id=&change_type=OUTBOUND&同范围；采购分析供应商/状态→purchases?supplier_id= / ?status=；销售分析趋势→sales?created_from=&created_to=（sales 白名单有日期）+ 状态→sales?status=。
+- **验证**：go build/vet/test 全绿（reports 套件 -count=1）、tsc 全绿；浏览器实测——待上架卡→/inbound?status=AWAITING_PUTAWAY、预警行 level+keyword、异动行 business_no、库位行 warehouseId=9101、趋势柱→ledger INBOUND 2026-10-05、仓库排行条→stock?warehouse_id=9103 全部命中；本地后端已重建重启（.local-env/server.exe，SF_SERVER_MODE=debug）。采购分析页图表点击在自动化面板未复现（与用户实时操作同面板存在焦点竞争），机制与 Dashboard 同一内核路径且接线经 tsc 与代码走查，建议日常使用中验证。
+- **不做什么**：L6/L7/L12/L15（需拍板/后端配合）保持挂起；不给无参数的图表造假筛选。
+
 ## [2026-10-07] 功能：退货单审核 UI 接入（销售/采购退货列表操作列）
 
 - **背景**：后端退货域 submit/approve 接口已交付（internal/returns/handler.go:119-132，`ApproveInput{approved,opinion}`：通过→APPROVED、驳回→退回 DRAFT，service_sales.go:381-430），但前端两个退货列表页只有创建入口，单据停在「待审核」后界面无审核动作可点。计划见 docs/plans/2026-10-07-return-audit-ui.md。

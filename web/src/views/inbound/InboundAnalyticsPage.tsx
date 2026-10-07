@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react'
 import { Button, Col, Flex, Row, Segmented, Tooltip, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import dayjs from 'dayjs'
 import { analyticsApi } from '@/api/analytics'
 import { reportsApi } from '@/api/reports'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import {
   SfChartCard,
@@ -73,6 +76,11 @@ function RefreshButton({ onClick }: { onClick: () => void }) {
  */
 export default function InboundAnalyticsPage() {
   const [days, setDays] = useState(30)
+  // 联动批次二 L14：图表图元点击下钻（frontend.md §33.4）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillInbound = canAccess(user, 'inbound:view')
+  const canDrillPurchase = canAccess(user, 'purchase:view')
 
   // 统计窗口（后端 requireRange：time_from/time_to YYYY-MM-DD，上限 366 天——api/reports.ts ReportRangeQuery）
   const range = useMemo(
@@ -187,6 +195,17 @@ export default function InboundAnalyticsPage() {
               error={composition.error}
               onRetry={() => void composition.refetch()}
               emptyText="当前没有入库单"
+              onPointClick={
+                canDrillInbound
+                  ? ({ name }) => {
+                      // 图例中文名反查原始状态码（INBOUND_STATUS_LABEL 的逆映射）
+                      const status = (composition.data?.items ?? []).find(
+                        (item) => (INBOUND_STATUS_LABEL[item.status] ?? item.status) === name,
+                      )?.status
+                      if (status) navigate(`/inbound?status=${status}`)
+                    }
+                  : undefined
+              }
             />
             {composition.data && composition.data.total > 0 ? (
               <Flex justify="space-between" wrap="wrap">
@@ -215,6 +234,15 @@ export default function InboundAnalyticsPage() {
               error={supplierRank.error}
               onRetry={() => void supplierRank.refetch()}
               emptyText="所选时间范围内没有采购来源入库"
+              onPointClick={
+                canDrillPurchase
+                  ? ({ name }) => {
+                      // 供应商入库的来源是采购单 → 落点 /purchases?supplier_id=（入库列表无 supplier 参数）
+                      const hit = (supplierRank.data ?? []).find((row) => (row.supplier_name || row.supplier_code) === name)
+                      if (hit) navigate(`/purchases?supplier_id=${hit.supplier_id}`)
+                    }
+                  : undefined
+              }
             />
             <Flex justify="space-between" wrap="wrap">
               <Text type="secondary" style={{ fontSize: 12 }}>

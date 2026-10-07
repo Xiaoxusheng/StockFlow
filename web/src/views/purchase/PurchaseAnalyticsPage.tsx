@@ -4,7 +4,10 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { analyticsApi, type OrderAmountTrendPage } from '@/api/analytics'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import {
   SfChartCard,
@@ -40,7 +43,7 @@ function presetRange(key: Exclude<RangeKey, 'custom'>): [string, string] {
 }
 
 /** 采购订单状态 → 图例中文名（值域 db/migrations/000007 chk_purchase_orders_status 七态；
- * 文案与 PurchaseListPage.tsx PO_STATUS_TAG 逐键同值——环形图图例只取 label 不涉状态色，
+ * 文案与 purchaseStatusMeta.ts PO_STATUS_TAG 逐键同值——环形图图例只取 label 不涉状态色，
  * 未注册值兜底展示原始文案，后端新增状态不阻塞页面） */
 const PO_STATUS_LABELS: Record<string, string> = {
   DRAFT: '草稿',
@@ -101,6 +104,10 @@ function buildTrendData(page?: OrderAmountTrendPage): Array<{ date: string; orde
 export default function PurchaseAnalyticsPage() {
   const [range, setRange] = useState<RangeKey>('30d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
+  // 联动批次二 L14：供应商排行/状态构成点击下钻（frontend.md §33.4）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillPurchase = canAccess(user, 'purchase:view')
 
   // 自定义档：RangePicker 选定后才发请求（OutboundAnalyticsPage 同款交互），
   // 未就绪时以空串占位（请求 enabled=false 不发出，卡脚显示「待选择」）
@@ -227,6 +234,17 @@ export default function PurchaseAnalyticsPage() {
               error={composition.error}
               onRetry={() => void composition.refetch()}
               emptyText="暂无采购单，状态构成不可展示"
+              onPointClick={
+                canDrillPurchase
+                  ? ({ name }) => {
+                      // 图例中文名反查原始状态码（poStatusName 的逆映射）
+                      const status = (composition.data?.items ?? []).find(
+                        (item) => poStatusName(item.status) === name,
+                      )?.status
+                      if (status) navigate(`/purchases?status=${status}`)
+                    }
+                  : undefined
+              }
             />
             <Flex justify="space-between" wrap="wrap">
               {/* total 为后端 StatusComposition 原值字段（前端不求和，规则 8） */}
@@ -259,6 +277,15 @@ export default function PurchaseAnalyticsPage() {
               error={rank.error}
               onRetry={() => void rank.refetch()}
               emptyText="所选时间范围内没有供应商采购记录"
+              onPointClick={
+                canDrillPurchase
+                  ? ({ name }) => {
+                      // rankData.name = `供应商名（编码）`，反查原始行取 supplier_id
+                      const hit = (rank.data ?? []).find((row) => `${row.supplier_name}（${row.supplier_code}）` === name)
+                      if (hit) navigate(`/purchases?supplier_id=${hit.supplier_id}`)
+                    }
+                  : undefined
+              }
             />
             <Flex justify="space-between" wrap="wrap">
               <Text type="secondary" style={{ fontSize: 12 }}>

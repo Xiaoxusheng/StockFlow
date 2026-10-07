@@ -6,7 +6,7 @@
  */
 import { useMemo } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { SfChart } from './SfChart'
+import { SfChart, type SfChartProps } from './SfChart'
 import { type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_DEFAULT_HEIGHT,
@@ -24,6 +24,8 @@ export interface SfDonutChartProps extends SfChartStatusProps {
   data: SfDonutDatum[]
   /** 最大分片数，默认 6；超出折叠为「其他」（§36） */
   maxSlices?: number
+  /** 图元点击（frontend.md §33.4 图表下钻，透传内核） */
+  onPointClick?: SfChartProps['onPointClick']
 }
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
@@ -76,6 +78,7 @@ export function SfDonutChart({
   onRetry,
   emptyText = DEFAULT_EMPTY_TEXT,
   className,
+  onPointClick,
 }: SfDonutChartProps) {
   const { theme, palette } = useSfChartTheme()
   // 全 0 或空数据不画 0（§52）；plots Pie 对全 0 会兜底画 1，此处先行拦截
@@ -96,6 +99,7 @@ export function SfDonutChart({
       empty={empty}
       emptyText={emptyText}
       className={className}
+      onPointClick={onPointClick}
     />
   )
 }

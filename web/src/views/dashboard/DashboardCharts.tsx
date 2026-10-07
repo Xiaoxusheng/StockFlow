@@ -13,8 +13,11 @@
  * - 库位利用率 GET /api/reports/dashboard/warehouse-stock（bin_utilization 0-100）
  */
 import { Flex, Typography } from 'antd'
+import { useNavigate } from 'react-router'
 import type { AnalyticsTrendPoint, StockSummary } from '@/api/inventory'
 import type { DashboardWarehouseStock, TrendPoint } from '@/api/dashboard'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { formatQty } from '@/utils/format'
 import {
   SfAreaChart,
@@ -120,6 +123,8 @@ export function StockStatusDonut({
  * 出入库趋势（§27 出入库趋势）：入库 / 出库按日分组柱（多序列 group）。
  * 注：§27 草图为「Bar + Line（库存量）」复合图，components/charts 现无复合图组件、
  * 业务页禁止直引 plots 自组复合图——库存量趋势已由本页「库存趋势」Area 承载，此处为双序列 Bar。
+ * 联动批次二 L13：点击某日柱 → /inventory/ledger?change_type=&created_from=&created_to=
+ * 该日流水预筛（frontend.md §33.4；inventory:stock:view 门控）。
  */
 export function FlowTrendChart({
   points,
@@ -132,6 +137,9 @@ export function FlowTrendChart({
   error?: unknown
   onRetry?: () => void
 }) {
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const clickable = canAccess(user, 'inventory:stock:view')
   return (
     <SfBarChart
       data={points.map((p) => ({ date: p.date, inbound: p.inbound, outbound: p.outbound }))}
@@ -145,6 +153,16 @@ export function FlowTrendChart({
       loading={loading}
       error={error}
       onRetry={onRetry}
+      onPointClick={
+        clickable
+          ? ({ name, seriesName }) => {
+              const changeType = seriesName === '出库' ? 'OUTBOUND' : 'INBOUND'
+              navigate(
+                `/inventory/ledger?change_type=${changeType}&created_from=${encodeURIComponent(name)}&created_to=${encodeURIComponent(name)}`,
+              )
+            }
+          : undefined
+      }
     />
   )
 }
@@ -154,6 +172,8 @@ export function FlowTrendChart({
  * 注：任务书 §27 草图该槽位为「SKU TOP 10」——后端无 SKU 维度排行聚合端点
  * （逐域 grep 全部 RegisterRoutes 核实；/api/reports/inventory-summary 为分页明细、
  * 无排序参数，跨页取 TOP 属前端拼装，§54 禁止），故此槽位以真实仓库排行呈现。
+ * 联动批次二 L13：点击仓条 → /inventory/stock?warehouse_id= 预筛（warehouse_id 随
+ * warehouseStockDTO 下发；frontend.md §33.4）。
  */
 export function WarehouseRankChart({
   items,
@@ -166,6 +186,9 @@ export function WarehouseRankChart({
   error?: unknown
   onRetry?: () => void
 }) {
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const clickable = canAccess(user, 'inventory:stock:view')
   return (
     <SfHBarChart
       data={items.map((w) => ({ name: w.warehouse_name, qty: w.total_qty }))}
@@ -177,6 +200,14 @@ export function WarehouseRankChart({
       error={error}
       onRetry={onRetry}
       emptyText="当前没有仓库库存数据"
+      onPointClick={
+        clickable
+          ? ({ name }) => {
+              const hit = items.find((w) => w.warehouse_name === name)
+              if (hit) navigate(`/inventory/stock?warehouse_id=${hit.warehouse_id}`)
+            }
+          : undefined
+      }
     />
   )
 }

@@ -4,8 +4,11 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { analyticsApi } from '@/api/analytics'
 import { reportsApi, type FlowStatsPage, type FlowValuationBasis } from '@/api/reports'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -96,6 +99,11 @@ function buildTrendData(page?: FlowStatsPage): Array<{ date: string; qty: number
 export default function OutboundAnalyticsPage() {
   const [range, setRange] = useState<RangeKey>('30d')
   const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
+  // 联动批次二 L14：SKU 出库排行点击 → /inventory/ledger?sku_id=&change_type=OUTBOUND&同范围
+  // （frontend.md §33.4；ledger 白名单 sku_id/change_type/created_from/created_to——口径与卡脚一致）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillLedger = canAccess(user, 'inventory:stock:view')
   // 估值口径（outbound-stats 响应 valuation.basis 随查询回写——trend queryFn :119；
   // 未响应前置 null，:207 卡脚走「金额估值口径随响应披露」兜底文案）
   const [valuationBasis, setValuationBasis] = useState<FlowValuationBasis | null>(null)
@@ -289,6 +297,19 @@ export default function OutboundAnalyticsPage() {
                   error={productRank.error}
                   onRetry={() => void productRank.refetch()}
                   emptyText="所选时间范围内没有出库流水落账"
+                  onPointClick={
+                    canDrillLedger
+                      ? ({ name }) => {
+                          const hit = (productRank.data?.items ?? []).find(
+                            (row) => (row.sku_name || row.sku_code) === name,
+                          )
+                          if (!hit) return
+                          navigate(
+                            `/inventory/ledger?sku_id=${hit.sku_id}&change_type=OUTBOUND&created_from=${encodeURIComponent(timeFrom)}&created_to=${encodeURIComponent(timeTo)}`,
+                          )
+                        }
+                      : undefined
+                  }
                 />
               )}
               {/* 卡脚口径披露（§54）：流水含一切 OUTBOUND 扣减；估值口径随响应披露（api.md §9 节②） */}

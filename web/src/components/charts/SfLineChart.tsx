@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react'
 import type { EChartsCoreOption } from 'echarts/core'
-import { SfChart } from './SfChart'
+import { SfChart, type SfChartProps } from './SfChart'
 import { dayLabel, SF_CHART_LINE_WIDTH, type SfChartTheme } from './sfChartTheme'
 import {
   SF_CHART_COLOR_KEY_INDEX,
@@ -23,6 +23,8 @@ export interface SfLineChartProps extends SfChartStatusProps {
   smooth?: boolean
   /** 面积填充（单序列趋势带），默认 false */
   area?: boolean
+  /** 图元点击（frontend.md §33.4 图表下钻，透传内核） */
+  onPointClick?: SfChartProps['onPointClick']
 }
 
 const DEFAULT_EMPTY_TEXT = '当前时间范围内没有可展示的数据'
@@ -91,6 +93,7 @@ export function SfLineChart({
   onRetry,
   emptyText = DEFAULT_EMPTY_TEXT,
   className,
+  onPointClick,
 }: SfLineChartProps) {
   const { theme, palette } = useSfChartTheme()
   const empty = !Array.isArray(data) || data.length === 0 || series.length === 0
@@ -109,6 +112,7 @@ export function SfLineChart({
       empty={empty}
       emptyText={emptyText}
       className={className}
+      onPointClick={onPointClick}
     />
   )
 }

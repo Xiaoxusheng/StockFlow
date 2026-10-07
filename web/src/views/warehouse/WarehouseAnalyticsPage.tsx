@@ -2,9 +2,12 @@ import { useMemo, useState } from 'react'
 import { Button, Col, Flex, Progress, Row, Segmented, Tooltip, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import dayjs from 'dayjs'
 import { analyticsApi, type WarehouseWorkloadRow } from '@/api/analytics'
 import { dashboardApi, type DashboardWarehouseStock } from '@/api/dashboard'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -43,12 +46,25 @@ function RefreshButton({ onClick }: { onClick: () => void }) {
  * 取代旧「≤3 仓逐仓 Gauge」方案——仪表盘针式表盘信息密度低、视觉重；Progress 行在任意仓数下
  * 一行一仓纵读，占用率与 SKU 数同排直达（§37 利用率呈现 Progress/Gauge 中的 Progress 分支）。
  * 数据同源 warehouse-stock.bin_utilization（0-100，dashboard.go 直出），无前端换算。
+ * 联动批次二 L14：行点击 → /bins?warehouseId=<id>（frontend.md §33.4；warehouse:bin:view 门控）。
  */
 function UtilizationList({ items }: { items: DashboardWarehouseStock[] }) {
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const clickable = canAccess(user, 'warehouse:bin:view')
   return (
     <Flex vertical gap={16} justify="center" style={{ minHeight: ANALYTICS_CHART_HEIGHT - 32 }}>
       {items.map((w) => (
-        <Flex key={w.warehouse_code} align="center" gap={12}>
+        <Flex
+          key={w.warehouse_code}
+          align="center"
+          gap={12}
+          style={{ cursor: clickable ? 'pointer' : 'default' }}
+          onClick={() => {
+            if (!clickable) return
+            navigate(`/bins?warehouseId=${w.warehouse_id}`)
+          }}
+        >
           <Text style={{ width: 110 }} ellipsis>
             {w.warehouse_name}
           </Text>
@@ -109,6 +125,10 @@ function buildWorkloadData(rows: WarehouseWorkloadRow[]) {
  * 命中端点同款 PermInventoryList，与实时库存/库存预警同码同源，menu.tsx:59,72 先例）走 sharedChanges。
  */
 export default function WarehouseAnalyticsPage() {
+  // 联动批次二 L14：图表图元点击下钻（frontend.md §33.4）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillStock = canAccess(user, 'inventory:stock:view')
   const warehouseStock = useQuery({
     queryKey: ['warehouse', 'analytics', 'warehouse-stock'],
     queryFn: () => dashboardApi.warehouseStock(),
@@ -156,6 +176,14 @@ export default function WarehouseAnalyticsPage() {
                 error={warehouseStock.error}
                 onRetry={() => void warehouseStock.refetch()}
                 emptyText="当前没有仓库库存数据"
+                onPointClick={
+                  canDrillStock
+                    ? ({ name }) => {
+                        const hit = items.find((w) => w.warehouse_name === name)
+                        if (hit) navigate(`/inventory/stock?warehouse_id=${hit.warehouse_id}`)
+                      }
+                    : undefined
+                }
               />
             </SfChartCard>
           </Col>
@@ -209,6 +237,20 @@ export default function WarehouseAnalyticsPage() {
                   error={workload.error}
                   onRetry={() => void workload.refetch()}
                   emptyText="所选时间范围内暂无仓库作业数据"
+                  onPointClick={
+                    canDrillStock
+                      ? ({ name, seriesName }) => {
+                          const hit = workloadRows.find((w) => w.warehouse_name === name)
+                          if (!hit) return
+                          // seriesName→目标列表：入库量→/inbound、出库量→/outbound，均按仓库预筛
+                          navigate(
+                            seriesName === '出库量'
+                              ? `/outbound?warehouse_id=${hit.warehouse_id}`
+                              : `/inbound?warehouse_id=${hit.warehouse_id}`,
+                          )
+                        }
+                      : undefined
+                  }
                 />
                 {!workload.isPending && !workload.error && workloadRows.length > 0 ? (
                   <Flex vertical>
