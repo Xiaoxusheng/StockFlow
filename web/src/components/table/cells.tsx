@@ -28,9 +28,15 @@ export interface NumberCellProps {
 }
 
 /** 数字单元格：tabular-nums 纵向对齐，配合列 align:'right' 使用 */
+/** 数字单元格：tabular-nums 纵向对齐，配合列 align:'right' 使用；
+ *  strong=重点数字（15px/600——任务书 §13「核心数字加 500 字重」的强化档，用于
+ *  数量/金额等需要重点标注的列，如已完成量、单据主数量） */
 export function NumberCell({ value, format = formatNumber, strong = false }: NumberCellProps) {
   return (
-    <span className="sf-num" style={{ fontWeight: strong ? 500 : undefined }}>
+    <span
+      className="sf-num"
+      style={strong ? { fontSize: 15, fontWeight: 600 } : { fontWeight: 500 }}
+    >
       {format(value)}
     </span>
   )

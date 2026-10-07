@@ -19,6 +19,8 @@ body {
 /* 数字统一使用等宽数字，保证表格纵向对齐 */
 .sf-num {
   font-variant-numeric: tabular-nums;
+  /* 表格数字略重于正文（500）：数字列扫读时的视觉锚点（frontend.md §6.2 数字右对齐） */
+  font-weight: 500;
 }
 
 /* 页面容器：紧凑企业级密度（frontend.md §3） */

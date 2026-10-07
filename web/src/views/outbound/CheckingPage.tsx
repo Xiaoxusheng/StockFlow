@@ -298,7 +298,12 @@ export default function CheckingPage() {
       dataIndex: 'qty',
       width: 100,
       align: 'right',
-      render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
+      /* 重点数字（用户口径：表格要有重点标注）——15px/600 强化档 */
+      render: (v: number) => (
+        <span className="sf-num" style={{ fontSize: 15, fontWeight: 600 }}>
+          {formatNumber(v)}
+        </span>
+      ),
     },
     {
       title: '复核结果',

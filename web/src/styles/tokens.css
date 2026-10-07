@@ -9,8 +9,11 @@
  */
 
 :root {
-  /* ===== 表面与背景（任务书 §6：页面背景 #F6F7F9 与 Surface #FFFFFF 两级分层） ===== */
-  --sf-bg: #f6f7f9;
+  /* ===== 表面与背景（2026-10-06 两轮反馈定型：Light 页面背景近白 #f9fafb，
+     卡片/面板恒纯白——分层 = 底色微色阶 + 既有边框；比原 #f6f7f9 更亮、比纯白低半档。
+     深浅只调这一枚 token，App.tsx colorBgLayout 同 commit 同步；
+     Dark 维持 #101418 与 Surface 两级分层不变） ===== */
+  --sf-bg: #f9fafb;
   --sf-surface: #ffffff;
   --sf-surface-elevated: #ffffff;
   /* hover 表面档（表格行 / 侧边栏菜单 hover） */
@@ -33,10 +36,10 @@
   --sf-primary-active: #1e53d5;
   /* 主色底上的前景对比色（logo 描边等 on-primary 语义，两主题恒定白） */
   --sf-on-primary: #ffffff;
-  --sf-success: #16a34a;
-  --sf-warning: #d97706;
-  --sf-danger: #dc2626;
-  --sf-info: #0891b2;
+  --sf-success: #15803d;
+  --sf-warning: #b45309;
+  --sf-danger: #b91c1c;
+  --sf-info: #0e7490;
 
   /* ===== 字体（任务书 §8；无外部字体文件，Inter 缺省回退系统中文字体） ===== */
   --sf-font-family: Inter, 'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, 'Segoe UI', sans-serif;
