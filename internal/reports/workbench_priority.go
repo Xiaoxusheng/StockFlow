@@ -172,7 +172,9 @@ type nearExpiryRow struct {
 }
 
 // 临期库存计数 + 明细（%1=仓库范围片段作用于 inventory 聚合子查询；窗口参数 ?::interval
-// 与 alerts expiry 分支同形——repository_alerts.go buildAlertBranch）。
+// 与 alerts expiry 分支同形——repository_alerts.go buildAlertBranch）。聚合行无自然主键，
+// 明细 id 取组内 MIN(i.id)（每条 inventory 行恰属一个 (仓,SKU,批次) 组，MIN 必组间唯一）；
+// 派生表 b 不含 expiry_date 列，days_left 由子查询内计算后透出。
 const (
 	nearExpiryCountBase = `
 SELECT COUNT(*)
@@ -186,10 +188,10 @@ FROM (
 JOIN batches b ON b.id = t.batch_id AND b.sku_id = t.sku_id
 WHERE b.expiry_date > CURRENT_DATE AND b.expiry_date <= (CURRENT_DATE + ?::interval)`
 	nearExpiryListBase = `
-SELECT t.warehouse_id, s.code AS sku_code, p.name AS sku_name, w.name AS warehouse_name,
-       b.batch_no, (b.expiry_date - CURRENT_DATE)::int AS days_left, t.qty::float8 AS qty
+SELECT t.id, t.warehouse_id, s.code AS sku_code, p.name AS sku_name, w.name AS warehouse_name,
+       b.batch_no, b.days_left, t.qty::float8 AS qty
 FROM (
-    SELECT i.warehouse_id, i.sku_id, i.batch_id, SUM(i.total_qty) AS qty
+    SELECT i.warehouse_id, i.sku_id, i.batch_id, SUM(i.total_qty) AS qty, MIN(i.id) AS id
     FROM inventory i
     WHERE %s
     GROUP BY 1, 2, 3
