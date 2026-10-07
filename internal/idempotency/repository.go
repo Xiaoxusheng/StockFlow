@@ -2,6 +2,7 @@ package idempotency
 
 import (
 	"context"
+	"time"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -28,6 +29,13 @@ type Repo interface {
 	Complete(ctx context.Context, id, updatedBy int64, snapshot []byte) error
 	// Release 释放占用行（仅 PROCESSING；已 COMPLETED 行不受影响）。返回释放行数。
 	Release(ctx context.Context, id int64) (int64, error)
+	// PreemptExpired 原子抢占滞留 PROCESSING 的过期占用行（TTL 惰性回收唯一路径）。
+	// 单条 UPDATE 参数化守卫 id + status=PROCESSING + created_at < cutoff，并发抢占方
+	// 恰一方 RowsAffected=1 判胜负；胜出行被改写绑定本次请求（request_hash/updated_by
+	// 落库、response_snapshot 归零、created_at 刷新——租约自接管时刻重新起算，接管方
+	// 执行期内不会被后续重试再次抢占）。返回 1 = 抢占胜出；0 = 失利（原持有者恰已
+	// 收尾成 COMPLETED 或并发方先到）。
+	PreemptExpired(ctx context.Context, id, updatedBy int64, requestHash string, cutoff time.Time) (int64, error)
 }
 
 // NewRepo GORM 幂等键仓储。
@@ -74,5 +82,20 @@ func (r gormRepo) Release(ctx context.Context, id int64) (int64, error) {
 	res := r.db.WithContext(ctx).
 		Where("id = ? AND status = ?", id, StatusProcessing).
 		Delete(&Key{})
+	return res.RowsAffected, res.Error
+}
+
+func (r gormRepo) PreemptExpired(ctx context.Context, id, updatedBy int64, requestHash string, cutoff time.Time) (int64, error) {
+	// 单条原子 UPDATE：created_at < cutoff 守卫使并发抢占方恰一方胜出（后到方在
+	// 行锁上重估谓词时 created_at 已被刷新为 now，判定 0 行）。
+	res := r.db.WithContext(ctx).Model(&Key{}).
+		Where("id = ? AND status = ? AND created_at < ?", id, StatusProcessing, cutoff).
+		Updates(map[string]any{
+			"request_hash":      requestHash,
+			"response_snapshot": jsonb("{}"), // PROCESSING 态快照归零（000024 列缺省同形）
+			"created_at":        database.Now(),
+			"updated_at":        database.Now(),
+			"updated_by":        updatedBy,
+		})
 	return res.RowsAffected, res.Error
 }

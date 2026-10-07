@@ -74,6 +74,15 @@ func (r *InboundContentReader) Assemble(ctx context.Context, ids []string, field
 	}
 
 	// 单据头（来源 PURCHASE 经 source_no=po_no 关联供应商；OTHER 无供应商留空）。
+	// 数据权限（f20）：请求 context 携带仓库范围快照时越仓单据按缺失处理。
+	args := []any{parsed}
+	whFilter := ""
+	if sc, restricted := printing.RestrictedScope(ctx); restricted {
+		if printing.EmptyScopeIDs(sc) {
+			return nil, printing.FailMissing(ids)
+		}
+		whFilter, args = printing.InScope(ctx, "io.warehouse_id", args)
+	}
 	var heads []inboundHeadRow
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT io.id AS inbound_id, io.inbound_no, io.source_type,
@@ -85,7 +94,7 @@ func (r *InboundContentReader) Assemble(ctx context.Context, ids []string, field
 		LEFT JOIN purchase_orders po ON io.source_type = 'PURCHASE' AND po.po_no = io.source_no
 		LEFT JOIN suppliers sp ON sp.id = po.supplier_id
 		LEFT JOIN warehouses w ON w.id = io.warehouse_id
-		WHERE io.id IN ?`, parsed).Scan(&heads).Error
+		WHERE io.id IN ?`+whFilter, args...).Scan(&heads).Error
 	if err != nil {
 		return nil, err
 	}

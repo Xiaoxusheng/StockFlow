@@ -134,6 +134,16 @@ func (r *OutboundContentReader) Assemble(ctx context.Context, ids []string, fiel
 	}
 
 	var heads []outboundHeadRow
+	// 数据权限（f20）：请求 context 携带仓库范围快照时越仓对象按缺失处理
+	//（EmptyScopeIDs = 不落仓库行级的范围，fail-closed 全部不可见）。
+	args := []any{parsed}
+	whFilter := ""
+	if sc, restricted := printing.RestrictedScope(ctx); restricted {
+		if printing.EmptyScopeIDs(sc) {
+			return nil, printing.FailMissing(ids)
+		}
+		whFilter, args = printing.InScope(ctx, "o.warehouse_id", args)
+	}
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT o.id AS outbound_id, o.outbound_no,
 		       COALESCE(cu.name, '') AS customer_name,
@@ -144,7 +154,7 @@ func (r *OutboundContentReader) Assemble(ctx context.Context, ids []string, fiel
 		LEFT JOIN sales_orders so ON so.so_no = o.so_no
 		LEFT JOIN customers cu ON cu.id = so.customer_id
 		LEFT JOIN warehouses w ON w.id = o.warehouse_id
-		WHERE o.id IN ?`, parsed).Scan(&heads).Error
+		WHERE o.id IN ?`+whFilter, args...).Scan(&heads).Error
 	if err != nil {
 		return nil, err
 	}
@@ -314,6 +324,15 @@ func (r *PickContentReader) Assemble(ctx context.Context, ids []string, fields [
 	}
 
 	var rows []pickRow
+	// 数据权限（f20）：同 OutboundContentReader——越仓任务按缺失处理。
+	args := []any{parsed}
+	whFilter := ""
+	if sc, restricted := printing.RestrictedScope(ctx); restricted {
+		if printing.EmptyScopeIDs(sc) {
+			return nil, printing.FailMissing(ids)
+		}
+		whFilter, args = printing.InScope(ctx, "t.source_warehouse_id", args)
+	}
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT t.id AS pick_id, t.pick_no,
 		       COALESCE(t.assignee_name, '') AS picker_name,
@@ -324,7 +343,7 @@ func (r *PickContentReader) Assemble(ctx context.Context, ids []string, fields [
 		       CAST(t.picked_qty AS varchar) AS qty_picked
 		FROM pick_tasks t
 		LEFT JOIN warehouses w ON w.id = t.source_warehouse_id
-		WHERE t.id IN ?`, parsed).Scan(&rows).Error
+		WHERE t.id IN ?`+whFilter, args...).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -441,6 +460,15 @@ func (r *ShipmentContentReader) Assemble(ctx context.Context, ids []string, fiel
 	}
 
 	var rows []shipmentRow
+	// 数据权限（f20）：同 OutboundContentReader——越仓发货单按缺失处理。
+	args := []any{parsed}
+	whFilter := ""
+	if sc, restricted := printing.RestrictedScope(ctx); restricted {
+		if printing.EmptyScopeIDs(sc) {
+			return nil, printing.FailMissing(ids)
+		}
+		whFilter, args = printing.InScope(ctx, "sh.warehouse_id", args)
+	}
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT sh.id AS shipment_id, sh.shipment_no, sh.outbound_no,
 		       o.id AS outbound_id,
@@ -451,7 +479,7 @@ func (r *ShipmentContentReader) Assemble(ctx context.Context, ids []string, fiel
 		FROM shipments sh
 		LEFT JOIN outbound_orders o ON o.outbound_no = sh.outbound_no
 		LEFT JOIN warehouses w ON w.id = sh.warehouse_id
-		WHERE sh.id IN ?`, parsed).Scan(&rows).Error
+		WHERE sh.id IN ?`+whFilter, args...).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

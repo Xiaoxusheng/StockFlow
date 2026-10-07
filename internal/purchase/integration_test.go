@@ -411,3 +411,89 @@ func TestIntegrationPutawayAndInspectChain(t *testing.T) {
 		ch.in.InboundNo, ch.in.InboundNo).Scan(&ledgerCount).Error)
 	require.GreaterOrEqual(t, ledgerCount, int64(3), "上架与质检两向流水齐备（inventory-rules §5）")
 }
+
+// TestIntegrationDraftPOEditReplaceItems 草稿编辑整单替换明细（回归：2026-10-07
+// 编辑采购订单报"系统内部错误"——ReplacePOItems 曾用 GORM 软删，软删行物理保留占用
+// uk_purchase_order_items_po_line (po_id, line_no)，重插同行号即 23505；
+// Unscoped 硬删后必须可重复编辑，且旧明细物理清除、新明细行号连续）。
+func TestIntegrationDraftPOEditReplaceItems(t *testing.T) {
+	db, svc := integrationEnv(t)
+	actor := testActor()
+	ctx := context.Background()
+
+	po, err := svc.CreatePO(ctx, actor, POCreateInput{
+		SupplierID: 11, WarehouseID: 1,
+		Items: []POItemInput{{SKUID: 100, Qty: mustQty(t, "10"), Price: mustQty(t, "2")}},
+	})
+	require.NoError(t, err)
+	poID := po.ID.Int64()
+
+	// 第一次替换：同 SKU 改量改价（用户截图场景：编辑保存）
+	_, err = svc.UpdatePO(ctx, actor, poID, POUpdateInput{
+		Items: []POItemInput{{SKUID: 100, Qty: mustQty(t, "2000"), Price: mustQty(t, "1")}},
+	})
+	require.NoError(t, err, "草稿编辑替换明细不得因唯一索引冲突失败")
+
+	// 第二次替换：换 SKU + 行数变化（1 行 → 2 行），覆盖删旧插新的完整路径
+	_, err = svc.UpdatePO(ctx, actor, poID, POUpdateInput{
+		Items: []POItemInput{
+			{SKUID: 100, Qty: mustQty(t, "5"), Price: mustQty(t, "3")},
+			{SKUID: 101, Qty: mustQty(t, "7"), Price: mustQty(t, "4")},
+		},
+	})
+	require.NoError(t, err, "行数变化的重替换同样不得冲突")
+
+	items, err := svc.repo.ListPOItems(ctx, poID)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+	require.Equal(t, 1, items[0].LineNo)
+	require.Equal(t, int64(100), items[0].SKUID)
+	require.Equal(t, "5.0000", items[0].QtyOrdered.String())
+	require.Equal(t, 2, items[1].LineNo)
+	require.Equal(t, int64(101), items[1].SKUID)
+
+	// 旧行必须物理清除（Unscoped 硬删）：任何 deleted_at 非空行残留都会再次顶爆唯一索引
+	var stale int64
+	require.NoError(t, db.Raw(
+		`SELECT COUNT(*) FROM purchase_order_items WHERE po_id = ? AND deleted_at IS NOT NULL`, poID).
+		Scan(&stale).Error)
+	require.Zero(t, stale, "替换后不得残留软删行（唯一索引 (po_id, line_no) 会被其占用）")
+}
+
+// TestIntegrationDraftInboundEditReplaceItems 入库单草稿编辑同型回归（与 PO 同一
+// 软删冲突面：uk_inbound_items_inbound_line）。
+func TestIntegrationDraftInboundEditReplaceItems(t *testing.T) {
+	db, svc := integrationEnv(t)
+	actor := testActor()
+	ctx := context.Background()
+
+	in, err := svc.CreateInbound(ctx, actor, InboundCreateInput{
+		SourceType: SourceTypeOther, WarehouseID: 1,
+		Items: []InboundItemInput{{SKUID: 100, Qty: mustQty(t, "10")}},
+	})
+	require.NoError(t, err)
+	inID := in.ID.Int64()
+
+	_, err = svc.UpdateInbound(ctx, actor, inID, InboundUpdateInput{
+		Items: []InboundItemInput{{SKUID: 100, Qty: mustQty(t, "20")}},
+	})
+	require.NoError(t, err, "入库单草稿编辑替换明细不得因唯一索引冲突失败")
+
+	_, err = svc.UpdateInbound(ctx, actor, inID, InboundUpdateInput{
+		Items: []InboundItemInput{
+			{SKUID: 100, Qty: mustQty(t, "3")},
+			{SKUID: 101, Qty: mustQty(t, "4")},
+		},
+	})
+	require.NoError(t, err)
+
+	items, err := svc.repo.ListInboundItems(ctx, inID)
+	require.NoError(t, err)
+	require.Len(t, items, 2)
+
+	var stale int64
+	require.NoError(t, db.Raw(
+		`SELECT COUNT(*) FROM inbound_items WHERE inbound_id = ? AND deleted_at IS NOT NULL`, inID).
+		Scan(&stale).Error)
+	require.Zero(t, stale, "替换后不得残留软删行")
+}

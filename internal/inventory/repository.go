@@ -184,12 +184,21 @@ func ensureRow(tx *gorm.DB, key RowKey, actor Actor, init StockState) (row *Inve
 		if row != nil {
 			return row, false, nil
 		}
+		// SAVEPOINT 隔离唯一冲突重试（渗透修复）：23505 会把 PG 事务置为 aborted
+		// （25P02），同事务内直接重试下一条语句必失败——原"并发首建竞态：重读走更新
+		// 路径"的收敛实际不可达。冲突时回滚到插入前清除 aborted 状态，重读收敛。
+		if err := tx.SavePoint("sf_inv_ensure_row").Error; err != nil {
+			return nil, false, err
+		}
 		row, err = insertRow(tx, key, actor, init)
 		if err == nil {
 			return row, true, nil
 		}
 		if !pgUniqueViolation(err, "uk_inventory_location") {
 			return nil, false, err
+		}
+		if rbErr := tx.RollbackTo("sf_inv_ensure_row").Error; rbErr != nil {
+			return nil, false, rbErr
 		}
 		// 并发首建竞态：另一事务已插入并提交 → 重读走更新路径。
 	}
@@ -307,6 +316,25 @@ func lockForUpdate(tx *gorm.DB, id int64) (*InventoryLock, error) {
 	return &row, nil
 }
 
+// getLockByID 无锁普通读锁定记录（ReleaseLock 锁序统一第 1 步：先取行键，锁定
+// 库存行后再加锁重读——消除"lock 行 → 库存行"反向锁序，见 service.ReleaseLock）。
+// 行不存在返回 (nil, nil)。
+func getLockByID(tx *gorm.DB, id int64) (*InventoryLock, error) {
+	var row InventoryLock
+	err := tx.Raw(`
+		SELECT id, warehouse_id, bin_id, sku_id, batch_id, lock_type,
+		       source_type, source_no, qty, status, released_at, released_by, remark,
+		       created_at, updated_at, created_by, updated_by
+		FROM inventory_locks WHERE id = ?`, id).Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.ID == 0 {
+		return nil, nil
+	}
+	return &row, nil
+}
+
 // updateLockAfterSplit 锁记录部分释放/核销后的落库（qty 递减、清零时终态）。
 // 状态由 Go 侧基于行锁内读数计算，WHERE 仍带 ACTIVE 守卫（数据层最后防线）。
 func updateLockAfterSplit(tx *gorm.DB, row *InventoryLock, releasedBy int64) error {
@@ -385,9 +413,17 @@ func writeAdjustment(tx *gorm.DB, a *InventoryAdjustment, existingID, updatedBy 
 			return "", err
 		}
 		a.AdjustmentNo = no
+		// SAVEPOINT 隔离唯一冲突重试（渗透修复，同 ensureRow/writeLedger——23505 置
+		// 事务 aborted 后同事务重试必失败）。SAVEPOINT 置于取号之后：回滚不回收号码。
+		if err := tx.SavePoint("sf_inv_write_adj").Error; err != nil {
+			return "", err
+		}
 		if err := insertAdjustment(tx, a); err == nil {
 			return no, nil
 		} else if pgUniqueViolation(err, "uk_inventory_adjustments_no") {
+			if rbErr := tx.RollbackTo("sf_inv_write_adj").Error; rbErr != nil {
+				return "", rbErr
+			}
 			continue
 		} else {
 			return "", err
@@ -633,16 +669,33 @@ func insertSerial(tx *gorm.DB, s *SerialNumber) error {
 
 // updateSerial 记录序列号状态变化（每次变化更新 last_source_*/last_event_at：
 // 来源单据、位置、操作人、时间，inventory-rules §8.3）。
-func updateSerial(tx *gorm.DB, s *SerialNumber) error {
-	return tx.Exec(`
+//
+// expectStatus CAS 状态守卫（渗透修复，inventory-rules §9.3 数据层最后防线）：
+// WHERE status = 期望前置态（调用方传 serialForUpdate 行锁内读到的当前状态），
+// 影响行数 0 = 状态已并发变化，按现有冲突口径返回——封堵"并发两订单同时通过
+// IN_STOCK 校验并双双核销同一序列号"（一物两卖）窗口：读侧 SerialStates 已加
+// FOR UPDATE（同事务串行化），本守卫兜底防状态被越事务改写。
+func updateSerial(tx *gorm.DB, s *SerialNumber, expectStatus string) error {
+	res := tx.Exec(`
 		UPDATE serial_numbers
 		SET sku_id = ?, batch_id = ?, warehouse_id = ?, bin_id = ?, status = ?,
 		    last_source_type = ?, last_source_no = ?, last_event_at = ?,
 		    updated_at = now(), updated_by = ?
-		WHERE id = ?`,
+		WHERE id = ? AND status = ?`,
 		s.SKUID, s.BatchID, s.WarehouseID, s.BinID, s.Status,
-		s.LastSourceType, s.LastSourceNo, s.LastEventAt, s.UpdatedBy, s.ID,
-	).Error
+		s.LastSourceType, s.LastSourceNo, s.LastEventAt, s.UpdatedBy, s.ID, expectStatus,
+	)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return response.NewError(response.CodeConflict, map[string]any{
+			"reason":          "序列号状态并发变化，请重试",
+			"serial_no":       s.SerialNo,
+			"expected_status": expectStatus,
+		})
+	}
+	return nil
 }
 
 // ---- 查询（列表接口，api.md §2.1 强制分页）----

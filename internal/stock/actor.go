@@ -14,6 +14,39 @@ type Actor struct {
 	UserAgent string `json:"user_agent"`
 	Method    string `json:"method"`
 	Path      string `json:"path"`
+
+	// Scope 数据权限仓库范围快照（auth.WarehouseScope 口径，permission.md §4）。
+	// HTTP 入口必须经各域 actorOf 注入；nil = 未注入（仅限内部系统路径与测试构造，
+	// 此时按 ID 直取的写动作不校验仓库范围——行为与注入前的历史调用方一致）。
+	Scope *WhScope `json:"-"`
+}
+
+// WhScope 仓库数据权限范围快照（ALL/超管 → All=true；SPECIFIED_WAREHOUSE →
+// 绑定仓库集；其余范围不落仓库行级 → 空集 = 不可见任何仓库，fail-closed）。
+type WhScope struct {
+	All          bool    `json:"all"`
+	WarehouseIDs []int64 `json:"warehouse_ids"`
+}
+
+// CanAccess 单仓库范围判定（Scope 未注入 = 内部系统路径，不限制）。
+func (a Actor) CanAccess(warehouseID int64) bool {
+	return a.CanAccessAny(warehouseID)
+}
+
+// CanAccessAny 任一仓库在范围内即通过（调拨等双仓实体与各域详情接口
+// scopeVisible* 既有 fail-closed 口径一致；Scope 未注入不限制）。
+func (a Actor) CanAccessAny(warehouseIDs ...int64) bool {
+	if a.Scope == nil || a.Scope.All {
+		return true
+	}
+	for _, target := range warehouseIDs {
+		for _, id := range a.Scope.WarehouseIDs {
+			if id == target {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // RowKey 五维定位键（inventory-rules §3）。定位 = warehouse + bin + sku + batch

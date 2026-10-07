@@ -57,6 +57,10 @@ type Actor struct {
 	UserAgent string
 	Method    string
 	Path      string
+
+	// Scope 数据权限仓库范围快照（auth.WarehouseScope 口径；HTTP 入口 actorOf 注入；
+	// nil = 未注入，仅限内部路径与测试，按 ID 直取的写动作不校验仓库范围）。
+	Scope *stock.WhScope
 }
 
 // inventoryActor 转换为库存原语的归因结构（stock.Actor 为值类型）。
@@ -64,7 +68,15 @@ func (a Actor) inventoryActor() stock.Actor {
 	return stock.Actor{
 		ID: a.UserID, Name: a.Username, RequestID: a.RequestID,
 		IP: a.IP, UserAgent: a.UserAgent, Method: a.Method, Path: a.Path,
+		Scope: a.Scope,
 	}
+}
+
+// canAccessWarehouse 仓库数据范围判定（f16：按 ID 直取的写动作在加载实体后
+// fail-closed 校验，口径与详情接口 fail-closed 一致；任一仓库命中即通过；
+// Scope 未注入 = 内部系统路径，不限制）。
+func (a Actor) canAccessWarehouse(warehouseIDs ...int64) bool {
+	return a.inventoryActor().CanAccessAny(warehouseIDs...)
 }
 
 // auditEntry 构造 returns 域审计条目骨架（module=returns；快照由调用方补充；

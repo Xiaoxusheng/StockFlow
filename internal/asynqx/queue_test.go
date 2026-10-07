@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 )
@@ -236,6 +237,37 @@ func TestConfigNormalize(t *testing.T) {
 	}
 	if got := (Config{Concurrency: 3, MaxRetry: 2}).normalize(); got.Concurrency != 3 || got.MaxRetry != 2 {
 		t.Fatalf("显式配置不应被覆盖，实际 %+v", got)
+	}
+}
+
+// TestResolveOptionsTimeout 入队超时选项解析：零值（未传 Option）默认 DefaultTimeout
+// ——asynq 在未显式设置 Timeout 时静默取库默认 30 分钟，超大导出/导入注定被误杀
+// 且每次重试整文件重生成，入队必须显式下发；WithTimeout 显式覆盖；0/负值回退默认。
+func TestResolveOptionsTimeout(t *testing.T) {
+	o, err := resolveOptions(Task{Type: TaskTypeExportRun}, DefaultMaxRetry, nil)
+	if err != nil {
+		t.Fatalf("解析入队选项失败: %v", err)
+	}
+	if o.timeout != DefaultTimeout {
+		t.Fatalf("零值应默认 DefaultTimeout=%v，实际 %v", DefaultTimeout, o.timeout)
+	}
+
+	o, err = resolveOptions(Task{Type: TaskTypeExportRun}, DefaultMaxRetry, []Option{WithTimeout(15 * time.Minute)})
+	if err != nil {
+		t.Fatalf("解析入队选项失败: %v", err)
+	}
+	if o.timeout != 15*time.Minute {
+		t.Fatalf("WithTimeout 显式覆盖应生效（15m），实际 %v", o.timeout)
+	}
+
+	for name, d := range map[string]time.Duration{"零值": 0, "负值": -time.Minute} {
+		o, err = resolveOptions(Task{Type: TaskTypeExportRun}, DefaultMaxRetry, []Option{WithTimeout(d)})
+		if err != nil {
+			t.Fatalf("%s: 解析入队选项失败: %v", name, err)
+		}
+		if o.timeout != DefaultTimeout {
+			t.Fatalf("%s: 应回退 DefaultTimeout=%v，实际 %v", name, DefaultTimeout, o.timeout)
+		}
 	}
 }
 

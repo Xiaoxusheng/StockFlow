@@ -82,6 +82,10 @@ func (s *Service) Ship(ctx context.Context, actor Actor, in ShipInput) (*ShipRes
 		if o == nil {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
 		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
+		}
 		if o.Status != OBStatusPacked && o.Status != OBStatusPartialShipped {
 			return response.NewError(ErrStateConflict, map[string]any{
 				"outbound_no": in.OutboundNo, "from": o.Status,
@@ -391,6 +395,10 @@ func (s *Service) CancelOutbound(ctx context.Context, actor Actor, outboundNo st
 		if o == nil {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
 		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
+		}
 		if err := s.cancelOutboundInTx(ctx, tx, actor, o, in.Reason); err != nil {
 			return err
 		}
@@ -476,6 +484,10 @@ func (s *Service) CloseOutbound(ctx context.Context, actor Actor, outboundNo str
 		if o == nil {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
 		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
+		}
 		before := o.Status
 		if !canTransition(obTransitions, before, OBStatusClosed) {
 			return response.NewError(ErrStateConflict, map[string]any{
@@ -536,6 +548,10 @@ func (s *Service) Reallocate(ctx context.Context, actor Actor, in ReallocateInpu
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
+		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
 		}
 		if o.Status != OBStatusAllocated && o.Status != OBStatusPicking {
@@ -697,6 +713,10 @@ func (s *Service) UpdateShipmentStatus(ctx context.Context, actor Actor, shipmen
 			return err
 		}
 		if sh == nil {
+			return response.NewError(ErrTaskNotFound, map[string]any{"shipment_id": shipmentID})
+		}
+		// 数据权限 fail-closed（f16）：越仓发货单按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(sh.WarehouseID) {
 			return response.NewError(ErrTaskNotFound, map[string]any{"shipment_id": shipmentID})
 		}
 		if !canTransition(shipTransitions, sh.Status, target) {

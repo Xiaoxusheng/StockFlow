@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stockflow/server/internal/response"
 )
@@ -241,5 +242,77 @@ func TestCompleteNonCacheableResponse(t *testing.T) {
 func TestEndpointOf(t *testing.T) {
 	if got := EndpointOf("POST", "/api/receipts"); got != "POST /api/receipts" {
 		t.Fatalf("EndpointOf 口径不符: %q", got)
+	}
+}
+
+// TestAcquireTakeOverStaleProcessing TTL 惰性回收：占用行收尾失败滞留 PROCESSING
+// 且 created_at 超 defaultLeaseTTL → 同键同载荷重试原子抢占接管、按全新请求执行；
+// 接管即换新租约（接管方执行期内同键重试仍 409），接管行收尾后同普通占用行可回放；
+// 换载荷重试即使命中滞留行也仍 409 MISMATCH（TTL 不削弱换载荷防御）。
+func TestAcquireTakeOverStaleProcessing(t *testing.T) {
+	svc, repo := testService()
+	ctx := context.Background()
+	hash := HashRequest([]byte(`{}`))
+
+	l1, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash)
+	if err != nil || !l1.Acquired() {
+		t.Fatalf("首次占用失败: %v %+v", err, l1)
+	}
+	// 模拟持有者失联（快照落库失败/硬崩溃）：行滞留 PROCESSING 且租约超 TTL。
+	repo.backdateCreatedAt(tKey, 7, tEndpoint, defaultLeaseTTL+time.Minute)
+
+	// 换载荷重试命中滞留行：仍 409 REQUEST_MISMATCH，不得借 TTL 绕过键复用防御。
+	_, err = svc.Acquire(ctx, 7, tEndpoint, tKey, HashRequest([]byte(`{"qty":2}`)))
+	requireErrCode(t, err, "IDEMPOTENCY_REQUEST_MISMATCH")
+
+	// 同键同载荷重试：超 TTL → 原子抢占接管，视为全新请求占用成功。
+	l2, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash)
+	if err != nil {
+		t.Fatalf("滞留行超 TTL 应被接管按全新请求执行: %v", err)
+	}
+	if !l2.Acquired() || l2.Replay() != nil {
+		t.Fatalf("接管应视为全新占用（无回放）: %+v", l2)
+	}
+	// 接管即换新租约：接管方执行期内（租约未超时）同键重试仍 409，不双执行。
+	if _, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash); err == nil {
+		t.Fatal("接管后的新租约期内同键重试应 409 IN_PROGRESS")
+	} else {
+		requireErrCode(t, err, "IDEMPOTENCY_IN_PROGRESS")
+	}
+	// 接管行收尾 → 快照就绪 → 后续提交回放（接管行与普通占用行同语义）。
+	svc.Complete(ctx, l2, 200, []byte(`{"code":0,"message":"ok","data":{},"request_id":"w"}`))
+	l3, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash)
+	if err != nil || l3.Acquired() || l3.Replay() == nil {
+		t.Fatalf("接管行收尾后应可回放: %v %+v", err, l3)
+	}
+}
+
+// TestAcquireFreshProcessingStillConflict 租约有效期内 PROCESSING 行仍 409：
+// 滞留但未超 TTL 的行不得被接管（惰性回收不得缩短租约语义，防在途长任务被
+// 并发重试误接管造成双执行）。
+func TestAcquireFreshProcessingStillConflict(t *testing.T) {
+	svc, repo := testService()
+	ctx := context.Background()
+	hash := HashRequest([]byte(`{}`))
+
+	l1, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash)
+	if err != nil || !l1.Acquired() {
+		t.Fatalf("首次占用失败: %v %+v", err, l1)
+	}
+	// 回拨至 TTL 之内（租约仍有效）：同键重试 409，不得接管。
+	repo.backdateCreatedAt(tKey, 7, tEndpoint, defaultLeaseTTL-time.Minute)
+	if _, err := svc.Acquire(ctx, 7, tEndpoint, tKey, hash); err == nil {
+		t.Fatal("租约有效期内同键重试应 409 IN_PROGRESS")
+	} else {
+		requireErrCode(t, err, "IDEMPOTENCY_IN_PROGRESS")
+	}
+	// 刚占用（created_at=now）的并发同键第二请求：409，不回放、不抢占。
+	if _, err := svc.Acquire(ctx, 7, tEndpoint, "fresh-key", hash); err != nil {
+		t.Fatalf("新键占用失败: %v", err)
+	}
+	if _, err := svc.Acquire(ctx, 7, tEndpoint, "fresh-key", hash); err == nil {
+		t.Fatal("并发同键第二请求应 409 IN_PROGRESS")
+	} else {
+		requireErrCode(t, err, "IDEMPOTENCY_IN_PROGRESS")
 	}
 }

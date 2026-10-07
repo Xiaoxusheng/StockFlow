@@ -176,6 +176,10 @@ func (s *Service) UpdatePO(ctx context.Context, actor Actor, id int64, in POUpda
 	if po == nil {
 		return nil, response.NewError(ErrPONotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetPO 详情同口径）。
+	if !actor.canAccessWarehouse(po.WarehouseID) {
+		return nil, response.NewError(ErrPONotFound, nil)
+	}
 	if po.Status != POStatusDraft {
 		return nil, response.NewError(ErrPOStatusNotAllowed, map[string]any{"status": po.Status, "reason": "仅草稿可修改"})
 	}
@@ -253,6 +257,10 @@ func (s *Service) SubmitPO(ctx context.Context, actor Actor, id int64) (*Purchas
 	if po == nil {
 		return nil, response.NewError(ErrPONotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetPO 详情同口径）。
+	if !actor.canAccessWarehouse(po.WarehouseID) {
+		return nil, response.NewError(ErrPONotFound, nil)
+	}
 	if !canTransition(purchaseTransitions, po.Status, POStatusPendingApproval) {
 		return nil, response.NewError(ErrPOStatusNotAllowed, map[string]any{
 			"status": po.Status, "to": POStatusPendingApproval,
@@ -303,6 +311,10 @@ func (s *Service) ApprovePO(ctx context.Context, actor Actor, id int64, in POApp
 	if po == nil {
 		return nil, response.NewError(ErrPONotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetPO 详情同口径）。
+	if !actor.canAccessWarehouse(po.WarehouseID) {
+		return nil, response.NewError(ErrPONotFound, nil)
+	}
 	if po.Status != POStatusPendingApproval {
 		return nil, response.NewError(ErrPOStatusNotAllowed, map[string]any{"status": po.Status})
 	}
@@ -344,6 +356,10 @@ func (s *Service) CancelPO(ctx context.Context, actor Actor, id int64, in Cancel
 		return nil, err
 	}
 	if po == nil {
+		return nil, response.NewError(ErrPONotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetPO 详情同口径）。
+	if !actor.canAccessWarehouse(po.WarehouseID) {
 		return nil, response.NewError(ErrPONotFound, nil)
 	}
 	if !canTransition(purchaseTransitions, po.Status, POStatusCancelled) {
@@ -409,6 +425,10 @@ func (s *Service) ClosePO(ctx context.Context, actor Actor, id int64, in POClose
 		return nil, err
 	}
 	if po == nil {
+		return nil, response.NewError(ErrPONotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetPO 详情同口径）。
+	if !actor.canAccessWarehouse(po.WarehouseID) {
 		return nil, response.NewError(ErrPONotFound, nil)
 	}
 	if !canTransition(purchaseTransitions, po.Status, POStatusCompleted) {

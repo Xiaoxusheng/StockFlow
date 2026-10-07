@@ -31,6 +31,9 @@ type Repository interface {
 	UpdatePOCols(ctx context.Context, tx *gorm.DB, id int64, cols map[string]any) error
 	UpdatePOStatus(ctx context.Context, tx *gorm.DB, id int64, from, to string, approvedBy int64) (int64, error)
 	ListPOItems(ctx context.Context, poID int64) ([]*PurchaseOrderItem, error)
+	// ListPOItemsTx 事务内读明细：progressPOAfterReceipt 在同事务累计 PO 明细
+	// qty_received 后判定推进，必须经 tx 读（ListInboundItemsTx 同理）。
+	ListPOItemsTx(ctx context.Context, tx *gorm.DB, poID int64) ([]*PurchaseOrderItem, error)
 	FindPOItemBySku(ctx context.Context, poID, skuID int64) (*PurchaseOrderItem, error)
 	AddPOItemReceived(ctx context.Context, tx *gorm.DB, itemID int64, recv, rej stock.Qty, by int64) (int64, error)
 	AddPOItemPutaway(ctx context.Context, tx *gorm.DB, itemID int64, qty stock.Qty, by int64) (int64, error)
@@ -44,6 +47,11 @@ type Repository interface {
 	UpdateInboundCols(ctx context.Context, tx *gorm.DB, id int64, cols map[string]any) error
 	UpdateInboundStatus(ctx context.Context, tx *gorm.DB, id int64, from, to string, by int64) (int64, error)
 	ListInboundItems(ctx context.Context, inboundID int64) ([]*InboundItem, error)
+	// ListInboundItemsTx 事务内读明细：状态推进判定（progressAfterReceipt /
+	// progressInboundAfterQC）在同事务累计 qty_received / qty_inspected 后必须经
+	// tx 读取本事务未提交写入——r.db 连接 READ COMMITTED 下只见旧值，收齐/质检
+	// 完成判定恒 false（2026-10-07 链路实测修复）。
+	ListInboundItemsTx(ctx context.Context, tx *gorm.DB, inboundID int64) ([]*InboundItem, error)
 	FindInboundItemBySku(ctx context.Context, inboundID, skuID int64) (*InboundItem, error)
 	AddInboundItemReceived(ctx context.Context, tx *gorm.DB, itemID int64, delta stock.Qty, by int64) (int64, error)
 	AddInboundItemInspected(ctx context.Context, tx *gorm.DB, itemID int64, delta stock.Qty, by int64) (int64, error)
@@ -80,6 +88,9 @@ type Repository interface {
 	// 迁移 000023 chk_putaway_tasks_priority CHECK 0-9 兜底）。
 	SetPutawayTaskPriority(ctx context.Context, tx *gorm.DB, id int64, priority int, by int64) (int64, error)
 	CountTasksByInbound(ctx context.Context, inboundNo string) (map[string]int64, error)
+	// CountTasksByInboundTx 事务内读任务计数：progressInboundAfterTask 在同事务
+	// 完成当前任务（IN_PROGRESS→COMPLETED）后判定全部完成，必须经 tx 读。
+	CountTasksByInboundTx(ctx context.Context, tx *gorm.DB, inboundNo string) (map[string]int64, error)
 	ListCompletedPendingTasksBySKU(ctx context.Context, inboundNo string, skuID int64) ([]*PutawayTask, error)
 
 	// —— 审批记录（000006 共享表，append-only）——
@@ -315,8 +326,12 @@ func (r *repo) InsertPO(ctx context.Context, tx *gorm.DB, po *PurchaseOrder) err
 	return wrapDB(tx.WithContext(ctx).Create(po).Error, "写入采购订单")
 }
 
+// ReplacePOItems 整单替换明细。必须 Unscoped 硬删：BaseModel 软删行物理保留，
+// 会继续占用 uk_purchase_order_items_po_line (po_id, line_no) 唯一索引，重插同行号
+// 即 23505（草稿编辑必现内部错误）。调用面仅 create + 仅草稿可改的 update——行无
+// 收货/上架历史，硬删不丢业务事实（stockops ReplaceTransferItems raw DELETE 同口径）。
 func (r *repo) ReplacePOItems(ctx context.Context, tx *gorm.DB, poID int64, items []*PurchaseOrderItem, by int64) error {
-	if err := tx.WithContext(ctx).Where("po_id = ?", poID).Delete(&PurchaseOrderItem{}).Error; err != nil {
+	if err := tx.WithContext(ctx).Unscoped().Where("po_id = ?", poID).Delete(&PurchaseOrderItem{}).Error; err != nil {
 		return wrapDB(err, "清理采购订单明细")
 	}
 	for _, it := range items {
@@ -349,8 +364,16 @@ func (r *repo) UpdatePOStatus(ctx context.Context, tx *gorm.DB, id int64, from, 
 }
 
 func (r *repo) ListPOItems(ctx context.Context, poID int64) ([]*PurchaseOrderItem, error) {
+	return r.listPOItems(withCtx(ctx, r.db), poID)
+}
+
+func (r *repo) ListPOItemsTx(ctx context.Context, tx *gorm.DB, poID int64) ([]*PurchaseOrderItem, error) {
+	return r.listPOItems(tx.WithContext(ctx), poID)
+}
+
+func (r *repo) listPOItems(q *gorm.DB, poID int64) ([]*PurchaseOrderItem, error) {
 	var rows []*PurchaseOrderItem
-	err := withCtx(ctx, r.db).Where("po_id = ?", poID).Order("line_no ASC").Find(&rows).Error
+	err := q.Where("po_id = ?", poID).Order("line_no ASC").Find(&rows).Error
 	return rows, wrapDB(err, "查询采购订单明细")
 }
 
@@ -413,8 +436,11 @@ func (r *repo) InsertInbound(ctx context.Context, tx *gorm.DB, o *InboundOrder) 
 	return wrapDB(tx.WithContext(ctx).Create(o).Error, "写入入库单")
 }
 
+// ReplaceInboundItems 整单替换明细。必须 Unscoped 硬删：软删行物理保留会占用
+// uk_inbound_items_inbound_line (inbound_id, line_no) 唯一索引，重插同行号即 23505
+// （仅草稿可改，行无收货历史——ReplacePOItems 同口径注释）。
 func (r *repo) ReplaceInboundItems(ctx context.Context, tx *gorm.DB, inboundID int64, items []*InboundItem, by int64) error {
-	if err := tx.WithContext(ctx).Where("inbound_id = ?", inboundID).Delete(&InboundItem{}).Error; err != nil {
+	if err := tx.WithContext(ctx).Unscoped().Where("inbound_id = ?", inboundID).Delete(&InboundItem{}).Error; err != nil {
 		return wrapDB(err, "清理入库单明细")
 	}
 	for _, it := range items {
@@ -443,8 +469,16 @@ func (r *repo) UpdateInboundStatus(ctx context.Context, tx *gorm.DB, id int64, f
 }
 
 func (r *repo) ListInboundItems(ctx context.Context, inboundID int64) ([]*InboundItem, error) {
+	return r.listInboundItems(withCtx(ctx, r.db), inboundID)
+}
+
+func (r *repo) ListInboundItemsTx(ctx context.Context, tx *gorm.DB, inboundID int64) ([]*InboundItem, error) {
+	return r.listInboundItems(tx.WithContext(ctx), inboundID)
+}
+
+func (r *repo) listInboundItems(q *gorm.DB, inboundID int64) ([]*InboundItem, error) {
 	var rows []*InboundItem
-	err := withCtx(ctx, r.db).Where("inbound_id = ?", inboundID).Order("line_no ASC").Find(&rows).Error
+	err := q.Where("inbound_id = ?", inboundID).Order("line_no ASC").Find(&rows).Error
 	return rows, wrapDB(err, "查询入库单明细")
 }
 
@@ -717,11 +751,19 @@ func (r *repo) SetPutawayTaskPriority(ctx context.Context, tx *gorm.DB, id int64
 }
 
 func (r *repo) CountTasksByInbound(ctx context.Context, inboundNo string) (map[string]int64, error) {
+	return r.countTasksByInbound(withCtx(ctx, r.db), inboundNo)
+}
+
+func (r *repo) CountTasksByInboundTx(ctx context.Context, tx *gorm.DB, inboundNo string) (map[string]int64, error) {
+	return r.countTasksByInbound(tx.WithContext(ctx), inboundNo)
+}
+
+func (r *repo) countTasksByInbound(q *gorm.DB, inboundNo string) (map[string]int64, error) {
 	var rows []struct {
 		Status string `gorm:"column:status"`
 		N      int64  `gorm:"column:n"`
 	}
-	err := withCtx(ctx, r.db).Raw(`
+	err := q.Raw(`
 		SELECT status, COUNT(*) AS n FROM putaway_tasks WHERE inbound_no = ? GROUP BY status`,
 		inboundNo).Scan(&rows).Error
 	if err != nil {

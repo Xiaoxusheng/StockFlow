@@ -298,6 +298,10 @@ func (s *Service) UpdateTransfer(ctx context.Context, actor stock.Actor, id int6
 		if o == nil {
 			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		if o.Status != TransferDraft {
 			return response.NewError(ErrStatusConflict, map[string]any{
 				"reason": "仅草稿状态可修改调拨单", "current_status": o.Status,
@@ -331,6 +335,10 @@ func (s *Service) SubmitTransfer(ctx context.Context, actor stock.Actor, id int6
 		o, items, err := loadTransfer(ctx, t, id)
 		if err != nil {
 			return err
+		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
 		}
 		if o.Status == TransferPending {
 			replay = true
@@ -390,6 +398,10 @@ func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		switch in.Action {
 		case "reject":
 			if o.Status == TransferCancelled {
@@ -402,9 +414,15 @@ func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int
 					"reason": "仅待审核状态可驳回", "current_status": o.Status,
 				})
 			}
-			if _, err := t.UpdateTransferStatus(ctx, id, TransferPending, TransferCancelled,
+			// 守卫 UPDATE 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突，
+			// 禁止继续执行后续库存动作。
+			if n, err := t.UpdateTransferStatus(ctx, id, TransferPending, TransferCancelled,
 				TransferStamps{Cancelled: true}, actor.ID); err != nil {
 				return err
+			} else if n == 0 {
+				return response.NewError(ErrStatusConflict, map[string]any{
+					"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+				})
 			}
 			o.Status = TransferCancelled
 			if err := t.InsertApproval(ctx, ApprovalRecord{
@@ -431,9 +449,15 @@ func (s *Service) ApproveTransfer(ctx context.Context, actor stock.Actor, id int
 				})
 			}
 			// 状态先迁移（守卫 UPDATE 串行化并发审核），任一锁定失败整体回滚。
-			if _, err := t.UpdateTransferStatus(ctx, id, TransferPending, TransferApproved,
+			// 影响行数为 0 = 并发下状态已被他方迁移（f9，如审核 vs 取消）——显式冲突，
+			// 禁止继续加锁（否则 CANCELLED 单据将残留 ACTIVE ORDER_HOLD 预占）。
+			if n, err := t.UpdateTransferStatus(ctx, id, TransferPending, TransferApproved,
 				TransferStamps{Approve: true, ApprovedBy: actor.ID}, actor.ID); err != nil {
 				return err
+			} else if n == 0 {
+				return response.NewError(ErrStatusConflict, map[string]any{
+					"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+				})
 			}
 			for _, it := range items {
 				key := transferKey(TransferLoc{
@@ -486,6 +510,10 @@ func (s *Service) OutboundTransfer(ctx context.Context, actor stock.Actor, id in
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		if o.Status == TransferMoving {
 			replay = true
 			detail.Order, detail.Items = *o, items
@@ -496,9 +524,14 @@ func (s *Service) OutboundTransfer(ctx context.Context, actor stock.Actor, id in
 				"reason": "仅待出库（已审核）状态可出库", "current_status": o.Status,
 			})
 		}
-		if _, err := t.UpdateTransferStatus(ctx, id, TransferApproved, TransferMoving,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突，禁止继续核销预占。
+		if n, err := t.UpdateTransferStatus(ctx, id, TransferApproved, TransferMoving,
 			TransferStamps{Outbound: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		// 预占锁回查（transfer_items 无 lock_id 冻结列——锁由 inventory_locks 持有，
 		// 按来源单据 + 行维度定位；只读 SELECT，见 repo_gorm.go 编排说明）。
@@ -601,6 +634,10 @@ func (s *Service) ArriveTransfer(ctx context.Context, actor stock.Actor, id int6
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		if o.Status == TransferAwaiting {
 			replay = true
 			detail.Order, detail.Items = *o, items
@@ -618,9 +655,14 @@ func (s *Service) ArriveTransfer(ctx context.Context, actor stock.Actor, id int6
 				})
 			}
 		}
-		if _, err := t.UpdateTransferStatus(ctx, id, TransferMoving, TransferAwaiting,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突。
+		if n, err := t.UpdateTransferStatus(ctx, id, TransferMoving, TransferAwaiting,
 			TransferStamps{}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		o.Status = TransferAwaiting
 		if err := t.Audit(transferAudit(actor, "arrive", o,
@@ -647,6 +689,10 @@ func (s *Service) ReceiveTransfer(ctx context.Context, actor stock.Actor, id int
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		if o.Status == TransferCompleted {
 			replay = true
 			detail.Order, detail.Items = *o, items
@@ -657,9 +703,14 @@ func (s *Service) ReceiveTransfer(ctx context.Context, actor stock.Actor, id int
 				"reason": "仅待入库状态可收货完成", "current_status": o.Status,
 			})
 		}
-		if _, err := t.UpdateTransferStatus(ctx, id, TransferAwaiting, TransferCompleted,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突，禁止继续入库。
+		if n, err := t.UpdateTransferStatus(ctx, id, TransferAwaiting, TransferCompleted,
 			TransferStamps{Received: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		for _, it := range items {
 			remaining := it.Qty.Sub(it.QtyIn)
@@ -741,6 +792,10 @@ func (s *Service) CancelTransfer(ctx context.Context, actor stock.Actor, id int6
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：两端仓库均越界按不存在处理（与 GetTransferDetail 同口径）。
+		if !actor.CanAccessAny(o.FromWarehouseID, o.ToWarehouseID) {
+			return response.NewError(ErrTransferNotFound, map[string]any{"id": id})
+		}
 		if o.Status == TransferCancelled {
 			replay = true
 			detail.Order, detail.Items = *o, items
@@ -757,9 +812,15 @@ func (s *Service) CancelTransfer(ctx context.Context, actor stock.Actor, id int6
 		default:
 			return response.NewError(ErrStatusConflict, map[string]any{"current_status": o.Status})
 		}
-		if _, err := t.UpdateTransferStatus(ctx, id, o.Status, TransferCancelled,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9，如取消 vs 审核）——显式冲突，
+		// 禁止继续执行释放预占等库存动作。
+		if n, err := t.UpdateTransferStatus(ctx, id, o.Status, TransferCancelled,
 			TransferStamps{Cancelled: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "单据状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		if o.Status == TransferApproved {
 			locks, err := t.FindSourceLocks(ctx, sourceTransfer, o.TransferNo, "ORDER_HOLD")
@@ -844,6 +905,12 @@ func (s *Service) ListInTransit(ctx context.Context, f InTransitFilter, page, pa
 		rows, total, err = t.ListInTransit(ctx, f, page, pageSize)
 		return err
 	})
+	if err == nil && rows == nil {
+		// 预置非 nil 空 slice：repo_gorm ListInTransit 为 GORM Raw Scan，零行不分配 slice，
+		// nil 直接透传 OKPage 会序列化为 items:null，违反统一分页契约（api.md §2.1）——
+		// 同 reports/repository.go 与 stockops/inventory handler 既有 `make([]T, 0, len(rows))` 口径。
+		rows = []InTransitRow{}
+	}
 	return rows, total, err
 }
 

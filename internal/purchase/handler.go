@@ -8,6 +8,7 @@ import (
 
 	"github.com/stockflow/server/internal/auth"
 	"github.com/stockflow/server/internal/response"
+	"github.com/stockflow/server/internal/stock"
 )
 
 // HTTP handler 层（architecture.md §1：只做参数接收与基础校验、调用 Service、统一响应
@@ -15,8 +16,11 @@ import (
 // handler 均为纯函数 (c, svc)，由 RegisterRoutes 以闭包挂接（无包级可变状态）。
 
 // actorOf 从 gin 上下文提取操作者归因（审计用；auth.CurrentUser 冻结契约 plan §5.1）。
+// 同时注入数据权限仓库范围快照（f16：按 ID 直取的写动作在 Service 层
+// fail-closed 校验仓库范围，permission.md §4）。
 func actorOf(c *gin.Context) Actor {
 	uc, _ := auth.CurrentUser(c)
+	all, ids := auth.WarehouseScope(c)
 	return Actor{
 		UserID:    uc.UserID,
 		Username:  uc.Username,
@@ -26,6 +30,7 @@ func actorOf(c *gin.Context) Actor {
 		UserAgent: c.Request.UserAgent(),
 		Method:    c.Request.Method,
 		Path:      c.FullPath(),
+		Scope:     &stock.WhScope{All: all, WarehouseIDs: ids},
 	}
 }
 

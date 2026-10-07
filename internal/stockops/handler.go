@@ -208,8 +208,11 @@ func scopeOf(c *gin.Context) Scope {
 }
 
 // actorOf 库存原语与审计的操作者归因（经 auth.CurrentUser 带出）。
+// 同时注入数据权限仓库范围快照（f16：按 ID 直取的写动作在 Service 层
+// fail-closed 校验仓库范围，permission.md §4）。
 func actorOf(c *gin.Context) stock.Actor {
 	uc, _ := auth.CurrentUser(c)
+	all, ids := auth.WarehouseScope(c)
 	return stock.Actor{
 		ID:        uc.UserID,
 		Name:      uc.Username,
@@ -218,6 +221,7 @@ func actorOf(c *gin.Context) stock.Actor {
 		UserAgent: c.Request.UserAgent(),
 		Method:    c.Request.Method,
 		Path:      c.FullPath(),
+		Scope:     &stock.WhScope{All: all, WarehouseIDs: ids},
 	}
 }
 

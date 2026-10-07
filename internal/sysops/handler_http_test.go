@@ -626,17 +626,17 @@ func TestSystemJobsListEndpoint(t *testing.T) {
 		},
 	})
 
-	// 已知 bug 复现位①：enabled 筛选参数被静默忽略——listJobs 经 parseSuccessQuery 取值，
-	// 而该函数只读 "success" 键（routes.go:146），?enabled=... 永不生效、非法值也不报 400。
-	t.Run("已知bug_enabled 筛选参数被忽略", func(t *testing.T) {
+	// enabled 筛选回归（原「已知 bug 复现位①」修复后改写为真实断言）：listJobs 按契约键名
+	// enabled 三态取参——非法值 400，合法值进入 WHERE（前端 SystemJobQuery 发 enabled）。
+	t.Run("enabled 筛选生效", func(t *testing.T) {
 		useSQLFixture(rowsFixture)
 		defer useSQLFixture(nil)
-		status, env := e.do(http.MethodGet, "/api/system/jobs?enabled=maybe", "")
-		require.Equal(t, http.StatusOK, status, "现状：enabled 非法值不校验直接 200")
-		require.EqualValues(t, 0, env["code"])
+		status, _ := e.do(http.MethodGet, "/api/system/jobs?enabled=maybe", "")
+		require.Equal(t, http.StatusBadRequest, status, "enabled 非法值应 400（不再静默 200）")
+		status, _ = e.do(http.MethodGet, "/api/system/jobs?enabled=true", "")
+		require.Equal(t, http.StatusOK, status)
 		args := sysCapture.argsOf("SELECT COUNT(*) FROM scheduled_jobs")
-		require.False(t, argContains(args, true), "现状：enabled=true 不进入 WHERE 参数")
-		t.Skip("已知bug：GET /api/system/jobs 的 enabled 筛选被静默忽略（parseSuccessQuery 只读 success 键，routes.go:343+146）")
+		require.True(t, argContains(args, true), "enabled=true 应进入 WHERE 参数")
 	})
 
 	// 已知 bug 复现位②：SQL 别名 cron_expr 无法映射到 DTO 字段 Cron（无 gorm column tag，

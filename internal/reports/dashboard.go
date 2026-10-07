@@ -290,27 +290,55 @@ func (r *repository) currentStockAnchor(ctx context.Context, sc Scope) (float64,
 	return n, nil
 }
 
-// netAfterByDay 逐日"该日之后至现在的总量级净变化"（锚点回推法的核心查询：
-// generate_series 逐日 LEFT JOIN 流水，日粒度一次扫描，created_at 走既有索引）。
+// netAfterByDay 逐日"该日之后至现在的总量级净变化"（锚点回推法的核心查询）。
+// f7 修复：原实现为 generate_series × 流水非等值 LEFT JOIN（l.created_at >= d.day+1day，
+// 无上界连接无法走 hash join，单请求代价 ≈ 流水总行数 × 天数，366 天 custom 档分钟级）。
+// 改写为后缀和——数学上与原查询逐日求和完全等价（同一条流水行集，仅求和次序不同）：
+//
+//	netAfter(to) = Σ{t ≥ to+1day}（有界单查询）
+//	netAfter(d)  = netAfter(d+1) + dayNet(d+1)（日序回推，Go 侧纯计算）
+//
+// dayNet 为窗口内逐日净变化聚合（created_at 索引范围扫描一遍，代价 ≈ 窗口内行数），
+// 代价从"全表 × 天数"降为"窗口行数"，随数据量的超线性劣化消除。
 func (r *repository) netAfterByDay(ctx context.Context, sc Scope, from, to time.Time) (map[string]float64, error) {
 	scCond, scArgs := sc.cond("l.warehouse_id")
-	sql := `SELECT d.day::date AS day, COALESCE(SUM(l.qty_change), 0)::float8 AS net_after
-FROM generate_series(?::date, ?::date, interval '1 day') AS d(day)
-LEFT JOIN inventory_ledgers l
-  ON l.created_at >= (d.day + interval '1 day')
- AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond + `
-GROUP BY 1 ORDER BY 1`
-	type netRow struct {
-		Day      time.Time `gorm:"column:day"`
-		NetAfter float64   `gorm:"column:net_after"`
+	// 尾段净变化 [to+1day, now)：有界（created_at 索引范围扫描）。
+	tailSQL := `SELECT COALESCE(SUM(l.qty_change), 0)::float8
+FROM inventory_ledgers l
+WHERE l.created_at >= (?::date + interval '1 day') AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond
+	var tail float64
+	if err := r.db.WithContext(ctx).Raw(tailSQL, append([]any{to}, scArgs...)...).Scan(&tail).Error; err != nil {
+		return nil, fmt.Errorf("reports: 回推尾段净变化查询失败: %w", err)
 	}
-	var nets []netRow
-	if err := r.db.WithContext(ctx).Raw(sql, append([]any{from, to}, scArgs...)...).Scan(&nets).Error; err != nil {
-		return nil, fmt.Errorf("reports: 回推净变化查询失败: %w", err)
+	// 窗口内逐日净变化 [from+1day, to+1day)：范围扫描一遍。
+	daySQL := `SELECT l.created_at::date AS day, COALESCE(SUM(l.qty_change), 0)::float8 AS net
+FROM inventory_ledgers l
+WHERE l.created_at >= (?::date + interval '1 day') AND l.created_at < (?::date + interval '1 day')
+  AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond + `
+GROUP BY 1`
+	type dayRow struct {
+		Day time.Time `gorm:"column:day"`
+		Net float64   `gorm:"column:net"`
 	}
-	out := make(map[string]float64, len(nets))
-	for _, n := range nets {
-		out[n.Day.Format("2006-01-02")] = n.NetAfter
+	var dayRows []dayRow
+	if err := r.db.WithContext(ctx).Raw(daySQL, append([]any{from, to}, scArgs...)...).Scan(&dayRows).Error; err != nil {
+		return nil, fmt.Errorf("reports: 回推逐日净变化查询失败: %w", err)
+	}
+	dayNet := make(map[string]float64, len(dayRows))
+	for _, d := range dayRows {
+		dayNet[d.Day.Format("2006-01-02")] = d.Net
+	}
+	// 日序回推（原 generate_series 每日必有行；缺日 = 零净变化，回推跳过等价）。
+	fromDay := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	out := make(map[string]float64, int(to.Sub(from).Hours()/24)+2)
+	net := tail
+	for d := to; ; d = d.AddDate(0, 0, -1) {
+		out[d.Format("2006-01-02")] = net
+		if d.AddDate(0, 0, -1).Before(fromDay) {
+			break
+		}
+		// netAfter(d-1) = netAfter(d) + dayNet(d)
+		net += dayNet[d.Format("2006-01-02")]
 	}
 	return out, nil
 }
@@ -504,26 +532,46 @@ WHERE `+scCond, scArgs...).Scan(&n).Error; err != nil {
 }
 
 // netAfterValueByDay 逐日"该日之后至现在的金额净变化"（净变化 × SKU 成本价）。
+// f7 修复：与 netAfterByDay 同款后缀和改写——尾段单查询 + 窗口内逐日金额净变化
+// 聚合（索引范围扫描一遍）+ Go 侧日序回推，代价从"全表 × 天数"降为"窗口行数"。
 func (r *repository) netAfterValueByDay(ctx context.Context, sc Scope, from, to time.Time) (map[string]float64, error) {
 	scCond, scArgs := sc.cond("l.warehouse_id")
-	sql := `SELECT d.day::date AS day, COALESCE(SUM(l.qty_change * COALESCE(s.cost_price, 0)), 0)::float8 AS net_after
-FROM generate_series(?::date, ?::date, interval '1 day') AS d(day)
-LEFT JOIN inventory_ledgers l
-  ON l.created_at >= (d.day + interval '1 day')
- AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond + `
+	tailSQL := `SELECT COALESCE(SUM(l.qty_change * COALESCE(s.cost_price, 0)), 0)::float8
+FROM inventory_ledgers l
 LEFT JOIN skus s ON s.id = l.sku_id
-GROUP BY 1 ORDER BY 1`
-	type netRow struct {
-		Day      time.Time `gorm:"column:day"`
-		NetAfter float64   `gorm:"column:net_after"`
+WHERE l.created_at >= (?::date + interval '1 day') AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond
+	var tail float64
+	if err := r.db.WithContext(ctx).Raw(tailSQL, append([]any{to}, scArgs...)...).Scan(&tail).Error; err != nil {
+		return nil, fmt.Errorf("reports: 回推尾段金额净变化查询失败: %w", err)
 	}
-	var nets []netRow
-	if err := r.db.WithContext(ctx).Raw(sql, append([]any{from, to}, scArgs...)...).Scan(&nets).Error; err != nil {
-		return nil, fmt.Errorf("reports: 回推金额净变化查询失败: %w", err)
+	daySQL := `SELECT l.created_at::date AS day,
+       COALESCE(SUM(l.qty_change * COALESCE(s.cost_price, 0)), 0)::float8 AS net
+FROM inventory_ledgers l
+LEFT JOIN skus s ON s.id = l.sku_id
+WHERE l.created_at >= (?::date + interval '1 day') AND l.created_at < (?::date + interval '1 day')
+  AND l.change_type IN (` + stockLevelTypes + `) AND ` + scCond + `
+GROUP BY 1`
+	type dayRow struct {
+		Day time.Time `gorm:"column:day"`
+		Net float64   `gorm:"column:net"`
 	}
-	out := make(map[string]float64, len(nets))
-	for _, n := range nets {
-		out[n.Day.Format("2006-01-02")] = n.NetAfter
+	var dayRows []dayRow
+	if err := r.db.WithContext(ctx).Raw(daySQL, append([]any{from, to}, scArgs...)...).Scan(&dayRows).Error; err != nil {
+		return nil, fmt.Errorf("reports: 回推逐日金额净变化查询失败: %w", err)
+	}
+	dayNet := make(map[string]float64, len(dayRows))
+	for _, d := range dayRows {
+		dayNet[d.Day.Format("2006-01-02")] = d.Net
+	}
+	fromDay := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, from.Location())
+	out := make(map[string]float64, int(to.Sub(from).Hours()/24)+2)
+	net := tail
+	for d := to; ; d = d.AddDate(0, 0, -1) {
+		out[d.Format("2006-01-02")] = net
+		if d.AddDate(0, 0, -1).Before(fromDay) {
+			break
+		}
+		net += dayNet[d.Format("2006-01-02")]
 	}
 	return out, nil
 }

@@ -108,6 +108,10 @@ func (s *Service) GeneratePickTasks(ctx context.Context, actor Actor, outboundNo
 		if o == nil {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
 		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": outboundNo})
+		}
 		if o.Status != OBStatusAllocated {
 			return response.NewError(ErrStateConflict, map[string]any{
 				"outbound_no": outboundNo, "from": o.Status, "to": OBStatusPicking,
@@ -176,6 +180,10 @@ func (s *Service) ClaimPickTask(ctx context.Context, actor Actor, taskID int64) 
 		if t == nil {
 			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
 		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
+			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
+		}
 		n, err := s.repo.ClaimPickTask(tx, taskID, actor.ID, actor.Name)
 		if err != nil {
 			return err
@@ -217,6 +225,10 @@ func (s *Service) ConfirmPick(ctx context.Context, actor Actor, taskID int64, in
 			return err
 		}
 		if t == nil {
+			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
+		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
 			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
 		}
 		if t.Status != PickStatusClaimed {
@@ -465,6 +477,10 @@ func (s *Service) ReportPickException(ctx context.Context, actor Actor, taskID i
 		if t == nil {
 			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
 		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
+			return response.NewError(ErrTaskNotFound, map[string]any{"pick_task_id": taskID})
+		}
 		n, err := s.repo.MarkPickTaskStatus(tx, taskID, PickStatusClaimed, PickStatusException, PickStamp{By: actor.ID})
 		if err != nil {
 			return err
@@ -582,6 +598,10 @@ func (s *Service) ClaimCheckTask(ctx context.Context, actor Actor, taskID int64)
 		if t == nil {
 			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
 		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
+			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
+		}
 		n, err := s.repo.AssignCheckTask(tx, taskID, actor.ID, actor.Name)
 		if err != nil {
 			return err
@@ -620,6 +640,10 @@ func (s *Service) ConfirmCheck(ctx context.Context, actor Actor, taskID int64, i
 			return err
 		}
 		if t == nil {
+			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
+		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
 			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
 		}
 		if t.Status != CheckStatusPending {
@@ -693,6 +717,10 @@ func (s *Service) ReopenCheckTask(ctx context.Context, actor Actor, taskID int64
 			return err
 		}
 		if t == nil {
+			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
+		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与列表行级过滤同口径）。
+		if !actor.CanAccess(t.WarehouseID) {
 			return response.NewError(ErrTaskNotFound, map[string]any{"check_task_id": taskID})
 		}
 		n, err := s.repo.MarkCheckTaskStatus(tx, taskID, CheckStatusException, CheckStatusPending, "")
@@ -783,6 +811,10 @@ func (s *Service) Pack(ctx context.Context, actor Actor, in PackInput) (*PackRes
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
+		}
+		// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrOutboundNotFound, map[string]any{"outbound_no": in.OutboundNo})
 		}
 		if o.Status != OBStatusChecked {

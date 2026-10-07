@@ -160,7 +160,7 @@ func (s *Service) Upload(ctx context.Context, actor Actor, importType string, fh
 	}
 	err = s.inTx(ctx, func(tx *gorm.DB) error {
 		file := &storage.File{
-			FileName:     fh.Filename,
+			FileName:     truncateFileName(fh.Filename),
 			StoredName:   stored.StoredName,
 			StoragePath:  stored.StoragePath,
 			MimeType:     stored.MimeType,
@@ -670,10 +670,16 @@ type ImportPreviewResult struct {
 }
 
 // Preview 前 100 行结构化预览（plan §6.2：parsed 优先，未校验行以 raw 文本回显）。
-func (s *Service) Preview(ctx context.Context, id int64) (*ImportPreviewResult, error) {
+// 数据权限（f8/f24）：导入任务的解析行按冻结规则仅创建人及全量范围用户可见
+// （repository.go FileScope 规则 ③ / service_file.go fileVisible ③ 同口径），
+// 越界按 404 处理防 ID 枚举探测——与同域 GetTask/ListImports/错误文件下载收口一致。
+func (s *Service) Preview(ctx context.Context, id int64, scope *FileScope) (*ImportPreviewResult, error) {
 	task, err := s.repo.FindImportTask(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if scope != nil && !scope.All && int64(task.CreatedBy) != scope.UserID {
+		return nil, response.NewError(ErrTaskNotFound, map[string]any{"id": id})
 	}
 	w, err := s.writerFor(task.ImportType)
 	if err != nil {

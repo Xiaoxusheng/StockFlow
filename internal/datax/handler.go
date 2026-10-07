@@ -230,7 +230,7 @@ func (h *handler) previewImport(c *gin.Context) {
 	if !ok {
 		return
 	}
-	res, err := h.svc.Preview(c.Request.Context(), id)
+	res, err := h.svc.Preview(c.Request.Context(), id, fileScopeOf(c))
 	if err != nil {
 		response.Err(c, err)
 		return

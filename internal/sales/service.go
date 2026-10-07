@@ -283,6 +283,10 @@ func (s *Service) UpdateSalesOrderDraft(ctx context.Context, actor Actor, id int
 		if o == nil {
 			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓订单按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
+		}
 		before := *o
 		o.CustomerID, o.WarehouseID = in.CustomerID, in.WarehouseID
 		o.ShippingAddress, o.DeliveryMethod = in.ShippingAddress, in.DeliveryMethod
@@ -367,6 +371,10 @@ func (s *Service) SubmitSalesOrder(ctx context.Context, actor Actor, id int64) (
 		if o == nil {
 			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓订单按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
+		}
 		before := *o
 		items, err := s.repo.ListSalesOrderItems(tx, id)
 		if err != nil {
@@ -435,6 +443,10 @@ func (s *Service) ApproveSalesOrder(ctx context.Context, actor Actor, id int64, 
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓订单按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
 		}
 		if action == "REJECT" {
@@ -592,6 +604,10 @@ func (s *Service) CancelSalesOrder(ctx context.Context, actor Actor, id int64, i
 		if o == nil {
 			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓订单按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
+		}
 		before := *o
 		switch o.Status {
 		case SOStatusDraft, SOStatusPendingApproval:
@@ -661,6 +677,10 @@ func (s *Service) CloseSalesOrder(ctx context.Context, actor Actor, id int64, in
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓订单按不存在处理（与详情接口同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrOrderNotFound, map[string]any{"id": id})
 		}
 		// 状态机守卫（business-flow §13.2）：soTransitions 仅允许 PARTIAL_SHIPPED→

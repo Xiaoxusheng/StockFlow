@@ -69,6 +69,13 @@ func (s *Service) MoveBin(ctx context.Context, actor stock.Actor, in MoveInput, 
 			"field": "source_no", "reason": "移库必须携带作业依据号（inventory-rules §5 来源追溯）",
 		})
 	}
+	// 数据权限 fail-closed（f16）：源/目标仓库均须在范围内（同仓移库，两端一致；
+	// 与库存中心详情接口 fail-closed 同口径，越仓按库位不存在处理）。
+	if !actor.CanAccessAny(in.From.WarehouseID, in.To.WarehouseID) {
+		return stock.MutationResult{}, responseError(ErrMoveKeyInvalid, map[string]any{
+			"field": "from", "reason": "仓库不在可见范围内",
+		})
+	}
 	srcNo := strings.TrimSpace(in.SourceNo)
 	op := stock.MoveBinOp{
 		From: stock.RowKey{

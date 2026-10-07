@@ -356,6 +356,15 @@ func (h *handler) getTask(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
+	// 数据权限 fail-closed（f20）：渲染数据包（rows = 真实业务取值）仅创建人及
+	// 全量范围用户可见（datax 导入任务产物 fileVisible ③ 同规则），越界按不存在
+	// 处理防 ID 枚举探测。模板/列表视图本就不携带 rows，维持既有边界不变。
+	all, _ := auth.WarehouseScope(c)
+	uc, _ := auth.CurrentUser(c)
+	if !all && view.CreatedBy != strconv.FormatInt(uc.UserID, 10) {
+		response.Err(c, response.NewError(ErrTaskNotFound, map[string]any{"id": id}))
+		return
+	}
 	response.OK(c, view)
 }
 
@@ -373,7 +382,11 @@ func (h *handler) createTask(c *gin.Context) {
 		response.Err(c, response.NewError(response.CodeInvalidParam, response.BindErrorDetails(err)))
 		return
 	}
-	view, err := h.svc.CreateTask(c.Request.Context(), actorOf(c), in)
+	// 数据权限（f20）：仓库范围快照随请求 context 下传，单据类装配 reader 据此
+	// 过滤——data_ids 直传他仓单据 ID 时按对象缺失（PRINT_DATA_NOT_FOUND）拒绝。
+	all, ids := auth.WarehouseScope(c)
+	ctx := WithWarehouseScope(c.Request.Context(), &WarehouseScope{All: all, WarehouseIDs: ids})
+	view, err := h.svc.CreateTask(ctx, actorOf(c), in)
 	if err != nil {
 		response.Err(c, err)
 		return

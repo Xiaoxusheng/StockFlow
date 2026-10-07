@@ -3,6 +3,7 @@ package reports
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"time"
 
 	"gorm.io/gorm"
@@ -47,16 +48,24 @@ type repository struct {
 // 为"移动"；LOCK/RELEASE 仅状态转移、INSPECT_* 为质检态迁移，均不进末次移动与净变化聚合。
 
 // paged 通用分页包装：countSQL 对子查询计数，listSQL 追加排序与 LIMIT/OFFSET。
+// f25：首页结果未满页时结果集必然穷尽（total = 已取行数），跳过 COUNT 对完整 base
+// 的第二遍执行——重报表（turnover/stagnant/replenishment/alerts 的 base 含全量流水
+// 扫描）在单页结果的常见场景下 DB 开销减半；满页/翻页场景仍走 COUNT，语义不变。
 func paged(ctx context.Context, db *gorm.DB, base string, args []any, order string, page, pageSize int, dst any) (int64, error) {
+	list := fmt.Sprintf("%s ORDER BY %s LIMIT ? OFFSET ?", base, order)
+	listArgs := append(append([]any{}, args...), pageSize, (page-1)*pageSize)
+	if err := db.WithContext(ctx).Raw(list, listArgs...).Scan(dst).Error; err != nil {
+		return 0, fmt.Errorf("reports: 聚合查询失败: %w", err)
+	}
+	if page == 1 {
+		if rv := reflect.ValueOf(dst).Elem(); rv.Kind() == reflect.Slice && rv.Len() < pageSize {
+			return int64(rv.Len()), nil
+		}
+	}
 	var total int64
 	if err := db.WithContext(ctx).Raw(
 		fmt.Sprintf("SELECT COUNT(*) FROM (%s) agg", base), args...).Scan(&total).Error; err != nil {
 		return 0, fmt.Errorf("reports: 聚合计数失败: %w", err)
-	}
-	list := fmt.Sprintf("%s ORDER BY %s LIMIT ? OFFSET ?", base, order)
-	args = append(args, pageSize, (page-1)*pageSize)
-	if err := db.WithContext(ctx).Raw(list, args...).Scan(dst).Error; err != nil {
-		return 0, fmt.Errorf("reports: 聚合查询失败: %w", err)
 	}
 	return total, nil
 }

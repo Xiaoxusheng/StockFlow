@@ -31,11 +31,15 @@ const (
 // 部件，恶意工作簿可在 ≤storage.upload_max_bytes 的上传内把内存放大数十倍；行数上限
 // 守卫在迭代开始后才生效，单个超大部件可先于守卫耗尽内存）。上限为常量不新增冻结配置键
 // （plan §3.2 清单外加键禁止）：ImportMaxRows 缺省 5000 行量级的合法工作簿解压通常
-// 数 MB 内，512MB 总量/256MB 单部件留百倍余量，攻击比率（千倍级）必然命中。
+// 数 MB 内，64MB 总量/32MB 单部件留 6~10 倍余量，攻击比率（千倍级）必然命中。
+// f15 收紧：预算必须对"HTTP 请求 goroutine 内同步二次全量加载"的内存峰值负责
+// ——512MB 解压量经 excelize 转为 Go 字符串结构后单请求峰值可达 GB 级，收紧到
+// 64MB 后单请求解析内存峰值被限制在数百 MB 内（高压缩比 xlsx 的放大攻击在
+// 预检即被拒绝，合法导入不受影响）。
 const (
-	maxImportZipEntries        = 10_000    // 工作簿部件数上限（合法 xlsx 部件数十个量级）
-	maxImportEntryUncompressed = 256 << 20 // 单部件解压上限 256MB
-	maxImportTotalUncompressed = 512 << 20 // 全簿累计解压上限 512MB
+	maxImportZipEntries        = 10_000   // 工作簿部件数上限（合法 xlsx 部件数十个量级）
+	maxImportEntryUncompressed = 32 << 20 // 单部件解压上限 32MB
+	maxImportTotalUncompressed = 64 << 20 // 全簿累计解压上限 64MB
 )
 
 // guardImportZipBudget 在 excelize.OpenReader 之前预检解压预算（excel §1.2 解析闸前置）：

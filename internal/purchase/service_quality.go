@@ -182,6 +182,10 @@ func (s *Service) StartQC(ctx context.Context, actor Actor, id int64) (*QualityO
 	if qc == nil {
 		return nil, response.NewError(ErrQCNotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓质检单按不存在处理（与 GetQC 详情同口径）。
+	if !actor.canAccessWarehouse(qc.WarehouseID) {
+		return nil, response.NewError(ErrQCNotFound, nil)
+	}
 	if !canTransition(qcTransitions, qc.Status, QCStatusInspecting) {
 		return nil, response.NewError(ErrQCStatusNotAllowed, map[string]any{
 			"status": qc.Status, "to": QCStatusInspecting,
@@ -222,6 +226,10 @@ func (s *Service) ExecuteQC(ctx context.Context, actor Actor, id int64, in QCExe
 		return nil, err
 	}
 	if qc == nil {
+		return nil, response.NewError(ErrQCNotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓质检单按不存在处理（与 GetQC 详情同口径）。
+	if !actor.canAccessWarehouse(qc.WarehouseID) {
 		return nil, response.NewError(ErrQCNotFound, nil)
 	}
 	if qc.Status != QCStatusInspecting {
@@ -420,7 +428,7 @@ func (s *Service) ExecuteQC(ctx context.Context, actor Actor, id int64, in QCExe
 // 每行 qty_inspected（质检处理量，含免检直通）≥ qty_received 时推进 AWAITING_QC→AWAITING_PUTAWAY，
 // 并即时检查全部任务已完成 → COMPLETED（免检直通先完成的场景，瞬时中间态留审计轨迹）。
 func (s *Service) progressInboundAfterQC(ctx context.Context, tx *gorm.DB, actor Actor, inbound *InboundOrder) error {
-	items, err := s.repo.ListInboundItems(ctx, inbound.ID.Int64())
+	items, err := s.repo.ListInboundItemsTx(ctx, tx, inbound.ID.Int64())
 	if err != nil {
 		return err
 	}

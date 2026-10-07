@@ -57,6 +57,12 @@ type Rule struct {
 	SeqWidth int
 	// Reset 流水重置周期（ResetDay/ResetAll）。
 	Reset Reset
+	// Preallocate 号段预取标记（仅恒定落单行计数的规则可用，当前仅 LED）：Next 经
+	// 进程内号段缓存发放，缓存耗尽时以独立短事务对计数行一次原子预取 preallocBatch
+	// 个号——消除"计数行锁持有至调用方事务提交"的全系统库存写事务提交尾串行化。
+	// 代价：流水允许跳号（事务回滚/进程重启丢缓存号段，inventory-rules §5 已确认）；
+	// 号码唯一性不变（号段由 DB 原子 UPDATE 划分，多实例互不重叠）。见 prefetch.go。
+	Preallocate bool
 }
 
 // validate 校验规则值域（规则为代码内冻结注册表值，触发即编程错误）。
@@ -107,26 +113,26 @@ func format(rule Rule, t time.Time, seq int64) string {
 // IMP/EXP/PT 为 M3 补录（backend-m3-plan §12.3：导入/导出/打印任务，均 ResetDay 6 位流水；
 // 有意避开 PRT——api §7 已冻结 prt: 为采购退货预占幂等键动作前缀，日志/审计中会混淆）。
 var frozenRules = map[string]Rule{
-	"PO":  {Prefix: "PO", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 采购单
-	"IN":  {Prefix: "IN", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 入库单
-	"RC":  {Prefix: "RC", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 收货单
-	"QC":  {Prefix: "QC", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 质检单
-	"PW":  {Prefix: "PW", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 上架任务
-	"SO":  {Prefix: "SO", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 销售订单
-	"OUT": {Prefix: "OUT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay}, // 出库单
-	"PK":  {Prefix: "PK", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 拣货任务
-	"CH":  {Prefix: "CH", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 复核任务
-	"BP":  {Prefix: "BP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 包裹
-	"SH":  {Prefix: "SH", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 发货单
-	"TR":  {Prefix: "TR", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 调拨单
-	"CK":  {Prefix: "CK", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 盘点单
-	"RT":  {Prefix: "RT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 退货单
-	"EX":  {Prefix: "EX", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 异常单
-	"IMP": {Prefix: "IMP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay}, // 导入任务（M3，backend-m3-plan §12.3）
-	"EXP": {Prefix: "EXP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay}, // 导出任务（M3，backend-m3-plan §12.3）
-	"PT":  {Prefix: "PT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},  // 打印任务（M3，backend-m3-plan §12.3）
-	"LED": {Prefix: "LED", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetAll}, // 库存流水（M1 承接）
-	"ADJ": {Prefix: "ADJ", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetAll}, // 库存调整单（M1 承接）
+	"PO":  {Prefix: "PO", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 采购单
+	"IN":  {Prefix: "IN", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 入库单
+	"RC":  {Prefix: "RC", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 收货单
+	"QC":  {Prefix: "QC", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 质检单
+	"PW":  {Prefix: "PW", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 上架任务
+	"SO":  {Prefix: "SO", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 销售订单
+	"OUT": {Prefix: "OUT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                    // 出库单
+	"PK":  {Prefix: "PK", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 拣货任务
+	"CH":  {Prefix: "CH", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 复核任务
+	"BP":  {Prefix: "BP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 包裹
+	"SH":  {Prefix: "SH", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 发货单
+	"TR":  {Prefix: "TR", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 调拨单
+	"CK":  {Prefix: "CK", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 盘点单
+	"RT":  {Prefix: "RT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 退货单
+	"EX":  {Prefix: "EX", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 异常单
+	"IMP": {Prefix: "IMP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                    // 导入任务（M3，backend-m3-plan §12.3）
+	"EXP": {Prefix: "EXP", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                    // 导出任务（M3，backend-m3-plan §12.3）
+	"PT":  {Prefix: "PT", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetDay},                     // 打印任务（M3，backend-m3-plan §12.3）
+	"LED": {Prefix: "LED", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetAll, Preallocate: true}, // 库存流水（M1 承接；号段预取——prefetch.go）
+	"ADJ": {Prefix: "ADJ", DateSeg: true, SeqWidth: DefaultSeqWidth, Reset: ResetAll},                    // 库存调整单（M1 承接）
 }
 
 // RuleFor 返回冻结注册表中的编号规则（各域统一经此处取规则，禁止散落字面量拼规则）。
@@ -140,6 +146,11 @@ func RuleFor(prefix string) (Rule, bool) {
 // tx 必须非 nil：流水发放必须与单据创建同事务（§4.1），事务回滚则号码作废出现空洞。
 // 同事务重复调用返回递增新号——调用方 INSERT 撞历史遗留单号唯一约束时可再取号重试
 // （或直接使用 NextWithRetry）。
+//
+// 发放路径按规则分派：
+//   - Preallocate 规则（当前仅 LED）→ nextPreallocated：进程内号段缓存直取，
+//     计数行锁只在其补号段短事务内持毫秒级（prefetch.go，inventory-rules §5 允许跳号）；
+//   - 其余规则 → nextInTx：同事务两语句逐号发放，计数行锁持有至调用方事务提交，语义不变。
 func Next(ctx context.Context, tx *gorm.DB, rule Rule) (string, error) {
 	if err := rule.validate(); err != nil {
 		return "", err
@@ -147,13 +158,21 @@ func Next(ctx context.Context, tx *gorm.DB, rule Rule) (string, error) {
 	if tx == nil {
 		return "", response.NewError(ErrTxRequired, nil)
 	}
+	if rule.Preallocate {
+		return nextPreallocated(ctx, tx, rule)
+	}
+	return nextInTx(ctx, tx, rule)
+}
+
+// nextInTx 同事务两语句发放（plan §4.1 原机制，非预取规则与预取回退路径共用）：
+// 先补行（并发首建竞态由 ON CONFLICT 收敛到既有行），再原子自增 RETURNING——
+// 行锁串行化保证并发下号码唯一递增，锁持有至调用方事务提交。
+func nextInTx(ctx context.Context, tx *gorm.DB, rule Rule) (string, error) {
 	if ctx != nil {
 		tx = tx.WithContext(ctx)
 	}
 	now := time.Now()
 	period := periodFor(rule, now)
-	// 冻结两语句发放（plan §4.1）：先补行（并发首建竞态由 ON CONFLICT 收敛到既有行），
-	// 再原子自增 RETURNING（同事务内 INSERT 后 UPDATE 必命中；行锁串行化保证并发下号码唯一递增）。
 	if err := tx.Exec(`
 		INSERT INTO doc_number_counters (prefix, period, next_no, created_at, updated_at, created_by, updated_by)
 		VALUES (?, ?, 0, now(), now(), 0, 0)
@@ -184,15 +203,36 @@ const RetryLimit = 3
 // 如历史遗留同格式单号撞 uk_*_no）时自动取下一个号重试，直至成功或重试耗尽
 // （返回 DOCNUM_NUMBER_CONFLICT）。insert 回调收到同一 tx（与取号同事务），
 // 任一次非冲突错误立即原样返回，事务由调用方统一回滚。
+//
+// SAVEPOINT 隔离（渗透修复）：真实事务内 23505 会把 PG 事务置为 aborted（25P02），
+// 同事务内直接重试 insert 必失败——原重试循环实际不可达。冲突时回滚到本次 insert
+// 前的 SAVEPOINT 再重试（取号先于 SAVEPOINT，计数器自增不回滚，重试换新号）。
+// SAVEPOINT 名按尝试序号区分，避免与外层嵌套 SAVEPOINT 同名冲突；非事务连接
+// （autocommit，合约外兜底形态）单语句失败无 aborted 语义，无需 SAVEPOINT。
 func NextWithRetry(ctx context.Context, tx *gorm.DB, rule Rule, insert func(tx *gorm.DB, no string) error) (string, error) {
 	if insert == nil {
 		return "", fmt.Errorf("docnum: insert 回调不能为空（编程错误）")
 	}
+	// SAVEPOINT 能力按方言检测：SavePoint/RollbackTo 仅由实现
+	// gorm.SavePointerDialectorInterface 的方言支持（postgres 真库支持）；测试假方言
+	// 未实现该接口，调用会得到 ErrUnsupportedDriver 污染取号错误——检测不通过时跳过
+	// SAVEPOINT 退回直接重试的旧语义（假方言不模拟 aborted 事务态，重试语义等价）。
+	useSavepoint := false
+	if tx != nil {
+		_, useSavepoint = tx.Dialector.(gorm.SavePointerDialectorInterface)
+	}
 	var lastErr error
-	for range RetryLimit {
+	for i := range RetryLimit {
 		no, err := Next(ctx, tx, rule)
 		if err != nil {
 			return "", err
+		}
+		sp := ""
+		if useSavepoint {
+			sp = fmt.Sprintf("sf_docnum_retry_%d", i)
+			if err := tx.SavePoint(sp).Error; err != nil {
+				return "", err
+			}
 		}
 		if err = insert(tx, no); err == nil {
 			return no, nil
@@ -200,6 +240,11 @@ func NextWithRetry(ctx context.Context, tx *gorm.DB, rule Rule, insert func(tx *
 		lastErr = err
 		if !isUniqueViolation(err) {
 			return "", err
+		}
+		if sp != "" {
+			if rbErr := tx.RollbackTo(sp).Error; rbErr != nil {
+				return "", rbErr
+			}
 		}
 	}
 	return "", response.NewError(ErrNumberConflict, map[string]any{

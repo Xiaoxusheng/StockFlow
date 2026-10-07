@@ -99,7 +99,7 @@ func (s *Service) UploadFile(ctx context.Context, actor Actor, in FileUploadInpu
 	}
 
 	file := &storage.File{
-		FileName:     in.File.Filename,
+		FileName:     truncateFileName(in.File.Filename),
 		StoredName:   stored.StoredName,
 		StoragePath:  stored.StoragePath,
 		MimeType:     stored.MimeType,

@@ -60,13 +60,22 @@ func (r *CountContentReader) Assemble(ctx context.Context, ids []string, fields 
 	}
 
 	var heads []countHeadRow
+	// 数据权限（f20）：请求 context 携带仓库范围快照时越仓盘点单按缺失处理。
+	args := []any{parsed}
+	whFilter := ""
+	if sc, restricted := printing.RestrictedScope(ctx); restricted {
+		if printing.EmptyScopeIDs(sc) {
+			return nil, printing.FailMissing(ids)
+		}
+		whFilter, args = printing.InScope(ctx, "o.warehouse_id", args)
+	}
 	err := r.db.WithContext(ctx).Raw(`
 		SELECT o.id AS count_id, o.count_no,
 		       COALESCE(w.name, '') AS warehouse_name,
 		       COALESCE(to_char(o.completed_at, 'YYYY-MM-DD HH24:MI:SS'), '') AS count_at
 		FROM count_orders o
 		LEFT JOIN warehouses w ON w.id = o.warehouse_id
-		WHERE o.id IN ?`, parsed).Scan(&heads).Error
+		WHERE o.id IN ?`+whFilter, args...).Scan(&heads).Error
 	if err != nil {
 		return nil, err
 	}

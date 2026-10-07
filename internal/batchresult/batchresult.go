@@ -99,19 +99,17 @@ func SummaryOf(items []Item) Result {
 //    零变化；skipped 携 DUPLICATE_DATA_ID reason 经 Item 直构——Builder.Skipped
 //    语义冻结 reason 恒空，不可用于该形态）。
 //
-// 以下两处仍持有同形状私有类型（ID 为 JSON 数字——api.md §2 冻结口径为业务 ID
-// 字符串形态，收敛即改契约，须先改 api.md 再同步前端消费点，见步骤 3）：
+// 以下两处仍持有同形状私有类型（sales/purchase），**ID 形态已于 2026-10-07 与本包
+// 对齐为 JSON 字符串**（api.md §2 冻结口径；BatchResultItem.ID int64 → string，
+// 构造处 strconv.FormatInt；api.md §9 批量结果收敛披露同步更新）——剩余差异仅是
+// 私有类型未合并至本包（shape 已一致），合并属可选清理，不再有契约分歧：
 //
-//  1. internal/sales/service_batch.go   BatchResult/BatchResultItem（ID int64，
+//  1. internal/sales/service_batch.go   BatchResult/BatchResultItem（ID string，
 //     batchStatus* 私有常量 + normalizeBatchResult 私有收敛）——该域两条
 //     batch-claim 使用中；
 //  2. internal/purchase/service_batch.go 同构私有定义——putaway batch-claim 使用中。
 //
-// 收敛步骤（由拥有对应文件的实现者/集成执行，一次一个域、conventional commit）：
+// 私有类型合并步骤（可选清理，由拥有对应文件的实现者/集成执行，一次一个域）：
 //  1. 域包 import 本包；handler 返回类型改 batchresult.Result；
 //  2. 逐条构造改 Builder（Failed 的 reason 沿用既有错误码字符串，行为不变）；
-//  3. ID 形态差异披露：sales/purchase 现为 JSON 数字、本包为字符串——api.md §2
-//     冻结口径为业务 ID 字符串形态；收敛 sales/purchase 时需同步前端消费点
-//     （web/src/api/task.ts 等，重试流以 results[].id 回填请求 ids，数字→字符串
-//     形态变化会使 gin 整数绑定 400）并按 docs 先行规则先改 api.md；
-//  4. 域包私有类型删除前 grep 引用清零（go-dev-standard 规则 2）。
+//  3. 域包私有类型删除前 grep 引用清零（go-dev-standard 规则 2）。

@@ -163,6 +163,10 @@ func (s *Service) ShipPurchaseReturn(ctx context.Context, actor Actor, id int64,
 		if o == nil {
 			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
+		}
 		if o.Type != ReturnTypePurchase {
 			return response.NewError(ErrSourceMismatch, map[string]any{
 				"return_id": id, "reason": "采购退货出库接口不适用于销售退货单",
@@ -371,6 +375,10 @@ func (s *Service) CompletePurchaseReturn(ctx context.Context, actor Actor, id in
 		o, items, err := s.loadOrderWithItems(tx, id)
 		if err != nil {
 			return err
+		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
 		if o.Type != ReturnTypePurchase {
 			return response.NewError(ErrSourceMismatch, map[string]any{"return_id": id, "reason": "仅采购退货有出库完成态"})

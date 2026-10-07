@@ -72,6 +72,10 @@ func (s *Service) ConfirmReceipt(ctx context.Context, actor Actor, in ReceiptInp
 	if inbound == nil {
 		return nil, response.NewError(ErrInboundNotFound, map[string]any{"inbound_no": in.InboundNo})
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetInbound 详情同口径）。
+	if !actor.canAccessWarehouse(inbound.WarehouseID) {
+		return nil, response.NewError(ErrInboundNotFound, map[string]any{"inbound_no": in.InboundNo})
+	}
 	if inbound.Status != InboundStatusDraft && inbound.Status != InboundStatusReceiving {
 		return nil, response.NewError(ErrInboundStatusNotAllowed, map[string]any{
 			"status": inbound.Status, "reason": "入库单当前状态不允许收货",
@@ -546,7 +550,7 @@ func (s *Service) progressAfterReceipt(ctx context.Context, tx *gorm.DB, actor A
 		}
 		inbound.Status = InboundStatusReceiving
 	}
-	items, err := s.repo.ListInboundItems(ctx, inbound.ID.Int64())
+	items, err := s.repo.ListInboundItemsTx(ctx, tx, inbound.ID.Int64())
 	if err != nil {
 		return err
 	}
@@ -580,7 +584,7 @@ func (s *Service) progressAfterReceipt(ctx context.Context, tx *gorm.DB, actor A
 // progressPOAfterReceipt 采购订单状态推进（plan §6.1）：
 // APPROVED→PARTIAL_RECEIVED（首收）→RECEIVED_ALL（全部明细收齐）。
 func (s *Service) progressPOAfterReceipt(ctx context.Context, tx *gorm.DB, actor Actor, po *PurchaseOrder) error {
-	items, err := s.repo.ListPOItems(ctx, po.ID.Int64())
+	items, err := s.repo.ListPOItemsTx(ctx, tx, po.ID.Int64())
 	if err != nil {
 		return err
 	}

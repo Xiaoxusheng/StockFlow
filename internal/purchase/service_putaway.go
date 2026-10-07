@@ -176,6 +176,10 @@ func (s *Service) ClaimPutawayTask(ctx context.Context, actor Actor, id int64) (
 	if t == nil {
 		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与 GetTask 详情同口径）。
+	if !actor.canAccessWarehouse(t.TargetWarehouseID) {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
 	if t.Status != TaskStatusPending {
 		return nil, response.NewError(ErrPutawayClaimConflict, map[string]any{
 			"status": t.Status, "claimed_by": t.ClaimedBy,
@@ -210,6 +214,10 @@ func (s *Service) ExecutePutawayTask(ctx context.Context, actor Actor, id int64,
 		return nil, err
 	}
 	if t == nil {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与 GetTask 详情同口径）。
+	if !actor.canAccessWarehouse(t.TargetWarehouseID) {
 		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
 	}
 	if t.Status != TaskStatusInProgress {
@@ -346,7 +354,7 @@ func (s *Service) ExecutePutawayTask(ctx context.Context, actor Actor, id int64,
 // AWAITING_PUTAWAY→COMPLETED 由"全部上架任务完成"触发；PAUSED 属未完成活动态，
 // 一并阻断推进——迁移 000017）。
 func (s *Service) progressInboundAfterTask(ctx context.Context, tx *gorm.DB, actor Actor, inbound *InboundOrder) error {
-	counts, err := s.repo.CountTasksByInbound(ctx, inbound.InboundNo)
+	counts, err := s.repo.CountTasksByInboundTx(ctx, tx, inbound.InboundNo)
 	if err != nil {
 		return err
 	}
@@ -378,6 +386,10 @@ func (s *Service) PausePutawayTask(ctx context.Context, actor Actor, id int64) (
 		return nil, err
 	}
 	if t == nil {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与 GetTask 详情同口径）。
+	if !actor.canAccessWarehouse(t.TargetWarehouseID) {
 		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
 	}
 	if t.Status != TaskStatusInProgress {
@@ -416,6 +428,10 @@ func (s *Service) ResumePutawayTask(ctx context.Context, actor Actor, id int64) 
 		return nil, err
 	}
 	if t == nil {
+		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与 GetTask 详情同口径）。
+	if !actor.canAccessWarehouse(t.TargetWarehouseID) {
 		return nil, response.NewError(ErrPutawayTaskNotFound, nil)
 	}
 	if t.Status != TaskStatusPaused {

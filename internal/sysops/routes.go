@@ -141,18 +141,23 @@ func parseID(c *gin.Context, key string) (int64, bool) {
 	return v, true
 }
 
-// parseSuccessQuery success 三态筛选（缺省 nil；非法值 400）。
-func parseSuccessQuery(c *gin.Context) (*bool, bool) {
-	raw := c.Query("success")
+// parseBoolQuery 布尔三态筛选（缺省 nil；非法值 400）。field 为 query 键名（错误提示回显）。
+func parseBoolQuery(c *gin.Context, field string) (*bool, bool) {
+	raw := c.Query(field)
 	if raw == "" {
 		return nil, true
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{"field": "success", "reason": "必须为 true/false"}))
+		response.Err(c, response.NewError(response.CodeInvalidParam, gin.H{"field": field, "reason": "必须为 true/false"}))
 		return nil, false
 	}
 	return &v, true
+}
+
+// parseSuccessQuery success 三态筛选（缺省 nil；非法值 400）。
+func parseSuccessQuery(c *gin.Context) (*bool, bool) {
+	return parseBoolQuery(c, "success")
 }
 
 // parseTimeQuery 可选时间参数（YYYY-MM-DD [HH:mm:ss]）。
@@ -340,7 +345,9 @@ func (h *handler) listJobs(c *gin.Context) {
 		response.Err(c, err)
 		return
 	}
-	enabled, ok := parseSuccessQuery(c)
+	// enabled 三态筛选（前端 SystemJobQuery 发 enabled=true/false）——原经 parseSuccessQuery
+	// 读 "success" 键致筛选被静默忽略，修复为按本端点契约键名取参。
+	enabled, ok := parseBoolQuery(c, "enabled")
 	if !ok {
 		return
 	}

@@ -43,6 +43,13 @@ type CountInput struct {
 	Remark      string     `json:"remark"`
 }
 
+// maxCountScopeRows 单次开始盘点的范围行数上限（f6）：StartCount 在单事务内对范围
+// 逐行 Lock 原语（每次 ≈7 条 SQL）+ 互斥回查 + 快照落库，且事务期间持有全部范围行
+// FOR UPDATE 锁——无上限的全仓盘点会让核心库存写路径随范围行数线性劣化到不可用。
+// 5000 行（≈4 万条 SQL、分钟级事务）为上限；更大范围请按库区/货架拆分盘点
+// （CountScope 支持 zone/shelf 维度），超限直接 400 拒绝、不进入冻结。
+const maxCountScopeRows = 5000
+
 // CountDetail 盘点单详情。
 type CountDetail struct {
 	Order       CountOrder        `json:"order"`
@@ -102,6 +109,10 @@ func (s *Service) StartCount(ctx context.Context, actor stock.Actor, id int64) (
 		if o == nil {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
 		if o.Status == CountCounting {
 			replay = true
 			items, ierr := t.ListCountItems(ctx, id)
@@ -124,7 +135,17 @@ func (s *Service) StartCount(ctx context.Context, actor stock.Actor, id int64) (
 		if len(rows) == 0 {
 			return response.NewError(ErrScopeEmpty, map[string]any{"count_no": o.CountNo})
 		}
+		// 范围行数上限（f6）：超限在加锁前快速失败——单事务逐行冻结的 SQL 往返与
+		// 锁持有时长随行数线性增长，不设上限即构成可用性风险（按库区/货架拆分）。
+		if len(rows) > maxCountScopeRows {
+			return response.NewError(response.CodeInvalidParam, map[string]any{
+				"count_no": o.CountNo, "scope_rows": len(rows), "max": maxCountScopeRows,
+				"reason": "盘点范围行数超出上限，请按库区/货架缩小盘点范围",
+			})
+		}
 		items := make([]CountItem, 0, len(rows))
+		// SKU 开关按 SKU 记忆化（f6：范围行数 ≫ SKU 数时消除重复点查）。
+		flagMemo := map[int64]SKUFlags{}
 		for _, row := range rows {
 			// 冻结该行可用部分（available→frozen）。available=0 的行无可用可冻
 			// （行仍入盘点范围——空行盘盈照样可登记）。锁定失败（如并发出库后
@@ -163,9 +184,13 @@ func (s *Service) StartCount(ctx context.Context, actor stock.Actor, id int64) (
 				CreatedBy: actor.ID, UpdatedBy: actor.ID,
 			})
 			// 序列号管理 SKU：逐件建档明细（inventory-rules §8.2；fail-closed）。
-			flags, err := s.skuFlags(ctx, row.SKUID)
-			if err != nil {
-				return err
+			flags, memo := flagMemo[row.SKUID]
+			if !memo {
+				flags, err = s.skuFlags(ctx, row.SKUID)
+				if err != nil {
+					return err
+				}
+				flagMemo[row.SKUID] = flags
 			}
 			if flags.SerialManaged {
 				serials, err := t.FindSerialsForRow(ctx, row)
@@ -192,9 +217,14 @@ func (s *Service) StartCount(ctx context.Context, actor stock.Actor, id int64) (
 				}
 			}
 		}
-		if _, err := t.UpdateCountStatus(ctx, id, CountDraft, CountCounting,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突，禁止重复冻结。
+		if n, err := t.UpdateCountStatus(ctx, id, CountDraft, CountCounting,
 			CountStamps{Frozen: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "盘点单状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		if err := t.ReplaceCountItems(ctx, id, items); err != nil {
 			return err
@@ -226,6 +256,10 @@ func (s *Service) RegisterCountings(ctx context.Context, actor stock.Actor, id i
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
 		if o.Status != CountCounting {
@@ -316,6 +350,10 @@ func (s *Service) FinishCount(ctx context.Context, actor stock.Actor, id int64) 
 		if o == nil {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
 		items, err := t.ListCountItems(ctx, id)
 		if err != nil {
 			return err
@@ -369,9 +407,14 @@ func (s *Service) FinishCount(ctx context.Context, actor stock.Actor, id int64) 
 				Status: DiffPending, CreatedBy: actor.ID, UpdatedBy: actor.ID,
 			})
 		}
-		if _, err := t.UpdateCountStatus(ctx, id, CountCounting, CountReview,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突。
+		if n, err := t.UpdateCountStatus(ctx, id, CountCounting, CountReview,
 			CountStamps{}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "盘点单状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		if err := t.ReplaceCountDifferences(ctx, id, diffs); err != nil {
 			return err
@@ -405,6 +448,10 @@ func (s *Service) CompleteCount(ctx context.Context, actor stock.Actor, id int64
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
 		if o.Status == CountCompleted {
@@ -515,9 +562,15 @@ func (s *Service) CompleteCount(ctx context.Context, actor stock.Actor, id int64
 		if err := t.SettleCountDifferences(ctx, id, DiffExecuted, adjustNos); err != nil {
 			return err
 		}
-		if _, err := t.UpdateCountStatus(ctx, id, CountReview, CountCompleted,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9，如双人同时完成盘点）——显式冲突，
+		// 禁止重复解冻/重复盘盈调整。
+		if n, err := t.UpdateCountStatus(ctx, id, CountReview, CountCompleted,
 			CountStamps{Reviewed: true, Completed: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "盘点单状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		o.Status = CountCompleted
 		if err := t.InsertApproval(ctx, ApprovalRecord{
@@ -554,6 +607,10 @@ func (s *Service) RejectCount(ctx context.Context, actor stock.Actor, id int64, 
 		if o == nil {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
 		if o.Status == CountCancelled {
 			replay = true
 			return loadCountDetail(ctx, t, id, detail)
@@ -573,9 +630,14 @@ func (s *Service) RejectCount(ctx context.Context, actor stock.Actor, id int64, 
 		if err := t.SettleCountDifferences(ctx, id, DiffRejected, nil); err != nil {
 			return err
 		}
-		if _, err := t.UpdateCountStatus(ctx, id, CountReview, CountCancelled,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9）——显式冲突。
+		if n, err := t.UpdateCountStatus(ctx, id, CountReview, CountCancelled,
 			CountStamps{Reviewed: true, Cancelled: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "盘点单状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		o.Status = CountCancelled
 		if err := t.InsertApproval(ctx, ApprovalRecord{
@@ -612,6 +674,10 @@ func (s *Service) CancelCount(ctx context.Context, actor stock.Actor, id int64, 
 		if o == nil {
 			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
 		}
+		// 数据权限 fail-closed（f16）：越仓盘点单按不存在处理（与 GetCountDetail 同口径）。
+		if !actor.CanAccess(o.WarehouseID) {
+			return response.NewError(ErrCountNotFound, map[string]any{"id": id})
+		}
 		if o.Status == CountCancelled {
 			replay = true
 			return loadCountDetail(ctx, t, id, detail)
@@ -632,9 +698,15 @@ func (s *Service) CancelCount(ctx context.Context, actor stock.Actor, id int64, 
 				"reason": "仅草稿/盘点中状态可取消（待审核差异走驳回）", "current_status": o.Status,
 			})
 		}
-		if _, err := t.UpdateCountStatus(ctx, id, fromStatus, CountCancelled,
+		// 影响行数为 0 = 并发下状态已被他方迁移（f9，如双人同时完成/取消）——显式冲突，
+		// 禁止重复解冻/重复盘盈。
+		if n, err := t.UpdateCountStatus(ctx, id, fromStatus, CountCancelled,
 			CountStamps{Cancelled: true}, actor.ID); err != nil {
 			return err
+		} else if n == 0 {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"reason": "盘点单状态已变化，请刷新重试", "current_status": o.Status,
+			})
 		}
 		o.Status = CountCancelled
 		if err := t.InsertApproval(ctx, ApprovalRecord{

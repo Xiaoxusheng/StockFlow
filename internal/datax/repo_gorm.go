@@ -3,6 +3,7 @@ package datax
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -10,6 +11,12 @@ import (
 	"github.com/stockflow/server/internal/docnum"
 	"github.com/stockflow/server/internal/storage"
 )
+
+// escapeLike ILIKE 通配符转义（%/_/\ 字面化，防结果集污染；PG 默认转义符为反斜杠。
+// 与 internal/search、internal/masterdata 同一口径）。
+func escapeLike(q string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+}
 
 // GORM 数据访问实现（迁移 000011 列结构；写 SQL 仅命中白名单四表——plan §2.3 判据 3，
 // guard-datax 守卫核查）。守卫更新统一形态：WHERE id=? AND status IN from，影响行数由
@@ -257,7 +264,7 @@ func (r *gormRepository) ListFiles(ctx context.Context, f FileListFilter) ([]*st
 		q = q.Where("business_no = ?", f.BusinessNo)
 	}
 	if f.Keyword != "" {
-		q = q.Where("file_name ILIKE ?", "%"+f.Keyword+"%")
+		q = q.Where("file_name ILIKE ?", "%"+escapeLike(f.Keyword)+"%")
 	}
 	// 数据权限（plan §6.4"数据权限沿用仓库范围，file 列表 Service 层过滤"）：SQL 侧过滤
 	// 保证分页 total 与行面一致；规则与 service_file.go fileVisible 同一冻结口径——

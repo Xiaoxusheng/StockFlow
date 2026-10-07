@@ -232,6 +232,30 @@ func truncateMessage(s string, max int) string {
 	return string(b) + "…"
 }
 
+// maxFileNameLen files.file_name 列宽（迁移 000011 varchar(255)）。multipart 文件名
+// 采集点不可控，在写入入口统一截断——超列宽会使登记 INSERT 失败并连带业务事务回滚
+// （middleware/audit.go S7 同款口径：按字节限长，多字节内容截断后字符数只会更少，
+// 对 varchar(n) 恒安全）。
+const maxFileNameLen = 255
+
+// truncateFileName 文件名按字节截断到列宽（UTF-8 rune 边界安全，不加省略号——
+// 仅用于入库字段；响应/错误元数据仍回传原始文件名）。
+func truncateFileName(s string) string {
+	if len(s) <= maxFileNameLen {
+		return s
+	}
+	b := []byte(s[:maxFileNameLen])
+	for len(b) > 0 && !utf8.RuneStart(b[len(b)-1]) {
+		b = b[:len(b)-1]
+	}
+	if len(b) > 0 {
+		if r, size := utf8.DecodeLastRune(b); r == utf8.RuneError && size == 1 {
+			b = b[:len(b)-1] // 切点落在多字节字符起始字节上——去掉该不完整字节
+		}
+	}
+	return string(b)
+}
+
 // expiry 文件保留期推导（datax.file_retention_days，excel §3/§5；NULL=不过期）。
 func (s *Service) expiry() *time.Time {
 	t := time.Now().AddDate(0, 0, s.cfg.FileRetentionDays)

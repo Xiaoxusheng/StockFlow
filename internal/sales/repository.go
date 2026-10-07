@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"gorm.io/gorm"
 
+	"github.com/stockflow/server/internal/database"
 	"github.com/stockflow/server/internal/response"
 )
 
@@ -268,21 +270,40 @@ func (r *gormRepository) InsertSalesOrder(tx *gorm.DB, o *SalesOrder, items []Sa
 }
 
 func insertSOItems(tx *gorm.DB, soID, by int64, items []SalesOrderItem) error {
+	// 明细批量写入（stockops f6 同款：原逐行 INSERT RETURNING，一次往返改多行 VALUES；
+	// PG 按插入序返回 id 逐行回填，it.SoID 语义不变）。
+	if len(items) == 0 {
+		return nil
+	}
+	var (
+		sb   strings.Builder
+		args = make([]any, 0, len(items)*10)
+	)
+	sb.WriteString(`
+		INSERT INTO sales_order_items
+			(so_id, line_no, sku_id, qty, price, amount, qty_allocated, qty_shipped,
+			 remark, created_at, updated_at, created_by, updated_by)
+		VALUES `)
 	for i := range items {
 		it := &items[i]
-		err := tx.Raw(`
-			INSERT INTO sales_order_items
-				(so_id, line_no, sku_id, qty, price, amount, qty_allocated, qty_shipped,
-				 remark, created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, now(), now(), ?, ?)
-			RETURNING id`,
-			soID, it.LineNo, it.SKUID, it.Qty.String(), it.Price.String(), it.Amount.String(),
-			it.QtyAllocated.String(), it.Remark, by, by,
-		).Scan(it).Error
-		if err != nil {
-			return err
-		}
 		it.SoID = soID
+		if i > 0 {
+			sb.WriteByte(',')
+		}
+		sb.WriteString("(?, ?, ?, ?, ?, ?, ?, 0, ?, now(), now(), ?, ?)")
+		args = append(args, soID, it.LineNo, it.SKUID, it.Qty.String(), it.Price.String(), it.Amount.String(),
+			it.QtyAllocated.String(), it.Remark, by, by)
+	}
+	sb.WriteString(` RETURNING id`)
+	var ids []int64
+	if err := tx.Raw(sb.String(), args...).Scan(&ids).Error; err != nil {
+		return err
+	}
+	if len(ids) != len(items) {
+		return fmt.Errorf("sales: 销售订单明细批量写入回执数不符: %d/%d", len(ids), len(items))
+	}
+	for i := range items {
+		items[i].ID = database.ID(ids[i])
 	}
 	return nil
 }

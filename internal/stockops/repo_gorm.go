@@ -3,6 +3,7 @@ package stockops
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"gorm.io/gorm"
 
@@ -68,26 +69,43 @@ func (t *gormTx) InsertTransfer(ctx context.Context, o *TransferOrder, items []T
 		return err
 	}
 	o.ID = database.ID(id)
-	for i := range items {
-		it := &items[i]
-		it.TransferID = id
-		var itemID int64
-		if err := tx.Raw(`
+	// 明细批量写入（f6 同款：原逐行 INSERT RETURNING，一次往返改多行 VALUES）：
+	// PG 对简单 INSERT 按行序返回 RETURNING id，逐行回填 it.ID 语义不变。
+	if len(items) > 0 {
+		var (
+			sb   strings.Builder
+			args = make([]any, 0, len(items)*17)
+		)
+		sb.WriteString(`
 			INSERT INTO transfer_items
 				(transfer_id, line_no, sku_id, batch_id,
 				 from_warehouse_id, from_zone_id, from_shelf_id, from_bin_id,
 				 to_warehouse_id, to_zone_id, to_shelf_id, to_bin_id,
 				 qty, qty_out, qty_in, remark, created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, now(), now(), ?, ?)
-			RETURNING id`,
-			it.TransferID, it.LineNo, it.SKUID, it.BatchID,
-			it.FromWarehouseID, it.FromZoneID, it.FromShelfID, it.FromBinID,
-			it.ToWarehouseID, it.ToZoneID, it.ToShelfID, it.ToBinID,
-			it.Qty.String(), it.QtyOut.String(), it.Remark, it.CreatedBy, it.UpdatedBy,
-		).Scan(&itemID).Error; err != nil {
+			VALUES `)
+		for i := range items {
+			it := &items[i]
+			it.TransferID = id
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, now(), now(), ?, ?)")
+			args = append(args, it.TransferID, it.LineNo, it.SKUID, it.BatchID,
+				it.FromWarehouseID, it.FromZoneID, it.FromShelfID, it.FromBinID,
+				it.ToWarehouseID, it.ToZoneID, it.ToShelfID, it.ToBinID,
+				it.Qty.String(), it.QtyOut.String(), it.Remark, it.CreatedBy, it.UpdatedBy)
+		}
+		sb.WriteString(` RETURNING id`)
+		var ids []int64
+		if err := tx.Raw(sb.String(), args...).Scan(&ids).Error; err != nil {
 			return err
 		}
-		it.ID = database.ID(itemID)
+		if len(ids) != len(items) {
+			return fmt.Errorf("stockops: 调拨明细批量写入回执数不符: %d/%d", len(ids), len(items))
+		}
+		for i := range items {
+			items[i].ID = database.ID(ids[i])
+		}
 	}
 	return nil
 }
@@ -110,26 +128,42 @@ func (t *gormTx) ReplaceTransferItems(ctx context.Context, transferID int64, ite
 	if err := tx.Exec(`DELETE FROM transfer_items WHERE transfer_id = ?`, transferID).Error; err != nil {
 		return err
 	}
-	for i := range items {
-		it := &items[i]
-		it.TransferID = transferID
-		var itemID int64
-		if err := tx.Raw(`
+	// 明细批量写入（f6 同款：一次往返多行 VALUES，PG 按插入序返回 id 逐行回填）。
+	if len(items) > 0 {
+		var (
+			sb   strings.Builder
+			args = make([]any, 0, len(items)*16)
+		)
+		sb.WriteString(`
 			INSERT INTO transfer_items
 				(transfer_id, line_no, sku_id, batch_id,
 				 from_warehouse_id, from_zone_id, from_shelf_id, from_bin_id,
 				 to_warehouse_id, to_zone_id, to_shelf_id, to_bin_id,
 				 qty, qty_out, qty_in, remark, created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, now(), now(), ?, ?)
-			RETURNING id`,
-			it.TransferID, it.LineNo, it.SKUID, it.BatchID,
-			it.FromWarehouseID, it.FromZoneID, it.FromShelfID, it.FromBinID,
-			it.ToWarehouseID, it.ToZoneID, it.ToShelfID, it.ToBinID,
-			it.Qty.String(), it.Remark, it.CreatedBy, it.UpdatedBy,
-		).Scan(&itemID).Error; err != nil {
+			VALUES `)
+		for i := range items {
+			it := &items[i]
+			it.TransferID = transferID
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, now(), now(), ?, ?)")
+			args = append(args, it.TransferID, it.LineNo, it.SKUID, it.BatchID,
+				it.FromWarehouseID, it.FromZoneID, it.FromShelfID, it.FromBinID,
+				it.ToWarehouseID, it.ToZoneID, it.ToShelfID, it.ToBinID,
+				it.Qty.String(), it.Remark, it.CreatedBy, it.UpdatedBy)
+		}
+		sb.WriteString(` RETURNING id`)
+		var ids []int64
+		if err := tx.Raw(sb.String(), args...).Scan(&ids).Error; err != nil {
 			return err
 		}
-		it.ID = database.ID(itemID)
+		if len(ids) != len(items) {
+			return fmt.Errorf("stockops: 调拨明细覆盖批量写入回执数不符: %d/%d", len(ids), len(items))
+		}
+		for i := range items {
+			items[i].ID = database.ID(ids[i])
+		}
 	}
 	return nil
 }
@@ -356,28 +390,54 @@ func (t *gormTx) UpdateCountStatus(ctx context.Context, id int64, from, to strin
 	return res.RowsAffected, nil
 }
 
+// ReplaceCountItems 覆盖写盘点明细（StartCount 冻结快照）。
+// f6：原实现逐行 INSERT RETURNING（范围行数 = SQL 往返数），改为分块多行
+// INSERT ... RETURNING id（PG 按插入序返回，逐行回填 it.ID 语义不变）。
 func (t *gormTx) ReplaceCountItems(ctx context.Context, countID int64, items []CountItem) error {
 	tx := t.tx.WithContext(ctx)
 	if err := tx.Exec(`DELETE FROM count_items WHERE count_id = ?`, countID).Error; err != nil {
 		return err
 	}
-	for i := range items {
-		it := &items[i]
-		it.CountID = countID
-		var itemID int64
-		if err := tx.Raw(`
+	// 分块大小：13 参数/行 × 1000 行 = 1.3 万 < 65535（PG 协议参数上限）。
+	const chunk = 1000
+	for start := 0; start < len(items); start += chunk {
+		end := start + chunk
+		if end > len(items) {
+			end = len(items)
+		}
+		batch := items[start:end]
+		var (
+			sb   strings.Builder
+			args = make([]any, 0, len(batch)*13)
+		)
+		sb.WriteString(`
 			INSERT INTO count_items
 				(count_id, inventory_row_id, sku_id, warehouse_id, zone_id, shelf_id, bin_id,
 				 qty_system, qty_counted, counted_by, counted_at, serial_no,
 				 created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, '', now(), now(), ?, ?)
-			RETURNING id`,
-			it.CountID, it.InventoryRowID, it.SKUID, it.WarehouseID, it.ZoneID, it.ShelfID, it.BinID,
-			it.QtySystem.String(), it.QtyCounted, it.CreatedBy, it.UpdatedBy,
-		).Scan(&itemID).Error; err != nil {
+			VALUES `)
+		for j := range batch {
+			it := &batch[j]
+			it.CountID = countID
+			if j > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, '', now(), now(), ?, ?)")
+			args = append(args, it.CountID, it.InventoryRowID, it.SKUID, it.WarehouseID,
+				it.ZoneID, it.ShelfID, it.BinID, it.QtySystem.String(), it.QtyCounted,
+				it.CreatedBy, it.UpdatedBy)
+		}
+		sb.WriteString(` RETURNING id`)
+		var ids []int64
+		if err := tx.Raw(sb.String(), args...).Scan(&ids).Error; err != nil {
 			return err
 		}
-		it.ID = database.ID(itemID)
+		if len(ids) != len(batch) {
+			return fmt.Errorf("stockops: 盘点明细批量写入回执数不符: %d/%d", len(ids), len(batch))
+		}
+		for j := range batch {
+			batch[j].ID = database.ID(ids[j])
+		}
 	}
 	return nil
 }
@@ -444,24 +504,40 @@ func (t *gormTx) ReplaceCountDifferences(ctx context.Context, countID int64, dif
 	if err := tx.Exec(`DELETE FROM count_differences WHERE count_id = ?`, countID).Error; err != nil {
 		return err
 	}
-	for i := range diffs {
-		d := &diffs[i]
-		d.CountID = countID
-		var id int64
-		if err := tx.Raw(`
+	// 差异批量写入（f6 同款：一次往返多行 VALUES，PG 按插入序返回 id 逐行回填）。
+	if len(diffs) > 0 {
+		var (
+			sb   strings.Builder
+			args = make([]any, 0, len(diffs)*14)
+		)
+		sb.WriteString(`
 			INSERT INTO count_differences
 				(count_id, line_no, sku_id, warehouse_id, bin_id, batch_id,
 				 qty_system, qty_counted, diff_qty, adjust_no, status, remark,
 				 created_at, updated_at, created_by, updated_by)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, now(), now(), ?, ?)
-			RETURNING id`,
-			d.CountID, d.LineNo, d.SKUID, d.WarehouseID, d.BinID, d.BatchID,
-			d.QtySystem.String(), d.QtyCounted.String(), d.DiffQty.String(), d.Status, d.Remark,
-			d.CreatedBy, d.UpdatedBy,
-		).Scan(&id).Error; err != nil {
+			VALUES `)
+		for i := range diffs {
+			d := &diffs[i]
+			d.CountID = countID
+			if i > 0 {
+				sb.WriteByte(',')
+			}
+			sb.WriteString("(?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, now(), now(), ?, ?)")
+			args = append(args, d.CountID, d.LineNo, d.SKUID, d.WarehouseID, d.BinID, d.BatchID,
+				d.QtySystem.String(), d.QtyCounted.String(), d.DiffQty.String(), d.Status, d.Remark,
+				d.CreatedBy, d.UpdatedBy)
+		}
+		sb.WriteString(` RETURNING id`)
+		var ids []int64
+		if err := tx.Raw(sb.String(), args...).Scan(&ids).Error; err != nil {
 			return err
 		}
-		d.ID = database.ID(id)
+		if len(ids) != len(diffs) {
+			return fmt.Errorf("stockops: 盘点差异批量写入回执数不符: %d/%d", len(ids), len(diffs))
+		}
+		for i := range diffs {
+			diffs[i].ID = database.ID(ids[i])
+		}
 	}
 	return nil
 }

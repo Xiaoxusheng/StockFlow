@@ -10,6 +10,7 @@ package sales
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -54,8 +55,9 @@ func TestBatchClaimPicksReconcile(t *testing.T) {
 	if res.Total != 3 || res.SuccessCount != 2 || res.FailedCount != 1 || res.SkippedCount != 0 {
 		t.Fatalf("计数对账不符: %+v", res)
 	}
-	if len(res.Results) != 3 || res.Results[0].ID != idA || res.Results[0].Status != batchStatusSuccess ||
-		res.Results[2].ID != 99999 || res.Results[2].Status != batchStatusFailed ||
+	// results[].id 为 JSON 字符串形态（api.md §2 冻结口径，service_batch.go strconv.FormatInt）。
+	if len(res.Results) != 3 || res.Results[0].ID != strconv.FormatInt(idA, 10) || res.Results[0].Status != batchStatusSuccess ||
+		res.Results[2].ID != "99999" || res.Results[2].Status != batchStatusFailed ||
 		res.Results[2].Reason != "SALES_TASK_NOT_FOUND" {
 		t.Fatalf("逐条结果不符: %+v", res.Results)
 	}

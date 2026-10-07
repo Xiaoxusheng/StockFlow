@@ -326,9 +326,14 @@ func buildLedger(row *Inventory, changeType string, src Source, actor Actor,
 }
 
 // writeLedger 写流水；单号经 internal/docnum 统一编号引擎发放（business-flow §13.1、
-// plan §4.1/§8.3 条 2——LED 前缀 ResetAll 承接 M1 存量口径），历史遗留同格式单号
-// 撞唯一索引（uk_inventory_ledgers_ledger_no）时取下一号重试。
+// plan §4.1/§8.3 条 2——LED 前缀号段预取发放，见 docnum/prefetch.go），历史遗留同格式
+// 单号撞唯一索引（uk_inventory_ledgers_ledger_no）时取下一号重试。
 // 幂等键冲突不在此重试——上抛给 mutate 兜底重放。
+//
+// 重试必须以 SAVEPOINT 隔离（渗透修复）：23505 会把 PG 事务置为 aborted（25P02），
+// 同事务内直接重试下一条 INSERT 必失败——原"重试收敛"路径实际不可达。SAVEPOINT
+// 置于取号之后：冲突回滚仅撤销失败的 INSERT，已取号码不回收（预取号段内顺延换号，
+// 跳号允许，inventory-rules §5），避免回滚计数器造成同号死循环。
 func writeLedger(tx *gorm.DB, l *InventoryLedger) error {
 	rule, _ := docnum.RuleFor("LED")
 	for range insertRetryLimit {
@@ -337,9 +342,15 @@ func writeLedger(tx *gorm.DB, l *InventoryLedger) error {
 			return err
 		}
 		l.LedgerNo = no
+		if err := tx.SavePoint("sf_inv_ledger").Error; err != nil {
+			return err
+		}
 		if err := insertLedger(tx, l); err == nil {
 			return nil
 		} else if pgUniqueViolation(err, "uk_inventory_ledgers_ledger_no") {
+			if rbErr := tx.RollbackTo("sf_inv_ledger").Error; rbErr != nil {
+				return rbErr
+			}
 			continue
 		} else {
 			return err
@@ -548,22 +559,45 @@ func (s *Service) ReleaseLock(ctx context.Context, tx *gorm.DB, op ReleaseLockOp
 		return MutationResult{}, err
 	}
 	return s.mutate(ctx, tx, idemKey, nil, func(tx *gorm.DB) (MutationResult, error) {
-		lock, err := lockForUpdate(tx, op.LockID)
+		// 锁序统一防死锁（渗透修复，inventory-rules §9）：与 Deduct/consumeLock 保持
+		// 相同的"库存行 → 锁记录行"加锁顺序。原实现先锁 lock 行（lockForUpdate）再锁
+		// 库存行（locateRowForUpdate），与并发的发货核销（Deduct 先库存行后 lock 行）
+		// 顺序相反——同一库存行上"发货核销"与"取消释放"并发时存在 PG 40P01 死锁窗口。
+		// 第 1 步：无锁普通读锁定记录取行键。不变式：inventory_locks 的行绑定
+		// （warehouse_id/bin_id/sku_id/batch_id/lock_type/source_*）创建后不可变——
+		// 全代码库仅 insertLock 写入、updateLockAfterSplit 更新（只改 qty/status/
+		// released_*/updated_*，见 repository.go），故第 3 步加锁重读的行键必与本次
+		// 读到的一致（第 4 步仍防御性校验，不一致按原错误口径返回）。
+		lock0, err := getLockByID(tx, op.LockID)
 		if err != nil {
 			return MutationResult{}, err
 		}
-		if lock == nil || lock.Status != "ACTIVE" || lock.Qty.Sub(op.Qty).IsNegative() {
+		if lock0 == nil {
 			return MutationResult{}, response.NewError(ErrLockNotFound, map[string]any{
 				"lock_id": op.LockID, "reason": "锁定记录不存在、已完结或释放量超出锁存量",
 			})
 		}
-		key := RowKey{WarehouseID: lock.WarehouseID, BinID: lock.BinID, SKUID: lock.SKUID, BatchID: lock.BatchID}
+		key := RowKey{WarehouseID: lock0.WarehouseID, BinID: lock0.BinID, SKUID: lock0.SKUID, BatchID: lock0.BatchID}
+		// 第 2 步：锁定库存行（与 Deduct 一致的锁序；锁定/释放的串行化点）。
 		row, err := locateRowForUpdate(tx, key)
 		if err != nil {
 			return MutationResult{}, err
 		}
 		if row == nil {
 			return MutationResult{}, response.NewError(ErrRecordNotFound, rowKeyDetails(key, "库存行不存在"))
+		}
+		// 第 3 步：加锁重读锁定记录（持有至事务结束；部分释放的串行化点）。
+		lock, err := lockForUpdate(tx, op.LockID)
+		if err != nil {
+			return MutationResult{}, err
+		}
+		// 第 4 步：状态/数量校验 + 行绑定一致性防御（口径与原实现一致）。
+		if lock == nil || lock.Status != "ACTIVE" || lock.Qty.Sub(op.Qty).IsNegative() ||
+			lock.WarehouseID != lock0.WarehouseID || lock.BinID != lock0.BinID ||
+			lock.SKUID != lock0.SKUID || lock.BatchID != lock0.BatchID {
+			return MutationResult{}, response.NewError(ErrLockNotFound, map[string]any{
+				"lock_id": op.LockID, "reason": "锁定记录不存在、已完结或释放量超出锁存量",
+			})
 		}
 		before := row.State()
 		fromCol, _ := lockTargetState(lock.LockType)
@@ -1007,13 +1041,21 @@ func (s *Service) EnsureBatch(ctx context.Context, tx *gorm.DB, op BatchOp) (bat
 			batchID = existing.ID.Int64()
 			return nil
 		}
+		// SAVEPOINT 隔离唯一冲突重试（渗透修复）：23505 置 PG 事务 aborted（25P02），
+		// 同事务内直接重读/重试必失败；冲突时回滚到插入前再回读收敛。
+		if ferr := tx.SavePoint("sf_inv_batch").Error; ferr != nil {
+			return ferr
+		}
 		id, ferr := insertBatch(tx, &Batch{
 			SKUID: op.SKUID, BatchNo: op.BatchNo, SupplierID: op.SupplierID,
 			ProductionDate: op.ProductionDate, InboundDate: op.InboundDate, ExpiryDate: op.ExpiryDate,
 			CostPrice: op.CostPrice, Remark: op.Remark, CreatedBy: op.Actor.ID, UpdatedBy: op.Actor.ID,
 		})
 		if ferr != nil && pgUniqueViolation(ferr, "uk_batches_sku_batch_no") {
-			// 并发首建竞态：回读既有批次。
+			// 并发首建竞态：回滚到插入前清除 aborted 状态，回读既有批次（首写为准）。
+			if rbErr := tx.RollbackTo("sf_inv_batch").Error; rbErr != nil {
+				return rbErr
+			}
 			existing, ferr = findBatchByNo(tx, op.SKUID, op.BatchNo)
 			if ferr == nil && existing != nil {
 				batchID = existing.ID.Int64()
@@ -1070,11 +1112,19 @@ func (s *Service) SerialEvent(ctx context.Context, tx *gorm.DB, op SerialOp) (se
 				LastSourceType: op.Source.Type, LastSourceNo: op.Source.No, LastEventAt: now,
 				CreatedBy: op.Actor.ID, UpdatedBy: op.Actor.ID,
 			}
+			// SAVEPOINT 隔离唯一冲突收敛（渗透修复，同 ensureRow/writeLedger——
+			// 23505 置事务 aborted 后重读必失败）。
+			if ferr := tx.SavePoint("sf_inv_serial").Error; ferr != nil {
+				return ferr
+			}
 			if ferr := insertSerial(tx, row); ferr != nil {
 				if !pgUniqueViolation(ferr, "uk_serial_numbers_serial_no") {
 					return ferr
 				}
-				// 并发首建竞态：重读后按更新路径收敛。
+				// 并发首建竞态：回滚到插入前清除 aborted 状态，重读后按更新路径收敛。
+				if rbErr := tx.RollbackTo("sf_inv_serial").Error; rbErr != nil {
+					return rbErr
+				}
 				if row, ferr = serialForUpdate(tx, op.SerialNo); ferr != nil {
 					return ferr
 				}
@@ -1091,6 +1141,11 @@ func (s *Service) SerialEvent(ctx context.Context, tx *gorm.DB, op SerialOp) (se
 				"serial_no": op.SerialNo, "existing_sku_id": row.SKUID, "request_sku_id": op.SKUID,
 			})
 		}
+		// CAS 守卫基线：行锁内读到的当前状态（serialForUpdate FOR UPDATE）。守卫语义
+		// 见 updateSerial——核销场景的前置态由调用方经 SerialStates（同事务 FOR UPDATE
+		// 读）校验后传入本原语，行锁内 prior 即校验值；多态迁移（盘点/退货等）按读时
+		// 状态传参，不写死 IN_STOCK。
+		priorStatus := row.Status
 		row.BatchID = op.BatchID
 		row.WarehouseID = op.WarehouseID
 		row.BinID = op.BinID
@@ -1099,7 +1154,7 @@ func (s *Service) SerialEvent(ctx context.Context, tx *gorm.DB, op SerialOp) (se
 		row.LastSourceNo = op.Source.No
 		row.LastEventAt = now
 		row.UpdatedBy = op.Actor.ID
-		if ferr := updateSerial(tx, row); ferr != nil {
+		if ferr := updateSerial(tx, row, priorStatus); ferr != nil {
 			return ferr
 		}
 		serialID = row.ID.Int64()

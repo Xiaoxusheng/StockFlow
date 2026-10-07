@@ -408,3 +408,77 @@ func TestLockLifecycle(t *testing.T) {
 	_, err = svc.ReleaseLock(ctx, nil, ReleaseLockOp{LockID: od.LockID, Qty: q(1), Source: Source{Type: "it_cancel", No: "SO-LC-1-X"}, Actor: testActor()})
 	require.Error(t, err)
 }
+
+// ---- 专项 7：序列号并发核销（2026-10 渗透修复回归：一物两卖窗口封闭）----
+
+// TestConcurrentSerialWriteOffSingleWinner 两个出库事务并发核销同一序列号，各自
+// 复刻消费方最小流程："SerialStates（FOR UPDATE 读）→ 校验 IN_STOCK →
+// SerialEvent(OUTBOUND)"。
+// 修复前：读侧普通 SELECT 无锁，两事务可同时读到 IN_STOCK 并双双核销（一物两卖）；
+// 修复后：后到事务在 SerialStates 处阻塞至先到提交，READ COMMITTED 重读见
+// OUTBOUND，校验 fail-closed 拒绝——恰一方成功；写侧 updateSerial 的
+// WHERE status=? CAS 守卫（repository.go）为第二重防线。
+func TestConcurrentSerialWriteOffSingleWinner(t *testing.T) {
+	db, svc := integrationEnv(t)
+	ctx := context.Background()
+
+	// 序列号建档 IN_STOCK（入库采集形态，inventory-rules §8.2）。
+	const sn = "SN-CONC-WRITEOFF-1"
+	_, _, err := svc.SerialEvent(ctx, nil, SerialOp{
+		SerialNo: sn, SKUID: testKey().SKUID, WarehouseID: testKey().WarehouseID, BinID: testKey().BinID,
+		Status: "IN_STOCK", Source: Source{Type: "it_inbound", No: "IN-SN-1"}, Actor: testActor(),
+	})
+	require.NoError(t, err)
+
+	key := testKey()
+	writeOff := func(order string) error {
+		return db.Transaction(func(tx *gorm.DB) error {
+			states, err := svc.SerialStates(ctx, tx, key.SKUID, []string{sn})
+			if err != nil {
+				return err
+			}
+			inStock := false
+			for _, st := range states {
+				if st.SerialNo == sn && st.Status == "IN_STOCK" {
+					inStock = true
+				}
+			}
+			if !inStock {
+				return response.NewError(response.CodeConflict, map[string]any{
+					"reason": "序列号不在库（IN_STOCK 校验不通过，fail-closed）",
+				})
+			}
+			_, _, err = svc.SerialEvent(ctx, tx, SerialOp{
+				SerialNo: sn, SKUID: key.SKUID, WarehouseID: key.WarehouseID, BinID: key.BinID,
+				Status: "OUTBOUND", Source: Source{Type: "it_ship", No: order}, Actor: testActor(),
+			})
+			return err
+		})
+	}
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	for i := range 2 {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			errs[idx] = writeOff(fmt.Sprintf("SH-SN-CONC-%d", idx))
+		}(i)
+	}
+	wg.Wait()
+	var success int
+	for _, err := range errs {
+		if err == nil {
+			success++
+			continue
+		}
+		// 失败方必须是业务拒绝（校验不通过或 CAS 冲突），不允许基础设施崩溃。
+		var bizErr *response.Error
+		require.True(t, errors.As(err, &bizErr), "失败方应返回业务错误，实际: %v", err)
+	}
+	require.Equal(t, 1, success, "并发核销同一序列号恰一方成功（一物两卖窗口已封闭）")
+
+	var status string
+	require.NoError(t, db.Raw(`SELECT status FROM serial_numbers WHERE serial_no = ?`, sn).Scan(&status).Error)
+	require.Equal(t, "OUTBOUND", status)
+}

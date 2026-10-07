@@ -9,6 +9,7 @@ import (
 
 	"github.com/stockflow/server/internal/auth"
 	"github.com/stockflow/server/internal/response"
+	"github.com/stockflow/server/internal/stock"
 )
 
 // HTTP handler 层（architecture.md §1：只做参数接收与基础校验、调用 Service、统一响应
@@ -21,6 +22,8 @@ type handler struct {
 }
 
 // actorOf 当前用户上下文 → 操作者归因（库存流水与审计 operator 冗余字段）。
+// 同时注入数据权限仓库范围快照（f16：按 ID/单号直取的写动作在 Service 层
+// fail-closed 校验仓库范围，permission.md §4）。
 func actorOf(c *gin.Context) Actor {
 	uc, ok := auth.CurrentUser(c)
 	a := Actor{Name: uc.Username, RequestID: c.GetString(response.RequestIDKey),
@@ -29,6 +32,8 @@ func actorOf(c *gin.Context) Actor {
 	if ok {
 		a.ID = uc.UserID
 	}
+	all, ids := auth.WarehouseScope(c)
+	a.Scope = &stock.WhScope{All: all, WarehouseIDs: ids}
 	return a
 }
 

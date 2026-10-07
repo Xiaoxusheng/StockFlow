@@ -137,13 +137,19 @@ func levelBranches(level string) ([]string, bool) {
 	}
 }
 
+// escapeLike ILIKE 通配符转义（%/_/\ 字面化，防结果集污染；PG 默认转义符为反斜杠）。
+func escapeLike(q string) string {
+	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(q)
+}
+
 func (r *repository) alerts(ctx context.Context, sc Scope, level, keyword string, expiryDays, minStagnantDays int, page, pageSize int) ([]AlertItem, int64, error) {
 	scCond, scArgs := sc.cond("i.warehouse_id")
 	lmCond, lmArgs := sc.cond("l.warehouse_id")
 	kw, kwArgs := "", []any{}
 	if keyword != "" {
 		kw = " AND (s.code ILIKE ? OR p.name ILIKE ?)"
-		kwArgs = []any{"%" + keyword + "%", "%" + keyword + "%"}
+		like := "%" + escapeLike(keyword) + "%"
+		kwArgs = []any{like, like}
 	}
 	keys, filterLevel := levelBranches(level)
 	if keys == nil {

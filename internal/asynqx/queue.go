@@ -1,7 +1,8 @@
 // Queue 接口与双实现（backend-m3-plan §4.1 冻结契约）。
 //
 //   - asynqQueue：Redis 队列（生产形态）。入队即投递，执行由 asynq Server 异步完成，
-//     MaxRetry 取 queue.max_retry（指数退避为 asynq 内建默认退避策略）。
+//     MaxRetry 取 queue.max_retry（指数退避为 asynq 内建默认退避策略）；Timeout 显式
+//     下发 DefaultTimeout=2h（防 asynq 库默认 30 分钟静默生效，见 DefaultTimeout 注）。
 //   - inlineQueue：Redis 未启用（redis.enabled=false）时的同步降级——Enqueue 即在请求
 //     goroutine 内执行已注册 handler，任务行照常落库、进度照常更新（plan §4.1），
 //     保证无 Redis 开发环境与场景 5/6 演示可用。执行失败仅记错误日志、不向调用方传播
@@ -13,6 +14,7 @@ package asynqx
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
@@ -36,6 +38,15 @@ const (
 	DefaultConcurrency = 10
 	DefaultMaxRetry    = 3
 )
+
+// DefaultTimeout 任务执行超时缺省（Enqueue 显式下发 asynq.Timeout）。asynq 库在
+// 入队未显式设置 Timeout 时静默取内建默认 30 分钟（asynq client.go defaultTimeout）
+// ——超大导出/导入注定被误杀：datax 单导出产物上限 ExportMaxFileBytes=200MB
+// （internal/datax，全量查询 + 流式写 Excel/CSV + 落盘耗时可远超 30 分钟），且
+// 超时即整文件重生成（每次重试重复全量 DB/IO，浪费倍增）。取 2h 覆盖该量级；
+// 同时是幂等租约 TTL 的对齐基准——internal/idempotency defaultLeaseTTL=3h 必须大
+// 于本值，在途长任务执行期内其幂等占用权才不会被同键重试误接管（恰一执行）。
+const DefaultTimeout = 2 * time.Hour
 
 // normalize 补零值默认（plan §3.2：queue.concurrency=10、queue.max_retry=3）。
 func (c Config) normalize() Config {
@@ -64,9 +75,12 @@ func (o RedisOptions) asynqOpt() asynq.RedisClientOpt {
 type enqueueOptions struct {
 	queue    string
 	maxRetry int
+	// timeout 单次执行超时（asynq.Timeout 显式下发；0/负值在 resolve 时回退
+	// DefaultTimeout——不显式下发会静默吃到 asynq 库默认 30 分钟）。
+	timeout time.Duration
 }
 
-// Option 入队可选项（队列名覆盖 / 重试次数覆盖）。
+// Option 入队可选项（队列名覆盖 / 重试次数覆盖 / 执行超时覆盖）。
 type Option func(*enqueueOptions)
 
 // WithQueue 覆盖任务类型的默认队列（冻结映射之外的队列须显式声明，默认禁止漂移）。
@@ -79,7 +93,13 @@ func WithMaxRetry(n int) Option {
 	return func(o *enqueueOptions) { o.maxRetry = n }
 }
 
-// resolveOptions 合成入队选项：默认队列取任务类型冻结映射，默认重试取队列配置。
+// WithTimeout 覆盖本次入队的任务执行超时（0/负值在 resolve 时回退 DefaultTimeout）。
+func WithTimeout(d time.Duration) Option {
+	return func(o *enqueueOptions) { o.timeout = d }
+}
+
+// resolveOptions 合成入队选项：默认队列取任务类型冻结映射，默认重试取队列配置，
+// 默认超时取 DefaultTimeout（零值/负值回退，不透传给 asynq 的 30 分钟库默认）。
 func resolveOptions(t Task, cfgMaxRetry int, opts []Option) (enqueueOptions, error) {
 	o := enqueueOptions{queue: "", maxRetry: cfgMaxRetry}
 	for _, opt := range opts {
@@ -93,6 +113,9 @@ func resolveOptions(t Task, cfgMaxRetry int, opts []Option) (enqueueOptions, err
 			return o, fmt.Errorf("asynqx: 任务类型 %q 不在冻结注册表，禁止入队", t.Type)
 		}
 		o.queue = q
+	}
+	if o.timeout <= 0 {
+		o.timeout = DefaultTimeout
 	}
 	return o, nil
 }
@@ -164,7 +187,9 @@ func (q *asynqQueue) Enqueue(ctx context.Context, t Task, opts ...Option) error 
 	if err != nil {
 		return err
 	}
-	at := []asynq.Option{asynq.Queue(o.queue), asynq.MaxRetry(o.maxRetry)}
+	// Timeout 显式下发（resolve 已回退零值）：防 asynq 库默认 30 分钟静默生效——
+	// 超大导出/导入会被误杀，且每次重试整文件重生成（量级对齐见 DefaultTimeout 注）。
+	at := []asynq.Option{asynq.Queue(o.queue), asynq.MaxRetry(o.maxRetry), asynq.Timeout(o.timeout)}
 	var task *asynq.Task
 	if t.TaskID != "" {
 		// 业务任务行号经传输头透传给 handler（asynq v0.26 handler 侧不暴露 msg.ID），

@@ -15,6 +15,7 @@ package purchase
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	"gorm.io/gorm"
@@ -25,9 +26,11 @@ import (
 // ---- 批量结果契约（§2.7 冻结形状；sales 域同形副本，域间零 import） ----
 
 // BatchResultItem 批量结果逐条项（status ∈ success|failed|skipped；reason 仅 failed
-// 携既有错误码字符串）。
+// 携既有错误码字符串）。ID 按 api.md §2 冻结口径输出 JSON 字符串（构造处
+// strconv.FormatInt，与 internal/batchresult.Item、printing 侧一致——原 int64 直出
+// 数字与冻结口径不符，2026-10-07 收敛）。
 type BatchResultItem struct {
-	ID     int64  `json:"id"`
+	ID     string `json:"id"`
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
 }
@@ -58,10 +61,17 @@ const (
 	batchStatusSkipped = "skipped"
 )
 
-// validateBatchIDs 入参校验：ids 非空且逐项为正整数。
+// batchClaimMaxIDs 批量领取单次上限（f17：逐条独立事务串行执行，无上限的 ids 数组
+// 可拖垮 worker 与连接池；100 ≈ 列表页最大选择集，超出即 400 拒绝）。
+const batchClaimMaxIDs = 100
+
+// validateBatchIDs 入参校验：ids 非空、逐项为正整数且有数量上限。
 func validateBatchIDs(ids []int64) error {
 	if len(ids) == 0 {
 		return invalidParam("ids", "至少一项任务 ID")
+	}
+	if len(ids) > batchClaimMaxIDs {
+		return invalidParam("ids", "单次最多 "+strconv.Itoa(batchClaimMaxIDs)+" 项")
 	}
 	for _, id := range ids {
 		if id <= 0 {
@@ -124,7 +134,7 @@ func (s *Service) BatchClaimPutawayTasks(ctx context.Context, actor Actor, in Ba
 	}
 	items := make([]BatchResultItem, 0, len(in.IDs))
 	for _, id := range in.IDs {
-		it := BatchResultItem{ID: id, Status: batchStatusSuccess}
+		it := BatchResultItem{ID: strconv.FormatInt(id, 10), Status: batchStatusSuccess}
 		if _, err := s.ClaimPutawayTask(ctx, actor, id); err != nil {
 			it.Status, it.Reason = s.classifyPutawayClaimConflict(ctx, actor, id, err)
 		}
@@ -166,6 +176,10 @@ func (s *Service) SetPutawayTaskPriority(ctx context.Context, actor Actor, id in
 			return err
 		}
 		if t == nil {
+			return response.NewError(ErrPutawayTaskNotFound, nil)
+		}
+		// 数据权限 fail-closed（f16）：越仓任务按不存在处理（与 GetTask 详情同口径）。
+		if !actor.canAccessWarehouse(t.TargetWarehouseID) {
 			return response.NewError(ErrPutawayTaskNotFound, nil)
 		}
 		if putawayPriorityGuarded(t.Status) {

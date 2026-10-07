@@ -61,16 +61,20 @@ func todayFixture(t *testing.T, log *queryLog, w todayWants) {
 		rrouteCount("FROM inventory_adjustments WHERE status IN ('PENDING_APPROVAL')", "", w.approvalAdj),
 		rrouteCount("FROM count_orders WHERE status IN ('PENDING_REVIEW')", "", w.approvalCnt),
 		rrouteCount("FROM exceptions WHERE status NOT IN", "", w.exception),
-		// 预警四分支合并（level=""）：count 先于 list（二重子串区分，均含四分支文本）。
+		// 预警四分支合并（level=""）：today/tasks 以 pageSize=1 专取 total（COUNT 仍执行，
+		// 二重子串区分）；普通列表调用 f25 后首页未满页直接以行数为 total——夹具按 wanted
+		// 计数回放等量占位行，两条路径计数一致。
 		rrouteCount("'low_stock' AS level", "SELECT COUNT(*) FROM (", w.alertTotal),
 		rroute("'low_stock' AS level", "SELECT * FROM (",
 			[]string{"level", "warehouse_id", "warehouse_code", "warehouse_name", "sku_id",
-				"sku_code", "sku_name", "current_qty", "threshold", "batch_no", "last_moved_at"}),
+				"sku_code", "sku_name", "current_qty", "threshold", "batch_no", "last_moved_at"},
+			alertPlaceholderRows(w.alertTotal)...),
 		// slow_moving 单分支（无 UNION ALL）。
 		rrouteCount("'slow_moving' AS level", "SELECT COUNT(*) FROM (", w.slowMovingTotal),
 		rroute("'slow_moving' AS level", "SELECT * FROM (",
 			[]string{"level", "warehouse_id", "warehouse_code", "warehouse_name", "sku_id",
-				"sku_code", "sku_name", "current_qty", "threshold", "batch_no", "last_moved_at"}),
+				"sku_code", "sku_name", "current_qty", "threshold", "batch_no", "last_moved_at"},
+			alertPlaceholderRows(w.slowMovingTotal)...),
 		rroute("COUNT(DISTINCT i.sku_id)::bigint", "",
 			[]string{"sku_count", "total_qty", "available_qty", "locked_qty", "frozen_qty", "abnormal_qty"},
 			[]any{w.summarySku, w.summaryTotal, w.summaryAvailable, w.summaryLocked,
@@ -116,6 +120,16 @@ func todayFixture(t *testing.T, log *queryLog, w todayWants) {
 // countRow 标量计数行（列名不影响 Scan）。
 func countRow(n int64) ([]string, [][]driver.Value) {
 	return fixtureRows([]string{"count"}, []any{n})
+}
+
+// alertPlaceholderRows n 行预警占位行（f25 后 paged 以行数为 total——夹具行数即计数）。
+func alertPlaceholderRows(n int64) [][]any {
+	rows := make([][]any, 0, n)
+	for i := int64(0); i < n; i++ {
+		rows = append(rows, []any{"low_stock", int64(1), "WH01", "一号仓", int64(7), "A001",
+			"凤爪 500g", 5.0, 10.0, "", nil})
+	}
+	return rows
 }
 
 func sampleTodayWants() todayWants {
@@ -264,23 +278,75 @@ func TestWorkbenchSummaryEndpoint(t *testing.T) {
 	}
 }
 
+// ---- 锚点回推夹具（f7 后缀和改写后的新查询形态） ----
+
+// 路由键与 production SQL 文本逐字对齐（dashboard.go netAfterByDay/netAfterValueByDay）。
+const (
+	routeQtyTail = "FROM inventory_ledgers l\nWHERE l.created_at >= (?::date + interval '1 day') AND l.change_type IN (" + stockLevelTypes + ")"
+	routeQtyDay  = "AS net\nFROM inventory_ledgers l\nWHERE l.created_at >= (?::date + interval '1 day') AND l.created_at < (?::date + interval '1 day')"
+	routeValTail = "SUM(l.qty_change * COALESCE(s.cost_price, 0)), 0)::float8\nFROM inventory_ledgers l\nLEFT JOIN skus s ON s.id = l.sku_id\nWHERE l.created_at >= (?::date + interval '1 day')"
+	routeValDay  = "AS net\nFROM inventory_ledgers l\nLEFT JOIN skus s ON s.id = l.sku_id\nWHERE l.created_at >= (?::date + interval '1 day') AND l.created_at < (?::date + interval '1 day')"
+)
+
+// pushbackFixtureData 旧口径"逐日之后净变化"（netAfter(d)）夹具 → 新实现两查询的
+// 回放数据：tail = 最大列出日的 netAfter；dayNet(d) = netAfter(d−1) − netAfter(d)
+// （未列出日 netAfter=0；数学上与旧单查询逐日求和完全等价）。
+func pushbackFixtureData(t *testing.T, netAfter [][2]any) (float64, [][]any) {
+	t.Helper()
+	if len(netAfter) == 0 {
+		return 0, nil
+	}
+	val := map[string]float64{}
+	var minDay, maxDay time.Time
+	for i, p := range netAfter {
+		ts, ok := p[0].(time.Time)
+		if !ok {
+			t.Fatalf("netAfter 行首列应为 time.Time: %v", p[0])
+		}
+		day := time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, ts.Location())
+		val[day.Format("2006-01-02")] = asFloat(p[1])
+		if i == 0 || day.Before(minDay) {
+			minDay = day
+		}
+		if i == 0 || day.After(maxDay) {
+			maxDay = day
+		}
+	}
+	tail := val[maxDay.Format("2006-01-02")]
+	rows := make([][]any, 0)
+	for d := minDay; !d.After(maxDay); d = d.AddDate(0, 0, 1) {
+		key := d.Format("2006-01-02")
+		prev := d.AddDate(0, 0, -1).Format("2006-01-02")
+		rows = append(rows, []any{d, val[prev] - val[key]})
+	}
+	return tail, rows
+}
+
+func asFloat(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int64:
+		return float64(n)
+	default:
+		return 0
+	}
+}
+
 // ---- GET /api/reports/dashboard/trend ----
 
-// dashboardTrendFixture 装配 trend 三查询：锚点 / 逐日之后净变化 / 每日进出。
+// dashboardTrendFixture 装配 trend 三查询：锚点 / 尾段+逐日净变化（f7 后缀和两查询）/ 每日进出。
 func dashboardTrendFixture(t *testing.T, log *queryLog, anchor float64, netAfter [][2]any, flows [][3]any) {
 	t.Helper()
-	netRows := make([][]any, 0, len(netAfter))
-	for _, p := range netAfter {
-		netRows = append(netRows, []any{p[0], p[1]})
-	}
+	tail, dayRows := pushbackFixtureData(t, netAfter)
 	flowRows := make([][]any, 0, len(flows))
 	for _, f := range flows {
 		flowRows = append(flowRows, []any{f[0], f[1], f[2]})
 	}
 	useFixture(logAndRoute(log,
 		rrouteScalar("COALESCE(SUM(i.total_qty), 0)::float8 FROM inventory i", anchor),
-		rroute("generate_series(?::date, ?::date, interval '1 day') AS d(day)", "",
-			[]string{"day", "net_after"}, netRows...),
+		rrouteScalar(routeQtyTail, tail),
+		rroute(routeQtyDay, "", []string{"day", "net"}, dayRows...),
 		rroute("SUM(CASE WHEN l.change_type = 'INBOUND'", "",
 			[]string{"day", "inbound", "outbound"}, flowRows...),
 	))
@@ -323,8 +389,8 @@ func TestDashboardTrendPresetRange(t *testing.T) {
 	if rows[6].StockQty != 990 { // 10-06：1000−10
 		t.Fatalf("10-06 日末库存应 990: %+v", rows[6])
 	}
-	// generate_series 窗口参数应为 from/to（预设档）。
-	args := log.argsOf("generate_series")
+	// 逐日净变化窗口参数应为 from/to（预设档；f7 后缀和改写后按 day 查询断言）。
+	args := log.argsOf(routeQtyDay)
 	assertTime(t, "trend from", args[0].Value.(time.Time), parseT(t, "2026-09-30 00:00:00"))
 	assertTime(t, "trend to", args[1].Value.(time.Time), parseT(t, "2026-10-06 00:00:00"))
 }
@@ -341,7 +407,7 @@ func TestDashboardTrendCustomRange(t *testing.T) {
 	if len(rows) != 3 || rows[0].Date != "2026-10-01" || rows[2].Date != "2026-10-03" {
 		t.Fatalf("custom 档应 3 行 10-01..10-03: %+v", rows)
 	}
-	args := log.argsOf("generate_series")
+	args := log.argsOf(routeQtyDay)
 	assertTime(t, "custom from", args[0].Value.(time.Time), parseT(t, "2026-10-01 00:00:00"))
 	assertTime(t, "custom to", args[1].Value.(time.Time), parseT(t, "2026-10-03 00:00:00"))
 }
@@ -543,18 +609,20 @@ func TestInventoryAnalyticsEndpoint(t *testing.T) {
 		rrouteScalar("COALESCE(SUM(i.total_qty), 0)::float8 FROM inventory i", 400.0),
 		rrouteScalar("SELECT COALESCE(SUM(l.qty_change), 0)::float8 FROM inventory_ledgers", 100.0),
 		rrouteScalar("SUM(i.total_qty * COALESCE(s.cost_price, 0)), 0)::float8", 10000.0),
-		// 金额净变化（与数量净变化同 generate_series，按金额特征子串分流）。
-		rroute("l.qty_change * COALESCE(s.cost_price, 0)", "",
-			[]string{"day", "net_after"},
-			[]any{parseT(t, "2026-10-04 00:00:00"), 1500.0},
-			[]any{parseT(t, "2026-10-05 00:00:00"), 1000.0},
-			[]any{parseT(t, "2026-10-06 00:00:00"), 500.0},
-		),
-		rroute("generate_series(?::date, ?::date, interval '1 day') AS d(day)", "",
-			[]string{"day", "net_after"},
-			[]any{parseT(t, "2026-10-04 00:00:00"), 150.0},
-			[]any{parseT(t, "2026-10-05 00:00:00"), 100.0},
+		// 数量/金额"之后净变化"两查询（f7 后缀和改写：尾段标量 + 逐日净变化）。
+		// 旧 netAfter 夹具 {10-04:150, 10-05:100, 10-06:50} → tail=50、
+		// dayNet(10-05)=150−100=50、dayNet(10-06)=100−50=50。
+		rrouteScalar(routeQtyTail, 50.0),
+		rroute(routeQtyDay, "", []string{"day", "net"},
+			[]any{parseT(t, "2026-10-05 00:00:00"), 50.0},
 			[]any{parseT(t, "2026-10-06 00:00:00"), 50.0},
+		),
+		// 旧金额 netAfter 夹具 {10-04:1500, 10-05:1000, 10-06:500} → tail=500、
+		// dayNet(10-05)=500、dayNet(10-06)=500。
+		rrouteScalar(routeValTail, 500.0),
+		rroute(routeValDay, "", []string{"day", "net"},
+			[]any{parseT(t, "2026-10-05 00:00:00"), 500.0},
+			[]any{parseT(t, "2026-10-06 00:00:00"), 500.0},
 		),
 	))
 	defer useFixture(nil)
@@ -660,13 +728,14 @@ func TestTurnoverTrendEndpoint(t *testing.T) {
 	log := &queryLog{}
 	useFixture(logAndRoute(log,
 		rrouteScalar("COALESCE(SUM(i.total_qty), 0)::float8 FROM inventory i", 100.0),
-		// 净变化窗口自 from 前一日取起（turnoverTrendRepo 日初差分键）。
-		rroute("generate_series(?::date, ?::date, interval '1 day') AS d(day)", "",
-			[]string{"day", "net_after"},
-			[]any{parseT(t, "2026-10-03 00:00:00"), 0.0},
-			[]any{parseT(t, "2026-10-04 00:00:00"), 10.0},
-			[]any{parseT(t, "2026-10-05 00:00:00"), 20.0},
-			[]any{parseT(t, "2026-10-06 00:00:00"), 30.0},
+		// 旧 netAfter 夹具 {10-03:0, 10-04:10, 10-05:20, 10-06:30}（窗口自 from 前一日
+		// 取起，turnoverTrendRepo 日初差分键）→ tail=30、dayNet(10-04)=−10、
+		// dayNet(10-05)=−10、dayNet(10-06)=−10（f7 后缀和两查询形态）。
+		rrouteScalar(routeQtyTail, 30.0),
+		rroute(routeQtyDay, "", []string{"day", "net"},
+			[]any{parseT(t, "2026-10-04 00:00:00"), -10.0},
+			[]any{parseT(t, "2026-10-05 00:00:00"), -10.0},
+			[]any{parseT(t, "2026-10-06 00:00:00"), -10.0},
 		),
 		rroute("l.change_type = 'OUTBOUND' AND l.created_at >= ?::date", "",
 			[]string{"day", "outbound"},

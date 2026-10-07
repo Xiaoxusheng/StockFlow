@@ -348,6 +348,10 @@ func (s *Service) SubmitReturn(ctx context.Context, actor Actor, id int64) (*Ret
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
+		}
 		if len(items) == 0 {
 			return paramError("lines", "退货明细不能为空")
 		}
@@ -384,6 +388,10 @@ func (s *Service) ApproveReturn(ctx context.Context, actor Actor, id int64, in A
 		o, items, err := s.loadOrderWithItems(tx, id)
 		if err != nil {
 			return err
+		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
 		before := snapshotOrder(o)
 		target := ReturnStatusApproved
@@ -437,6 +445,10 @@ func (s *Service) CancelReturn(ctx context.Context, actor Actor, id int64, in Ca
 		o, items, err := s.loadOrderWithItems(tx, id)
 		if err != nil {
 			return err
+		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
 		if o.Type == ReturnTypeSales {
 			for _, it := range items {
@@ -499,6 +511,10 @@ func (s *Service) ReceiveSalesReturn(ctx context.Context, actor Actor, id int64,
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
 			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
 		if o.Type != ReturnTypeSales {
@@ -684,6 +700,10 @@ func (s *Service) SubmitSalesQC(ctx context.Context, actor Actor, id int64, in S
 		if err != nil {
 			return err
 		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
+		}
 		if o.Type != ReturnTypeSales {
 			return response.NewError(ErrSourceMismatch, map[string]any{"return_id": id, "reason": "仅销售退货需要质检"})
 		}
@@ -742,6 +762,10 @@ func (s *Service) ApplySalesQCResult(ctx context.Context, actor Actor, id int64,
 			return err
 		}
 		if o == nil {
+			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
+		}
+		// 数据权限 fail-closed（f16）：越仓退货单按不存在处理（与详情接口同口径）。
+		if !actor.canAccessWarehouse(o.WarehouseID) {
 			return response.NewError(ErrReturnNotFound, map[string]any{"return_id": id})
 		}
 		if o.Type != ReturnTypeSales {

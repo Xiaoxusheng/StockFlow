@@ -211,6 +211,10 @@ func (s *Service) UpdateInbound(ctx context.Context, actor Actor, id int64, in I
 	if o == nil {
 		return nil, response.NewError(ErrInboundNotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetInbound 详情同口径）。
+	if !actor.canAccessWarehouse(o.WarehouseID) {
+		return nil, response.NewError(ErrInboundNotFound, nil)
+	}
 	if o.Status != InboundStatusDraft {
 		return nil, response.NewError(ErrInboundStatusNotAllowed, map[string]any{"status": o.Status, "reason": "仅草稿可修改"})
 	}
@@ -252,6 +256,10 @@ func (s *Service) CancelInbound(ctx context.Context, actor Actor, id int64, in C
 	if o == nil {
 		return nil, response.NewError(ErrInboundNotFound, nil)
 	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetInbound 详情同口径）。
+	if !actor.canAccessWarehouse(o.WarehouseID) {
+		return nil, response.NewError(ErrInboundNotFound, nil)
+	}
 	if !canTransition(inboundTransitions, o.Status, InboundStatusCancelled) {
 		return nil, response.NewError(ErrInboundStatusNotAllowed, map[string]any{
 			"status": o.Status, "to": InboundStatusCancelled,
@@ -281,6 +289,10 @@ func (s *Service) CloseInbound(ctx context.Context, actor Actor, id int64, in In
 		return nil, err
 	}
 	if o == nil {
+		return nil, response.NewError(ErrInboundNotFound, nil)
+	}
+	// 数据权限 fail-closed（f16）：越仓单据按不存在处理（与 GetInbound 详情同口径）。
+	if !actor.canAccessWarehouse(o.WarehouseID) {
 		return nil, response.NewError(ErrInboundNotFound, nil)
 	}
 	if !canTransition(inboundTransitions, o.Status, InboundStatusClosed) {
