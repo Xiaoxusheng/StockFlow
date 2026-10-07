@@ -67,6 +67,13 @@ export function App() {
           headerHeight: 48,
           headerPadding: '0 16px',
         },
+        Descriptions: {
+          // 详情摘要标签（采购单号/仓库/供应商等）升到正文色（2026-10-07 用户口径：
+          // 标签灰阶层次信息密度不突出——antd 6 缺省 labelColor 取 colorTextTertiary
+          // #94a3b8，比次要灰还浅一档；改为与正文同色后标签/值仅靠底色区分）。
+          // Dark 同步升到正文档 rgba(255,255,255,0.9)，与 --sf-text 映射同源。
+          labelColor: dark ? 'rgba(255, 255, 255, 0.9)' : '#111827',
+        },
         Table: {
           headerBg: dark ? '#1d232b' : '#f8fafc',
           headerSplitColor: 'transparent',

@@ -14,6 +14,14 @@
 
 ## 文档记录
 
+## [2026-10-07] 样式：详情摘要标签升正文色（Descriptions label 灰→黑，全站生效）
+
+- **背景**：用户反馈新建采购退货抽屉里「采购单号/收货仓库/供应商/单据状态」等标签为灰阶，「层次信息密度不突出」，要求换黑并全站统一。
+- **根因**：antd 6 Descriptions 无 border 时 labelColor 缺省取 colorTextTertiary（#94a3b8，比次要灰还浅一档）；bordered 变体则把标签色写死为 colorTextSecondary（#64748b，es/descriptions/style/index.js:37），且编译选择器 5 类 (0,5,0) 压过 components.Descriptions 的 labelColor token——两处都无法经组件 token 覆盖 bordered 形态。
+- **修复**：① App.tsx `components.Descriptions.labelColor` 升到正文色（覆盖非 bordered 形态，Dark rgba(255,255,255,0.9)）；② global.css 按同链 (0,5,1) 选择器覆写 bordered 标签为 `var(--sf-text)`（Light #111827 / Dark 自动翻转）——标签与值同色，层级改由 labelBg 底色承担。
+- **验证**：tsc/eslint 绿；真库实测新建采购退货抽屉（Light 标签 rgb(17,24,39)=正文黑、Dark rgba(255,255,255,0.9)）、pageerror=0。全站所有 antd Descriptions（详情页摘要、抽屉摘要、SfDetailSection 内嵌）一并生效。
+- **影响范围**：web/src/App.tsx、web/src/styles/global.css；纯样式，零行为/契约变化。
+
 ## [2026-10-07] 功能：跨模块联动批次三收官（PO 收货记录 chip 1:N / 销售四作业 chip / 报表行下钻 / Pad 单号复制，L6/L7/L12/L15）
 
 - **背景**：联动盘点 15 项最后一批（前两批 L1-L5/L9、L4/L8/L10/L11/L13/L14 见同日条目），本批后全量收口；计划 docs/plans/2026-10-07-linkage-batch3.md，规范续写 frontend.md §33.3。

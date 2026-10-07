@@ -146,6 +146,16 @@ body {
   text-overflow: ellipsis;
 }
 
+/* ===== 详情摘要标签升正文色（2026-10-07 用户口径：标签灰阶层次信息密度不突出） =====
+   antd 6 bordered 变体把标签色写死为 colorTextSecondary（es/descriptions/style/index.js:37，
+   无组件 token 可覆盖，编译选择器 5 类 (0,5,0) 也压过 components.Descriptions 的
+   labelColor token），故按 (0,5,1) 同链覆写为 --sf-text——Light #111827 / Dark 自动翻转；
+   标签与值仅靠底色（labelBg）区分层级。 */
+.ant-descriptions.ant-descriptions-bordered > .ant-descriptions-view .ant-descriptions-row > th.ant-descriptions-item-label,
+.ant-descriptions.ant-descriptions-bordered > .ant-descriptions-view .ant-descriptions-row > td.ant-descriptions-item-label {
+  color: var(--sf-text);
+}
+
 /* ===== 统一查询表单（components/table/SfSearchForm.tsx，frontend.md §6.3） ===== */
 /* label 定宽右对齐：修掉「label 自然宽度参与 flex 分配」——修前同一行内 label 越长
    控件越窄（实测出库单号 123px / 来源销售单号 95px / 状态下拉 191px 三种宽度并存，
