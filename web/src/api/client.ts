@@ -231,7 +231,15 @@ export function matchFieldErrors(
 
 /** 从任意错误中提取用户可读信息（frontend.md §9：错误必须可理解） */
 export function resolveErrorMessage(error: unknown): string {
-  if (error instanceof ApiError) return error.message
+  if (error instanceof ApiError) {
+    // 域内 invalidParam 错误的 message 是通用「请求参数错误」，具体原因在 details.reason
+    // （internal/response/errors.go：details={field,reason}）——透出给用户，否则无从定位
+    const reason = (error.details as { reason?: unknown } | null | undefined)?.reason
+    if (typeof reason === 'string' && reason.trim() && !error.message.includes(reason)) {
+      return `${error.message}：${reason.trim()}`
+    }
+    return error.message
+  }
   if (error instanceof Error) return error.message
   return '发生未知错误'
 }

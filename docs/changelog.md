@@ -14,6 +14,15 @@
 
 ## 文档记录
 
+## [2026-10-07] 修复：手动创建质检单「请求参数错误」不可定位——SKU 限定来源入库单明细 + 错误 reason 透出
+
+- **根因**（真库复现确认）：① 弹窗 SKU 下拉为全量 SKU，而后端 CreateQC 强校验 SKU 须属于来源入库单明细（service_quality.go:130 invalidParam「SKU %d 不在该入库单明细中」），选到非本单 SKU 必然被拒；② 后端域内 invalidParam 信封为 message=「请求参数错误」+details={field,reason}，而 resolveErrorMessage 只回显 message，真正原因（不在明细中/超余量/重复 SKU）全部被吞，用户无从修正。
+- **修复 ①**（web/src/views/quality/QualityCreateModal.tsx）：选中来源入库单后拉取其详情（GET /api/inbounds/{id} 带 items），SKU 下拉限定为该单已收货 SKU，选项行标注「可检 N」（=qty_received−qty_inspected，与后端 service_quality.go:119 余量同口径），余量≤0 不出现；未选来源单时下拉提示「请先选择来源入库单号」，明细加载失败如实提示；数量行内先行校验 ≤ 可检余量（后端强校验兜底）；切换/清空来源单重置明细行防残留他单 SKU；弹窗每次打开重置来源单状态。
+- **修复 ②**（web/src/api/client.ts）：resolveErrorMessage 对 ApiError.details.reason 非字符串重复时以「message：reason」形式透出——域内 invalidParam 类错误全站受益（message 本身已是具体文案的错误不受影响）。
+- **验证**：npm run build（tsc strict+vite）+ eslint 零告警；真库浏览器实测——修复前同参复现失败（API 层拿到 details.reason=「SKU 9402 不在该入库单明细中」）；修复后选 IN-20261006-000003（AWAITING_QC，SKU-E001-01 余量 40）成功创建 QC-20261007-000002（PENDING/抽检/40），列表落库；qty 41 被行内校验拦截（「检验数量不得超过该 SKU 可检余量 40」）不发起请求。
+- **遗留观察**：后端 CreateQC 的 settled 仅含入库单 qty_inspected（质检执行/免检收货才累计），创建多张 PENDING 质检单可合计超收货量（本次实测 10+40>40 均通过）——是否需在创建期聚合在途 PENDING 质检单占用量属业务规则问题（business-flow §4 未明确），留待后端批次裁决，前端校验与后端口径保持一致。
+- **影响范围**：web/src/api/client.ts（错误文案拼接）、web/src/views/quality/QualityCreateModal.tsx；不动后端。
+
 ## [2026-10-07] 样式：详情摘要标签升正文色（Descriptions label 灰→黑，全站生效）
 
 - **背景**：用户反馈新建采购退货抽屉里「采购单号/收货仓库/供应商/单据状态」等标签为灰阶，「层次信息密度不突出」，要求换黑并全站统一。
