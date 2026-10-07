@@ -38,7 +38,7 @@ export type SmartScanDirective =
   | { kind: 'locate-bin'; id: number | string; code: string; message: string }
   /** 识别对象不属于当前上下文 → 跳转到对应作业页（智能下一步 = 带到正确作业面） */
   | { kind: 'navigate'; path: string; message: string }
-  /** 多命中未定位（库位跨仓同码等，resolve id=0 且 items 非空） */
+  /** 多命中未定位（库位跨仓同码等，resolve id="0" 且 items 非空） */
   | { kind: 'ambiguous'; message: string }
   /** 识别成功但对象不存在（UNKNOWN_BARCODE / *_NOT_FOUND 等业务错误码） */
   | { kind: 'unmatched'; message: string }
@@ -109,8 +109,10 @@ function toDirective(
   result: ScanResolveResult,
   context: SmartScanContext,
 ): SmartScanDirective {
-  // 多命中未定位：如实携带 items 摘要（id=0 表示未定位，scanner.md §5.3）
-  if (result.id === 0 && result.items && result.items.length > 0) {
+  // 多命中未定位：如实携带 items 摘要（id="0" 表示未定位——resolve 出参 ID 为 database.ID
+  // 恒序列化为字符串，internal/database/model.go:22-24；多命中置零 service_scan.go:295-299，
+  // scanner.md §5.3）。字符串 "0" 与数字 0 双兼容判定，防形态漂移再引入恒假分支。
+  if (String(result.id) === '0' && result.items && result.items.length > 0) {
     const summary = result.items
       .slice(0, 3)
       .map((item) => `${item.code}${item.name ? `（${item.name}）` : ''}`)
@@ -213,7 +215,7 @@ export function useSmartScanNext({ context, page }: UseSmartScanNextOptions) {
           },
           result: {
             type: 'doc',
-            id: 0,
+            id: '0',
             code,
             name: '',
             duplicate: false,

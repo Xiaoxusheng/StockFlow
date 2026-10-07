@@ -25,7 +25,7 @@ import {
   type DeviceId,
   type DeviceType,
 } from '@/api/device'
-import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfEmpty } from '@/components/common/SfEmpty'
@@ -343,7 +343,7 @@ export default function DeviceCreatePage() {
 
   // 绑定仓库下拉：一次取全；接口失败降级为空数组，不阻塞表单其余字段
   const warehouses = useQuery({
-    queryKey: ['devices', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseOptions = (warehouses.data ?? []).map((item) => ({

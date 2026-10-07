@@ -18,7 +18,7 @@ import {
   type TransferType,
 } from '@/api/transfer'
 import { DateCell } from '@/components/table/cells'
-import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useTableRowFeedback } from '@/hooks/useTableRowFeedback'
@@ -133,7 +133,7 @@ export default function TransferListPage() {
 
   // 仓库 id → 名称映射（后端视图不联表下发仓库名，api/options.ts 一次取全后本地映射）
   const warehousesQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(

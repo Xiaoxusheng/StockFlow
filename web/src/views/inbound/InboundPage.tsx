@@ -13,7 +13,7 @@ import {
   type InboundSourceType,
 } from '@/api/inbound'
 import { DateCell } from '@/components/table/cells'
-import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -74,7 +74,7 @@ export default function InboundPage() {
   // 仓库 options（GET /api/warehouses）：仓库筛选下拉 + warehouse_id→名称本地映射；
   // 拉取失败降级为 ID 展示 / 空下拉，不阻塞列表（api/options.ts 约定）
   const warehouseOptions = useQuery({
-    queryKey: ['inbound', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseMaps = useMemo(

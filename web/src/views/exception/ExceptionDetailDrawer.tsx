@@ -11,7 +11,7 @@ import {
   exceptionApi,
 } from '@/api/exception'
 import { resolveErrorMessage } from '@/api/client'
-import { buildBinCodeMap, buildSkuMaps, buildUserNameMap, fetchBinOptions, fetchSkuOptions, fetchUserOptions } from '@/api/options'
+import { buildBinCodeMap, buildSkuMaps, buildUserNameMap, fetchBinOptions, fetchSkuOptions, fetchUserOptions, SKU_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
@@ -91,8 +91,8 @@ export default function ExceptionDetailDrawer({ open, exceptionId, onClose }: Ex
   })
 
   // 编码映射（列表/详情出参仅 ID，基础资料 options 本地映射，失败降级为 #id）
-  const skuOptions = useQuery({ queryKey: ['exception-detail', 'sku-options'], queryFn: fetchSkuOptions, enabled: open })
-  const binOptions = useQuery({ queryKey: ['exception-detail', 'bin-options'], queryFn: fetchBinOptions, enabled: open })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions, enabled: open })
+  const binOptions = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions, enabled: open })
   const userOptions = useQuery({ queryKey: ['exception-detail', 'user-options'], queryFn: fetchUserOptions, enabled: open })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
   const binCodeMap = useMemo(() => buildBinCodeMap(binOptions.data ?? []), [binOptions.data])

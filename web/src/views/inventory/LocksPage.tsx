@@ -18,8 +18,7 @@ import {
   fetchBinOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY, batchOptionsKey } from '@/api/options'
 import { DateCell } from '@/components/table/cells'
 import type { StatusSemantic } from '@/types/status'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -186,9 +185,9 @@ export default function LocksPage() {
   })
 
   // LockView 无联表编码/名称（warehouse_id/sku_id/bin_id/batch_id 裸 ID），options 一次取全本地映射
-  const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
-  const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
-  const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
+  const warehouses = useQuery({ queryKey: WAREHOUSE_OPTIONS_KEY, queryFn: fetchWarehouseOptions })
+  const skus = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
+  const bins = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions })
   // 批次映射按当前页行内 sku_id 集合按需拉取（/api/batches?sku_id= 过滤，handler.go:366-372），
   // 避免无过滤全量拉取超上限后 batch_id→batch_no 映射降级裸 ID
   const batchSkuIds = useMemo(
@@ -196,7 +195,7 @@ export default function LocksPage() {
     [list.items],
   )
   const batches = useQuery({
-    queryKey: ['options', 'batches', batchSkuIds],
+    queryKey: batchOptionsKey(batchSkuIds),
     queryFn: () => fetchBatchOptions(batchSkuIds),
     enabled: batchSkuIds.length > 0,
   })

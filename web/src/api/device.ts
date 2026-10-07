@@ -287,7 +287,9 @@ export interface ScanResolveItem {
   status?: string
 }
 
-/** 识别结果（ResolveResult，service_scan.go:47-57；多命中未定位时 id 为 0 并携带 items） */
+/** 识别结果（ResolveResult，service_scan.go:47-57；多命中未定位时后端置零 ID——经
+ * database.ID MarshalJSON 恒序列化为字符串 "0"（internal/database/model.go:22-24，
+ * service_scan.go:295-299），携带 items；消费方禁止用数字 0 等值比较判未定位） */
 export interface ScanResolveResult extends ScanResolveItem {
   /** 仅多命中携带（库位跨仓同码 / 批次跨 SKU，plan §8.3 歧义消解） */
   items?: ScanResolveItem[]

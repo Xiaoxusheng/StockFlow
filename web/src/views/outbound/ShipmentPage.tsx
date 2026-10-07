@@ -12,10 +12,11 @@ import {
   type Shipment,
   type ShipmentQuery,
   type ShipmentStatus,
+  type ShipmentTransitStatus,
 } from '@/api/outbound'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -70,7 +71,7 @@ const OB_STATUS_LABEL: Record<string, string> = {
  * 物流态人工流转允许的目标（models.go:334-340 shipTransitions 同源；PENDING→SHIPPED
  * 由发货确认完成，本表仅覆盖 SHIPPED 之后的纯记录流转）。
  */
-const SHIP_NEXT_STATUS: Partial<Record<ShipmentStatus, ShipmentStatus[]>> = {
+const SHIP_NEXT_STATUS: Partial<Record<ShipmentStatus, ShipmentTransitStatus[]>> = {
   SHIPPED: ['IN_TRANSIT', 'ABNORMAL'],
   IN_TRANSIT: ['SIGNED', 'ABNORMAL'],
 }
@@ -108,7 +109,7 @@ export default function ShipmentPage() {
 
   /** 物流态流转弹窗：当前发货单 / 目标状态 */
   const [statusTarget, setStatusTarget] = useState<Shipment | null>(null)
-  const [nextStatus, setNextStatus] = useState<ShipmentStatus>()
+  const [nextStatus, setNextStatus] = useState<ShipmentTransitStatus>()
   const [statusRemark, setStatusRemark] = useState('')
 
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
@@ -120,7 +121,7 @@ export default function ShipmentPage() {
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，失败降级为 ID）
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(
@@ -128,7 +129,7 @@ export default function ShipmentPage() {
     [warehouseOptions.data],
   )
   const skuOptions = useQuery({
-    queryKey: ['outbound', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
@@ -191,7 +192,7 @@ export default function ShipmentPage() {
   })
 
   const statusMutation = useMutation({
-    mutationFn: ({ id, status, remark: r }: { id: Shipment['id']; status: ShipmentStatus; remark?: string }) =>
+    mutationFn: ({ id, status, remark: r }: { id: Shipment['id']; status: ShipmentTransitStatus; remark?: string }) =>
       outboundTaskApi.shipments.updateStatus(id, { status, ...(r?.trim() ? { remark: r.trim() } : {}) }),
     onSuccess: (sh) => {
       message.success(`发货单 ${sh.shipment_no} 已更新为「${SHIP_STATUS_TAG[sh.status]?.label ?? sh.status}」`)
@@ -512,7 +513,7 @@ export default function ShipmentPage() {
               style={{ width: '100%' }}
               placeholder="选择目标状态"
               value={nextStatus}
-              onChange={(v: ShipmentStatus) => setNextStatus(v)}
+              onChange={(v: ShipmentTransitStatus) => setNextStatus(v)}
               options={(SHIP_NEXT_STATUS[statusTarget.status] ?? []).map((s) => ({
                 label: NEXT_STATUS_LABEL[s] ?? s,
                 value: s,

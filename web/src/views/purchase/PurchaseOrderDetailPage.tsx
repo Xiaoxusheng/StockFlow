@@ -14,8 +14,7 @@ import {
   buildIdItemMap,
   fetchSkuOptions,
   fetchSupplierOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfRelationNav } from '@/components/common/SfRelationNav'
@@ -174,11 +173,11 @@ export default function PurchaseOrderDetailPage() {
     queryFn: fetchSupplierOptions,
   })
   const warehouseOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skuOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const supplierItems = useMemo(

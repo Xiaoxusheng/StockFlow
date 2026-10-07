@@ -26,6 +26,36 @@ import type { PageResult } from '@/types/api'
 /** 页大小：下拉数据源等一次取全场景（复用 masterdata.ts 冻结常量） */
 export const OPTIONS_FETCH_PAGE_SIZE = OPTIONS_PAGE_SIZE
 
+// ---- 主数据全量 options 的规范化 queryKey（f2 修复） ----
+//
+// 同一 fetcher 全局共享同一缓存键：此前各页面为 fetchSkuOptions/fetchWarehouseOptions/
+// fetchBinOptions 自起炉灶（['reports','options','skus'] / ['purchase','options','skus'] /
+// ['pad','transfer','sku-options'] 等 17/11/16 个互不共享的 key），跨模块浏览即重复
+// 全量拉取。统一为模块级常量后，TanStack Query 以 URL 缓存语义跨页复用——同会话内
+// 同一份主数据只拉一遍（staleTime 仍由各 useQuery 自行声明）。
+
+/** SKU 主数据全量缓存键（配 fetchSkuOptions） */
+export const SKU_OPTIONS_KEY = ['options', 'skus'] as const
+/** 仓库主数据全量缓存键（配 fetchWarehouseOptions） */
+export const WAREHOUSE_OPTIONS_KEY = ['options', 'warehouses'] as const
+/** 库位主数据全量缓存键（配 fetchBinOptions） */
+export const BIN_OPTIONS_KEY = ['options', 'bins'] as const
+
+/** sku_id 集合规范化：去重、trim、过滤空串并排序（批次 options 的 key 与请求共用） */
+function normalizeSkuIds(skuIds?: ReadonlyArray<number | string>): string[] {
+  return [...new Set((skuIds ?? []).map((v) => String(v).trim()).filter(Boolean))].sort()
+}
+
+/**
+ * 批次 options 规范化缓存键（配 fetchBatchOptions）：sku_id 集合排序后拼接——
+ * 同一集合在不同行序/数组引用下命中同一缓存（此前各列表页把行序敏感的数组直接放进
+ * queryKey，翻页/排序即整组重拉；弹窗侧无过滤调用则各页自造 key，同一份全量批次
+ * 被重复拉取）。空集合归一为 '' 段（无过滤取全），由调用方 enabled 守卫避免误拉。
+ */
+export function batchOptionsKey(skuIds?: ReadonlyArray<number | string>): readonly [string, string, string] {
+  return ['options', 'batches', normalizeSkuIds(skuIds).join(',')] as const
+}
+
 /** 单页上限下的最大拉取页数（防御死循环：100×50=5000 行足够覆盖一页取全场景） */
 const MAX_PAGES = 50
 
@@ -55,8 +85,25 @@ export function fetchWarehouseOptions(): Promise<WarehouseItem[]> {
   return fetchAllPages((page) => warehouseApi.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
 }
 
-export function fetchSkuOptions(): Promise<SkuItem[]> {
-  return fetchAllPages((page) => masterdataApi.skus.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))
+/**
+ * SKU options 一次取全 + 商品名称装配。
+ * 后端 /api/skus 列表契约不返回 product_name（omitempty 仅详情装配，service_sku.go:49、
+ * changelog.md:858），而采购/入库/销售/库存等约 30 处消费点依赖 SkuItem.product_name
+ * 展示「商品名称」列与下拉文案——此处按既有口径（SkuListPage.tsx:166-170 同源）
+ * 用一次取全的商品数据源按 product_id 兜底映射（同一 API 的真实数据，非前端造数）。
+ * 商品列表失败时降级为仅 code（消费方均有 product_name 缺省回退），不阻断 SKU options。
+ */
+export async function fetchSkuOptions(): Promise<SkuItem[]> {
+  const [skus, products] = await Promise.all([
+    fetchAllPages((page) => masterdataApi.skus.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE })),
+    fetchAllPages((page) => masterdataApi.products.list({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE })).catch(
+      () => [] as ProductItem[],
+    ),
+  ])
+  const productNameById = new Map(products.map((p) => [idKey(p.id), p.name]))
+  return skus.map((s) =>
+    s.product_name ? s : { ...s, product_name: productNameById.get(idKey(s.product_id)) },
+  )
 }
 
 export function fetchProductOptions(): Promise<ProductItem[]> {
@@ -94,7 +141,7 @@ export function fetchBinOptions(): Promise<BinItem[]> {
  * （MAX_PAGES=50 页×100 行），无过滤全量拉取超限后 batch_id→batch_no 映射降级裸 ID。
  */
 export async function fetchBatchOptions(skuIds?: ReadonlyArray<number | string>): Promise<BatchItem[]> {
-  const ids = [...new Set((skuIds ?? []).map((v) => String(v).trim()).filter(Boolean))]
+  const ids = normalizeSkuIds(skuIds)
   if (ids.length === 0) {
     // 无 sku_id 可按（页面尚未查询/行数据为空）：退化为无过滤取全，仍受 MAX_PAGES 防御约束
     return fetchAllPages((page) => inventoryApi.batches({ page, pageSize: OPTIONS_FETCH_PAGE_SIZE }))

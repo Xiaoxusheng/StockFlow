@@ -39,15 +39,36 @@ export interface RecentVisit {
 /** 偏好读出参：{key: value} 映射（value 为原始 jsonb，白名单内键均可缺省） */
 export type PreferenceMap = Partial<Record<PreferenceKey, unknown>>
 
+/** 后端 GET 实际出参行（Preference，internal/userpref/models.go:74-76：value 为原始 jsonb） */
+export interface PreferenceRow {
+  key: string
+  value: unknown
+  created_at?: string
+  updated_at?: string
+}
+
 export const userprefApi = {
   /**
    * 读取偏好：keys 缺省返回全部白名单键。
    * GET /api/user/preferences?keys=a,b
+   *
+   * 后端响应为 Preference 行数组（internal/userpref/routes.go:250-258 `response.OK(c, rows)`，
+   * rows: []Preference），此处归约为 {key: value} 映射——消费方 usePreferences/
+   * usePreferenceValue 按键取值（hooks/usePreferences.ts:70 `data[key]`），
+   * 行数组直出会因数组按键索引恒 undefined 使偏好读取全失效。
    */
   getPreferences(keys?: readonly PreferenceKey[]): Promise<PreferenceMap> {
-    return http.get<PreferenceMap>('/api/user/preferences', {
-      params: keys && keys.length > 0 ? { keys: keys.join(',') } : undefined,
-    })
+    return http
+      .get<PreferenceRow[]>('/api/user/preferences', {
+        params: keys && keys.length > 0 ? { keys: keys.join(',') } : undefined,
+      })
+      .then((rows) => {
+        const map: PreferenceMap = {}
+        for (const row of rows ?? []) {
+          if (row && typeof row.key === 'string') map[row.key as PreferenceKey] = row.value
+        }
+        return map
+      })
   },
 
   /**

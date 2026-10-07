@@ -305,7 +305,9 @@ export const dataApi = {
     /** 上传并解析（multipart：import_type + file；Content-Type 与 boundary 由 axios 按 FormData 自动携带） */
     upload: (payload: { importType: ImportType; file: File }) => {
       const form = new FormData()
-      form.append('importType', payload.importType)
+      // 字段名对齐后端主契约 import_type（internal/datax/handler.go:180 `c.PostForm("import_type")`；
+      // importType 兼容分支仅为历史先行字段兜底，不得依赖）
+      form.append('import_type', payload.importType)
       form.append('file', payload.file)
       return http.post<ImportUploadResult>('/api/imports', form, {
         timeout: DATA_REQUEST_TIMEOUT_MS,

@@ -10,8 +10,7 @@ import {
   fetchBatchOptions,
   fetchBinOptions,
   fetchSkuOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY, batchOptionsKey } from '@/api/options'
 import type { BinItem } from '@/api/warehouse'
 
 export interface TransferFormModalProps {
@@ -83,13 +82,13 @@ export default function TransferFormModal({ open, mode, transferId, onClose }: T
   }, [open, mode, transferId, form])
 
   const warehouseOptions = useQuery({
-    queryKey: ['transfer-form', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
     enabled: open,
   })
-  const skuOptions = useQuery({ queryKey: ['transfer-form', 'sku-options'], queryFn: fetchSkuOptions, enabled: open })
-  const binOptions = useQuery({ queryKey: ['transfer-form', 'bin-options'], queryFn: fetchBinOptions, enabled: open })
-  const batchOptions = useQuery({ queryKey: ['transfer-form', 'batch-options'], queryFn: () => fetchBatchOptions(), enabled: open })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions, enabled: open })
+  const binOptions = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions, enabled: open })
+  const batchOptions = useQuery({ queryKey: batchOptionsKey(), queryFn: () => fetchBatchOptions(), enabled: open })
 
   const binItemMap = useMemo(
     () => buildIdItemMap<BinItem>(binOptions.data ?? [], (b) => b.id),

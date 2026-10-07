@@ -18,7 +18,7 @@ import {
   type MoveBinPayload,
   type MoveKeyInput,
 } from '@/api/transfer'
-import { OPTIONS_FETCH_PAGE_SIZE, buildIdItemMap, buildSkuMaps, fetchBinOptions, fetchSkuOptions } from '@/api/options'
+import { OPTIONS_FETCH_PAGE_SIZE, buildIdItemMap, buildSkuMaps, fetchBinOptions, fetchSkuOptions, SKU_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import type { BinItem } from '@/api/warehouse'
 import type { SkuItem } from '@/api/masterdata'
 import { SfEmpty } from '@/components/common/SfEmpty'
@@ -188,11 +188,11 @@ export default function PadStockMovePage() {
 
   // SKU / 库位映射（基础资料 options 一次取全；失败呈错误态并禁用相关步骤，不造假数据）
   const skuOptions = useQuery({
-    queryKey: ['pad', 'stockmove', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const binOptions = useQuery({
-    queryKey: ['pad', 'stockmove', 'bin-options'],
+    queryKey: BIN_OPTIONS_KEY,
     queryFn: fetchBinOptions,
   })
   const skuItems = useMemo(() => skuOptions.data ?? [], [skuOptions.data])

@@ -10,8 +10,7 @@ import {
   fetchBatchOptions,
   fetchBinOptions,
   fetchSkuOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY, batchOptionsKey } from '@/api/options'
 import type { BinItem } from '@/api/warehouse'
 
 /** 类型选项（九类中文值域即文案：internal/returns/models.go:48-51） */
@@ -58,15 +57,15 @@ export default function ExceptionCreateModal({ open, onClose }: ExceptionCreateM
   }, [open, form])
 
   // 基础资料 options（失败呈禁用 + 提示，不造假数据）
-  const skuOptions = useQuery({ queryKey: ['exception-form', 'sku-options'], queryFn: fetchSkuOptions, enabled: open })
-  const binOptions = useQuery({ queryKey: ['exception-form', 'bin-options'], queryFn: fetchBinOptions, enabled: open })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions, enabled: open })
+  const binOptions = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions, enabled: open })
   const warehouseOptions = useQuery({
-    queryKey: ['exception-form', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
     enabled: open,
   })
   const batchOptions = useQuery({
-    queryKey: ['exception-form', 'batch-options'],
+    queryKey: batchOptionsKey(),
     queryFn: () => fetchBatchOptions(),
     enabled: open && freezeEnabled === true,
   })

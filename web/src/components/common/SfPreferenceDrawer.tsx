@@ -1,6 +1,6 @@
 import { Drawer, Form, Select, Space, Button, Popconfirm, Typography, message } from 'antd'
 import { useQuery } from '@tanstack/react-query'
-import { fetchWarehouseOptions, idKey } from '@/api/options'
+import { fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePreferenceValue, useSetPreference, useClearRecentData } from '@/hooks/usePreferences'
 
 // ---------- 偏好设置抽屉（计划 §2.3 / frontend.md §23 组件清单） ----------
@@ -15,7 +15,7 @@ export function SfPreferenceDrawer({ open, onClose }: { open: boolean; onClose: 
 
   // 默认仓库候选：既有 options 接口（与各列表页筛选下拉同源缓存）
   const warehouses = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
     staleTime: 5 * 60_000,
   })

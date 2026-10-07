@@ -283,17 +283,23 @@ export function SfTable<T extends object>({
     [columns, effectiveHiddenKeys],
   )
 
-  // scroll.x 自适应（2026-10-06）：全部可见列均显式声明 width 时按「列宽总和+10」推导——
-  // 页面声明的 scrollX 普遍虚高（机动余量 80~200），视口本可容纳时提前出横向滚动条
-  // （用户反馈：仓库列表内容区 ~1390 vs 声明 1490）；min-width:100% 保证宽屏仍撑满容器，
-  // 仅「真正放不下」才出滚动条。存在未声明 width 的弹性列时仍用声明值（预留语义）；
-  // 列设置隐藏列后随可见列实时收缩。
+  // scroll.x 推导（2026-10-07 二轮，真库实测裁决）：
+  // 全部可见列均显式声明 width 时 scroll.x = 列宽和 + 选择列(48，antd6 勾选列实测宽) + 10 余量——
+  // antd 据此走 table-layout:fixed，列宽严格等于声明值：宽屏 min-width:100% 铺满无滚动条、
+  // 窄屏表内滚动且 fixed 列（操作 fixed:right）钉住常驻（否则 fixed 失效，操作按钮被表缘
+  // 裁切——用户报：库存预警「查看库存」半裁，且溢出泄漏页面 body 整页横滚）。
+  // 曾试 'max-content' 策略（同日午前）：max-content 使表格 layout=auto，长文本列
+  // （提示/备注等 ellipsis 列）按整段文本撑开（声明 162 → 实测 478），列宽声明全部失效、
+  // 溢出比声明值更严重——已废弃。页面声明的 scrollX 数字仅在存在弹性列时作为预留宽度。
   const resolvedScrollX = useMemo(() => {
-    if (scrollX === undefined) return undefined
     const cols = visibleColumns as Array<{ width?: unknown }>
-    if (cols.length === 0 || !cols.every((c) => typeof c.width === 'number')) return scrollX
-    return cols.reduce<number>((acc, c) => acc + (c.width as number), 0) + 10
-  }, [scrollX, visibleColumns])
+    const allDeclared = cols.length > 0 && cols.every((c) => typeof c.width === 'number')
+    if (allDeclared) {
+      const sum = cols.reduce<number>((acc, c) => acc + (c.width as number), 0)
+      return sum + (rowSelection ? 48 : 0) + 10
+    }
+    return scrollX
+  }, [scrollX, visibleColumns, rowSelection])
 
   // 动效 #4：批量工具栏——读受控 rowSelection，selectedRowKeys>0 由 SfToolbar 自动切换批量面板
   const selectedRowKeys =
@@ -608,11 +614,11 @@ export function SfTable<T extends object>({
                   }
                 : false
             }
-            /* 横向滚动策略（2026-10-07 改版，用户口径「不要出现滑动框」）：
-               scroll.x 用 'max-content'——列宽自动收缩适应容器（列总宽≤容器宽时
-               表格 width:100% 无滚动条；仅内容强制超宽时才出滚动条），
-               同时 fixed 列照常生效。各页声明的 scrollX 数字不再决定滚动宽度。 */
-            scroll={resolvedScrollX !== undefined ? { x: 'max-content' } : undefined}
+            /* 横向滚动策略（2026-10-07 二轮定稿）：scroll.x = 列宽和（全列显式 width 时
+               自动推导）——table-layout:fixed 下声明宽度严格生效，宽屏铺满无滚动条、
+               窄屏表内滚动且 fixed 列钉住（操作列恒可达）。'max-content' 方案已废弃：
+               长文本列按整段撑开（162→478），见 resolvedScrollX 注释。 */
+            scroll={resolvedScrollX !== undefined ? { x: resolvedScrollX } : undefined}
             {...rest}
           />
         </ConfigProvider>

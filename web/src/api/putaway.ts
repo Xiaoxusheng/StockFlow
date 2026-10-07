@@ -13,9 +13,14 @@ import type { PageQuery, PageResult } from '@/types/api'
 
 export type PutawayTaskId = number | string
 
-/** 上架任务状态（models.go:40-44 迁移 chk_putaway_tasks_status 同源；
- * PENDING→IN_PROGRESS 领取原子抢占，IN_PROGRESS→COMPLETED 上架确认，putawayTransitions） */
-export type PutawayTaskStatus = 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED'
+/**
+ * 上架任务状态（迁移 000017 五值 chk_putaway_tasks_status 同源，models.go:40-45）：
+ * PENDING→IN_PROGRESS 领取原子抢占，IN_PROGRESS→COMPLETED 上架确认、
+ * IN_PROGRESS→PAUSED 暂停（POST /api/putaway/:id/pause）、PAUSED→IN_PROGRESS 恢复
+ * （/resume，purchase.go:85-86，putawayTransitions models.go:105-110）——列表可能返回
+ * PAUSED 任务，前端类型必须覆盖。
+ */
+export type PutawayTaskStatus = 'PENDING' | 'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'CANCELLED'
 
 /** from_state（models.go:60-63：available 免检直通 / pending_inspect 经检待检，
  * 决定执行时 PutawayOp.RequireInspect） */

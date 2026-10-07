@@ -30,8 +30,7 @@ import {
   fetchBinOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfConfirm } from '@/components/common/SfConfirm'
@@ -166,16 +165,16 @@ export default function OutboundDetailPage() {
 
   // SKU / 仓库 ID → 编码/名称（拣货任务为裸模型无联表，映射失败降级为 ID）
   const skuOptions = useQuery({
-    queryKey: ['outbound', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   // 库位 ID → 编码（分配记录 bin_id 为裸 ID；失败降级为 #ID，不阻塞详情）
   const binOptions = useQuery({
-    queryKey: ['outbound', 'bin-options'],
+    queryKey: BIN_OPTIONS_KEY,
     queryFn: fetchBinOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])

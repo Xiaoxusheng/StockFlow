@@ -238,8 +238,9 @@ export interface SystemMonitorMetrics {
 // ---------- 数据备份（/api/system/backups，裁决②混合模式：应用侧登记/列表/下载，
 // pg_dump 由部署侧执行器拾取执行——internal/sysops/routes.go:111-114 / backups.go） ----------
 
-/** 菜单权限码（后端冻结三段式，internal/auth/permissions.go:362-365） */
-export const SYSTEM_BACKUP_VIEW_PERMISSION = 'system:backup:view'
+/** 备份列表权限码（后端冻结三段式 PermSystemBackupList，internal/auth/permissions.go:365；
+ * 菜单侧历史用宽松码 'system:backup:view' 经 matchBackendPermission 动作归一命中） */
+export const SYSTEM_BACKUP_LIST_PERMISSION = 'system:backup:list'
 /** 登记备份按钮权限（POST /api/system/backups 后端校验 system:backup:create） */
 export const SYSTEM_BACKUP_CREATE_PERMISSION = 'system:backup:create'
 /** 下载 / pg_dump 模板权限（system:backup:read，routes.go:111/114） */

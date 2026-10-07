@@ -6,8 +6,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   fetchSkuOptions,
   fetchSupplierOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import {
   PURCHASE_CREATE_PERMISSION,
   PURCHASE_UPDATE_PERMISSION,
@@ -76,11 +75,11 @@ export default function PurchaseOrderFormPage() {
     queryFn: fetchSupplierOptions,
   })
   const warehouses = useQuery({
-    queryKey: ['purchase', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skus = useQuery({
-    queryKey: ['purchase', 'options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
 

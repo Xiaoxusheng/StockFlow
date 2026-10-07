@@ -22,8 +22,7 @@ import {
   fetchCustomerOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -92,11 +91,11 @@ export function SalesReturnCreateDrawer({
     queryFn: fetchCustomerOptions,
   })
   const warehousesQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skusQuery = useQuery({
-    queryKey: ['options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const customerNames = useMemo(

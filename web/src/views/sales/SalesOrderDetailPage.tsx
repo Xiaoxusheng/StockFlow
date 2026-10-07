@@ -17,8 +17,7 @@ import {
   fetchCustomerOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfRelationNav } from '@/components/common/SfRelationNav'
@@ -100,11 +99,11 @@ export default function SalesOrderDetailPage() {
     queryFn: fetchCustomerOptions,
   })
   const warehousesQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skusQuery = useQuery({
-    queryKey: ['options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const customerMaps = useMemo(

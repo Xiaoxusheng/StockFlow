@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { Card, Descriptions, Drawer, Flex, Select, Space, Spin, Tooltip, Typography } from 'antd'
 import { useQuery } from '@tanstack/react-query'
@@ -51,33 +51,38 @@ function occupancySemantic(occupancyStatus: BinOccupancyStatus): StatusSemantic 
   return resolveStatus(toStatusKey(occupancyStatus))?.semantic ?? 'neutral'
 }
 
-function occupiedCellStyle(semantic: StatusSemantic): CSSProperties {
-  const color = SEMANTIC_TOKEN[semantic]
-  return {
-    height: 44,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingInline: 4,
-    borderRadius: 'var(--sf-radius-sm)',
-    border: `1px solid color-mix(in srgb, ${color} 45%, transparent)`,
-    background: `color-mix(in srgb, ${color} 14%, transparent)`,
-    color,
-    fontSize: 11,
-    fontWeight: 500,
-    overflow: 'hidden',
-    whiteSpace: 'nowrap',
-    textOverflow: 'ellipsis',
-    cursor: 'pointer',
-  }
-}
+// f4：占用样式按语义（4 值）模块级缓存——此前每格每渲染新建样式对象，
+// 万级库位页面的 reconcile 负担翻倍；引用稳定后配合 memo 化子树生效。
+const OCCUPIED_STYLES = Object.fromEntries(
+  (Object.keys(SEMANTIC_TOKEN) as StatusSemantic[]).map((semantic) => {
+    const color = SEMANTIC_TOKEN[semantic]
+    return [
+      semantic,
+      {
+        height: 44,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingInline: 4,
+        borderRadius: 'var(--sf-radius-sm)',
+        border: `1px solid color-mix(in srgb, ${color} 45%, transparent)`,
+        background: `color-mix(in srgb, ${color} 14%, transparent)`,
+        color,
+        fontSize: 11,
+        fontWeight: 500,
+        overflow: 'hidden',
+        whiteSpace: 'nowrap',
+        textOverflow: 'ellipsis',
+        cursor: 'pointer',
+      } satisfies CSSProperties,
+    ]
+  }),
+) as Record<StatusSemantic, CSSProperties>
 
-function emptyCellStyle(): CSSProperties {
-  return {
-    height: 44,
-    borderRadius: 'var(--sf-radius-sm)',
-    border: '1px dashed var(--sf-border)',
-  }
+const EMPTY_CELL_STYLE: CSSProperties = {
+  height: 44,
+  borderRadius: 'var(--sf-radius-sm)',
+  border: '1px dashed var(--sf-border)',
 }
 
 function buildCells(node: ShelfMapNode): BinCell[] {
@@ -98,7 +103,10 @@ function buildCells(node: ShelfMapNode): BinCell[] {
 
 type SelectBin = (bin: BinMapCell, zone: ZoneMapNode, shelf: ShelfMapNode) => void
 
-function ShelfGrid({
+// f4：ShelfGrid/ZoneCard memo 化 + onSelect 稳定引用（useCallback）——此前点击任一
+// 库位触发页面根 state 变化，整棵地图子树重渲染、每个货架重跑 buildCells；
+// memo 后数据未变的货架直接跳过 reconcile。数据仍来自服务端层级树，渲染内容不变。
+const ShelfGrid = memo(function ShelfGrid({
   zone,
   node,
   onSelect,
@@ -107,7 +115,7 @@ function ShelfGrid({
   node: ShelfMapNode
   onSelect: SelectBin
 }) {
-  const cells = buildCells(node)
+  const cells = useMemo(() => buildCells(node), [node])
   const cols = Math.max(node.shelf.columns, 1)
   const rows = Math.max(node.shelf.layers, 1)
   return (
@@ -137,7 +145,7 @@ function ShelfGrid({
           {cells.map((cell) => {
             const bin = cell.bin
             if (!bin) {
-              return <div key={`${cell.layer}-${cell.column_no}`} style={emptyCellStyle()} />
+              return <div key={`${cell.layer}-${cell.column_no}`} style={EMPTY_CELL_STYLE} />
             }
             const meta = resolveStatus(toStatusKey(bin.occupancy_status))
             return (
@@ -161,7 +169,7 @@ function ShelfGrid({
                 }
               >
                 <div
-                  style={occupiedCellStyle(occupancySemantic(bin.occupancy_status))}
+                  style={OCCUPIED_STYLES[occupancySemantic(bin.occupancy_status)]}
                   onClick={() => onSelect(bin, zone, node)}
                 >
                   {bin.code}
@@ -173,9 +181,9 @@ function ShelfGrid({
       </div>
     </div>
   )
-}
+})
 
-function ZoneCard({ zone, onSelect }: { zone: ZoneMapNode; onSelect: SelectBin }) {
+const ZoneCard = memo(function ZoneCard({ zone, onSelect }: { zone: ZoneMapNode; onSelect: SelectBin }) {
   return (
     <Card
       size="small"
@@ -206,7 +214,7 @@ function ZoneCard({ zone, onSelect }: { zone: ZoneMapNode; onSelect: SelectBin }
       )}
     </Card>
   )
-}
+})
 
 function CenteredLoading() {
   return (
@@ -246,6 +254,11 @@ export default function WarehouseMapPage() {
     enabled: selectedWarehouseId !== undefined,
   })
 
+  // f4：onSelect 引用稳定（memo 化子树生效的前提）；选中态仍挂页面根 state。
+  const handleSelect = useCallback<SelectBin>((bin, zone, shelf) => {
+    setSelected({ bin, zone, shelf })
+  }, [])
+
   const renderBody = () => {
     if (warehousesQuery.error) {
       return <SfError error={warehousesQuery.error} onRetry={warehousesQuery.refetch} />
@@ -277,11 +290,7 @@ export default function WarehouseMapPage() {
           </Flex>
         </Card>
         {zones.map((zone) => (
-          <ZoneCard
-            key={zone.zone.id}
-            zone={zone}
-            onSelect={(bin, zoneOf, shelfOf) => setSelected({ bin, zone: zoneOf, shelf: shelfOf })}
-          />
+          <ZoneCard key={zone.zone.id} zone={zone} onSelect={handleSelect} />
         ))}
       </>
     )

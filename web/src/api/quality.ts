@@ -159,12 +159,15 @@ export interface QualityCreatePayload {
   remark?: string
 }
 
-// ---------- 不合格品 / 质量追溯（前端先行契约，docs/changelog.md [2026-10-02] 集成记录冻结：
-// GET /api/quality/nonconforming、/trace 两端点后端未立项（质检主链路 M2/M3 已交付，
-// trace 与 nonconforming 属孪生缺口同批待补），后端就绪前页面呈统一错误态
-// （SfTable error 兜底），属预期行为，禁止 mock（requirements.md §10）。
-// 字段名按后端全站 snake_case JSON tag 惯例拼写（internal/returns/service_trace.go
-// TraceDocument/TraceOperation 等同款），端点立项后以后端 Go JSON tag 为准回对） ----------
+// ---------- 不合格品 / 质量追溯（后端 2026-10-04 已交付：GET /api/quality/trace、
+// GET /api/quality/nonconforming，internal/purchase/purchase.go:67-68 挂载、
+// service_quality_trace.go 实现——原「后端未立项呈统一错误态」披露废止）。
+// 已知边界（internal/purchase/service_quality_trace.go 文件头「已知边界」同源，禁止假功能）：
+//   - serial_no：质检链无序列号台账，trace 的 serial_no 检索后端显式 400（service_quality_trace.go:107-111），
+//     响应亦无 serial_no 字段——前端不提供该检索维度与结果列；
+//   - destination：quality_orders 无「处置去向」列，nonconforming 的 destination 检索后端
+//     显式 400（service_quality_trace.go:145-149）、记录也不下发——前端不提供该筛选与该列。
+// 字段名以后端 Go JSON tag（service_quality_trace.go:43-83）为准对齐。 ----------
 
 /** 不合格品处理结果（六值，business-flow.md §4.3；types/status.ts 质检处置六键同源） */
 export type QualityDisposition =
@@ -188,34 +191,19 @@ export const DISPOSITION_TAG_FALLBACK: Record<QualityDisposition, { label: strin
   special_release: { label: '特批放行', semantic: 'success' },
 }
 
-/** 不合格品去向（六值，business-flow.md §4.3 处置后物流去向） */
-export type NonconformingDestination =
-  | 'supplier'
-  | 'scrap_area'
-  | 'rework_area'
-  | 'downgrade_bin'
-  | 'defective_warehouse'
-  | 'released'
-
-/** 去向文案（值即文案，未知值回退展示原始值） */
-export const DESTINATION_LABEL: Record<NonconformingDestination, string> = {
-  supplier: '退供应商',
-  scrap_area: '报废区',
-  rework_area: '返工区',
-  downgrade_bin: '降级库位',
-  defective_warehouse: '不良品仓',
-  released: '放行',
-}
-
-/** 不合格品列表筛选（前端先行契约：keyword/disposition/destination + 分页） */
+/** 不合格品列表筛选（keyword/disposition + 分页；destination 检索后端不支持传值 400，
+ * 不提供——service_quality_trace.go:145-149） */
 export interface NonconformingQuery extends PageQuery {
   keyword?: string
   disposition?: QualityDisposition
-  destination?: NonconformingDestination
 }
 
-/** 不合格品记录（无独立 NCR 单号，以关联质检单号 QC- 为锚点，changelog 冻结回对清单；
- * 字段名对齐后端 snake_case JSON 惯例——camelCase 前端先行拼写已移除） */
+/**
+ * 不合格品记录（无独立 NCR 单号，以关联质检单号 QC- 为锚点；字段对齐后端
+ * NonconformingItem JSON tag，service_quality_trace.go:71-83）：
+ * 后端不下发「不合格原因」（质检单 result 即处置承载）与「去向」（未建模列），
+ * 前端不声明、列表不渲染（消费不存在字段恒空，禁止）。
+ */
 export interface NonconformingItem {
   id: SalesId
   /** 关联质检单号（QC-日期-流水） */
@@ -227,10 +215,9 @@ export interface NonconformingItem {
   batch_no?: string
   /** 不合格数量 */
   qty: number
-  /** 不合格原因 */
-  reason?: string
+  /** 处置六值英文键（检验三值不入表——无处置段，disposition 缺省） */
   disposition?: QualityDisposition
-  destination?: NonconformingDestination
+  /** 质检员（处置执行人） */
   handler_name?: string
   /** 处理时间 */
   handled_at?: string
@@ -247,15 +234,16 @@ export const RECORD_TYPE_LABEL: Record<QualityRecordType, string> = {
   disposition: '处置记录',
 }
 
-/** 质量追溯筛选（四维检索：SKU / 批次号 / 序列号 / 单据号 + 分页；snake_case 对齐后端惯例） */
+/** 质量追溯筛选（三维检索：SKU / 批次号 / 单据号 + 分页；serial_no 检索后端不支持
+ * 传值 400，不提供——service_quality_trace.go:107-111） */
 export interface QualityTraceQuery extends PageQuery {
   sku_code?: string
   batch_no?: string
-  serial_no?: string
   biz_no?: string
 }
 
-/** 质量追溯记录（检验与处置两级链路逐条记录；snake_case 对齐后端惯例） */
+/** 质量追溯记录（检验与处置两级链路逐条记录；字段对齐后端 QualityTraceItem JSON tag，
+ * service_quality_trace.go:43-58——无 serial_no 字段，前端不声明） */
 export interface QualityTraceItem {
   id: SalesId
   /** 记录时间 */
@@ -270,7 +258,6 @@ export interface QualityTraceItem {
   sku_code: string
   product_name: string
   batch_no?: string
-  serial_no?: string
   /** 检验方式三值（§4.1，与质检单 inspection_type 同值域） */
   inspection_method?: InspectionMethod
   /**
@@ -307,10 +294,12 @@ export const qualityApi = {
   /** 提交质检结果（POST /api/quality/{id}/execute，INSPECTING→COMPLETED + 库存映射） */
   execute: (id: SalesId, payload: QualityExecutePayload) =>
     http.post<QualityInspectionItem>(`/api/quality/${id}/execute`, payload),
-  /** 不合格品列表（GET /api/quality/nonconforming，前端先行契约：后端未交付，统一错误态兜底） */
+  /** 不合格品列表（GET /api/quality/nonconforming，后端 2026-10-04 已交付；
+   * destination 检索不支持——传值 400，前端不提供） */
   nonconforming: (query: NonconformingQuery) =>
     http.get<PageResult<NonconformingItem>>('/api/quality/nonconforming', { params: query }),
-  /** 质量追溯（GET /api/quality/trace，前端先行契约：后端未交付，统一错误态兜底） */
+  /** 质量追溯（GET /api/quality/trace，后端 2026-10-04 已交付；
+   * serial_no 检索不支持——传值 400，前端不提供） */
   trace: (query: QualityTraceQuery) =>
     http.get<PageResult<QualityTraceItem>>('/api/quality/trace', { params: query }),
 }

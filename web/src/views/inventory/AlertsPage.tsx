@@ -36,36 +36,37 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
   {
     title: '预警类型',
     dataIndex: 'level',
-    width: 100,
+    width: 85,
     fixed: 'left',
     render: (v: StockAlertLevel) => <SfStatusTag status={v} />,
   },
-  { title: 'SKU 编码', dataIndex: 'sku_code', width: 130 },
+  { title: 'SKU 编码', dataIndex: 'sku_code', width: 100 },
   {
     title: '商品名称',
     dataIndex: 'sku_name',
-    width: 200,
+    width: 130,
     ellipsis: true,
     render: (v: string) => <Text style={{ maxWidth: '100%' }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
   {
     title: '仓库',
     dataIndex: 'warehouse_name',
-    width: 120,
+    width: 112,
+    ellipsis: true,
     render: (v: string, record: StockAlertItem) =>
       record.warehouse_code ? `${v}（${record.warehouse_code}）` : v,
   },
   {
     title: '当前库存',
     dataIndex: 'current_qty',
-    width: 100,
+    width: 78,
     align: 'right',
     render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
   {
     title: '阈值',
     dataIndex: 'threshold',
-    width: 100,
+    width: 66,
     align: 'right',
     render: (v: number, record: StockAlertItem) => (
       <span className="sf-num">
@@ -78,14 +79,15 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
     // 批次号仅效期类预警携带（AlertItem.batch_no omitempty，repository.go:417），其余「-」
     title: '批次',
     dataIndex: 'batch_no',
-    width: 130,
+    width: 112,
+    ellipsis: true,
     render: (v?: string) => v || '-',
   },
   {
     // 末次移动时间仅积压预警携带（last_moved_at omitempty，repository.go:419）
     title: '末次移动',
     dataIndex: 'last_moved_at',
-    width: 160,
+    width: 132,
     render: (v?: string | null) =>
       v ? <DateCell value={v} /> : '-',
   },
@@ -94,9 +96,11 @@ const COLUMNS: ColumnsType<StockAlertItem> = [
     // maxWidth:320 与实际列宽（200）脱节，文本连同省略号溢出 td、冒到 fixed 右列
     // （操作列）右侧——用户可见「更多」样式的溢出点（2026-10-07 修复）。
     // maxWidth:'100%' 随列宽自适应，不再硬编码像素（column.ellipsis 的 td title 兜底提示）。
+    // 2026-10-07 二轮：宽度纳入整表 1127 预算（1440 展开侧栏/1280 收起侧栏整表无横向
+    // 滚动条），长提示经 ellipsis+tooltip 查看。
     title: '提示',
     dataIndex: 'message',
-    width: 280,
+    width: 162,
     ellipsis: true,
     render: (v: string) => <Text style={{ maxWidth: '100%' }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
@@ -139,10 +143,12 @@ export default function AlertsPage() {
             title: '操作',
             key: 'actions',
             fixed: 'right',
-            // 170 = 查看库存+去补货（134px inline-flex）+ 左右 padding 16 + 余量。
-            // 150 时 div 恰好顶满内容盒，亚像素溢出触发 td 的 text-overflow 在按钮右侧
-            // 画出幽灵「…」并被表缘裁切（用户误读为「更多」溢出，2026-10-07 修复）。
-            width: 170,
+            // 150 = 查看库存+去补货（~124px inline-flex）+ 左右 padding 16 + 余量。
+            // 2026-10-07 溢出审计轮二轮压缩（170→150）；本表全列显式 width，SfTable 自动
+            // 推导 scroll.x（列宽和+10）走 fixed 布局表内滚动——fixed:right 窄容器下钉住
+            // 常驻，不会再出现按钮被表缘裁切（旧 150 亚像素幽灵「…」已由
+            // global.css td.sf-table-actions-cell{text-overflow:clip} 全站兜底）。
+            width: 150,
             render: (_, record) => {
               const stockQuery = record.warehouse_id
                 ? `sku_id=${record.sku_id}&warehouse_id=${record.warehouse_id}`

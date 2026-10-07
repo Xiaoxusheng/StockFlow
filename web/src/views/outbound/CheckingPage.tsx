@@ -15,7 +15,7 @@ import {
 } from '@/api/outbound'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -245,11 +245,11 @@ export default function CheckingPage() {
 
   // SKU / 仓库 ID → 编码/名称（options.ts：一次取全基础资料，失败降级为 ID）
   const skuOptions = useQuery({
-    queryKey: ['outbound', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])

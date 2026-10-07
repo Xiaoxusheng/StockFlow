@@ -18,8 +18,7 @@ import {
   buildWarehouseMaps,
   fetchUserOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { DateCell } from '@/components/table/cells'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfDeviceStatus } from '@/components/device/SfDeviceStatus'
@@ -99,7 +98,7 @@ export default function DeviceListPage({ deviceType: deviceTypeProp }: { deviceT
   // warehouse_id/bound_user_id → 名称本地映射；拉取失败降级空下拉 / #ID 展示，
   // 不阻塞列表（api/options.ts 约定，InboundPage 同款）
   const warehouses = useQuery({
-    queryKey: ['devices', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const users = useQuery({

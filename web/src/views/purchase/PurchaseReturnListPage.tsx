@@ -14,7 +14,7 @@ import {
 } from '@/api/purchase'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildWarehouseMaps, fetchWarehouseOptions } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -73,7 +73,7 @@ export default function PurchaseReturnListPage() {
 
   // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
   const warehouseOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(

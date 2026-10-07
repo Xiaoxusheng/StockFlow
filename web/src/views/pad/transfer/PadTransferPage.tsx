@@ -19,8 +19,7 @@ import {
   buildWarehouseMaps,
   fetchBinOptions,
   fetchSkuOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import type { BinItem } from '@/api/warehouse'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
@@ -158,7 +157,7 @@ export default function PadTransferPage() {
 
   // 仓库/SKU/库位编码映射（基础资料 options 一次取全；失败降级为 ID 显示，不造假数据）
   const warehouseOptions = useQuery({
-    queryKey: ['pad', 'transfer', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNameMap = useMemo(
@@ -166,12 +165,12 @@ export default function PadTransferPage() {
     [warehouseOptions.data],
   )
   const skuOptions = useQuery({
-    queryKey: ['pad', 'transfer', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
   const binOptions = useQuery({
-    queryKey: ['pad', 'transfer', 'bin-options'],
+    queryKey: BIN_OPTIONS_KEY,
     queryFn: fetchBinOptions,
   })
   const binItemMap = useMemo(

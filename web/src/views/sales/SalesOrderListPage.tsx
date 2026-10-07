@@ -13,7 +13,7 @@ import {
 } from '@/api/sales'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildCustomerMaps, buildWarehouseMaps, fetchCustomerOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildCustomerMaps, buildWarehouseMaps, fetchCustomerOptions, fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -62,7 +62,7 @@ export default function SalesOrderListPage() {
     queryFn: fetchCustomerOptions,
   })
   const warehousesQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const customerNames = useMemo(

@@ -11,7 +11,7 @@ import {
   EXCEPTION_TYPES,
   exceptionApi,
 } from '@/api/exception'
-import { buildSkuMaps, fetchSkuOptions } from '@/api/options'
+import { buildSkuMaps, fetchSkuOptions, SKU_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { useAuthStore } from '@/stores/auth'
@@ -86,7 +86,7 @@ export default function ExceptionCenterPage() {
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
 
   // SKU 编码映射（出参仅 sku_id 裸 ID，基础资料 options 本地映射，失败降级为 #id）
-  const skuOptions = useQuery({ queryKey: ['exception', 'center', 'sku-options'], queryFn: fetchSkuOptions })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
   const skuMaps = buildSkuMaps(skuOptions.data ?? [])
   const skuCodeOf = (id: number) =>
     String(id) === '0' ? '-' : (skuMaps.code.get(String(id)) ?? `#${String(id)}`)

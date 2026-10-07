@@ -8,8 +8,7 @@ import {
   fetchSkuOptions,
   fetchWarehouseOptions,
   buildIdItemMap,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
 import {
   SALES_ORDER_CREATE_PERMISSION,
@@ -78,7 +77,7 @@ export default function SalesOrderCreatePage() {
 
   // 表单依赖下拉：客户 / 仓库 / SKU 一次取全（options 端点已冻结）；失败呈错误态可重试
   const customers = useQuery({
-    queryKey: ['options', 'customers'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchCustomerOptions,
   })
   const warehouses = useQuery({
@@ -86,7 +85,7 @@ export default function SalesOrderCreatePage() {
     queryFn: fetchWarehouseOptions,
   })
   const skus = useQuery({
-    queryKey: ['options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
 

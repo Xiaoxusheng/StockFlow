@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
 import type { TransferInTransitQuery, TransferInTransitRow } from '@/api/transfer'
 import { transferApi } from '@/api/transfer'
-import { buildSkuMaps, buildIdMap, fetchBatchOptions, fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
+import { buildSkuMaps, buildIdMap, fetchBatchOptions, fetchSkuOptions, fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, batchOptionsKey } from '@/api/options'
 import { SfError } from '@/components/common/SfError'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -33,10 +33,10 @@ export default function TransferInTransitDrawer({ open, onClose }: TransferInTra
   })
 
   // 编码映射（行出参仅 sku_id/batch_id 裸 ID，基础资料 options 本地映射，失败降级为 #id）
-  const skuOptions = useQuery({ queryKey: ['transfer-intransit', 'sku-options'], queryFn: fetchSkuOptions, enabled: open })
-  const batchOptions = useQuery({ queryKey: ['transfer-intransit', 'batch-options'], queryFn: () => fetchBatchOptions(), enabled: open })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions, enabled: open })
+  const batchOptions = useQuery({ queryKey: batchOptionsKey(), queryFn: () => fetchBatchOptions(), enabled: open })
   const warehouseOptions = useQuery({
-    queryKey: ['transfer-intransit', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
     enabled: open,
   })

@@ -21,10 +21,11 @@ export type TaskType = 'putaway' | 'picking' | 'checking'
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'exception'
 
 export interface TaskQuery extends PageQuery {
-  keyword?: string
   task_type?: TaskType
   status?: TaskStatus
   warehouse_code?: string
+  // keyword 已摘除：GET /api/tasks 后端仅消费 task_type/status/warehouse_code 三键
+  // （internal/reports/workbench.go:891-917 myTasks），传了被静默忽略（假筛选项，禁止）。
 }
 
 export interface TaskItem {
@@ -84,7 +85,8 @@ export interface RecentOperationItem {
   action: string
   module: string
   object_type?: string
-  object_id?: string
+  /** 对象 ID（operation_logs.object_id int64 直出 JSON number，未经 database.ID 字符串化） */
+  object_id?: number
   success: boolean
   error_code?: string
   request_id?: string

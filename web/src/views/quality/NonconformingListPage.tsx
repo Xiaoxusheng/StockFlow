@@ -1,10 +1,8 @@
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
-  DESTINATION_LABEL,
   DISPOSITION_TAG_FALLBACK,
   qualityApi,
-  type NonconformingDestination,
   type NonconformingItem,
   type NonconformingQuery,
   type QualityDisposition,
@@ -28,14 +26,9 @@ const DISPOSITION_OPTIONS: Array<{ label: string; value: QualityDisposition }> =
   { label: '特批放行', value: 'special_release' },
 ]
 
-const DESTINATION_OPTIONS: Array<{ label: string; value: NonconformingDestination }> = [
-  { label: '退供应商', value: 'supplier' },
-  { label: '报废区', value: 'scrap_area' },
-  { label: '返工区', value: 'rework_area' },
-  { label: '降级库位', value: 'downgrade_bin' },
-  { label: '不良品仓', value: 'defective_warehouse' },
-  { label: '放行', value: 'released' },
-]
+// 去向（destination）筛选与列已摘除：quality_orders 无「处置去向」列，后端对非空
+// destination 检索显式 400、记录亦不下发（service_quality_trace.go:145-149 + 文件头
+// 「已知边界」）——提供即假筛选/恒空列，禁止（requirements.md §10）。
 
 /**
  * 处理结果 → SfStatusTag：六种处置值均不在 types/status.ts 注册表，
@@ -67,24 +60,14 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
     align: 'right',
     render: (v: number) => <span className="sf-num">{formatNumber(v)}</span>,
   },
-  {
-    title: '不合格原因',
-    dataIndex: 'reason',
-    width: 160,
-    ellipsis: true,
-    render: (v?: string) => (v ? <Text style={{ maxWidth: 160 }} ellipsis={{ tooltip: v }}>{v}</Text> : '-'),
-  },
+  // 「不合格原因」（reason）列已摘除：后端 NonconformingItem 无该字段（不合格成因由
+  // 质检单 result 九值承载）——消费不存在字段恒显示 '-' 属拿错数据，禁止。
+  // 「去向」（destination）列已摘除：同上无字段（service_quality_trace.go:71-83）。
   {
     title: '处理结果',
     dataIndex: 'disposition',
     width: 130,
     render: (v?: QualityDisposition) => <DispositionTag value={v} />,
-  },
-  {
-    title: '去向',
-    dataIndex: 'destination',
-    width: 110,
-    render: (v?: NonconformingDestination) => (v ? (DESTINATION_LABEL[v] ?? v) : '-'),
   },
   { title: '处理人', dataIndex: 'handler_name', width: 100, render: (v?: string) => v ?? '-' },
   {
@@ -103,11 +86,10 @@ const COLUMNS: ColumnsType<NonconformingItem> = [
 
 /**
  * 不合格品列表（frontend.md §9.1 质量中心模块；菜单 /quality/nonconforming，config/menu.tsx:107）。
- * GET /api/quality/nonconforming 端点未立项：质检主链路后端 M2/M3 已交付（GET/POST /api/quality
- * 等，internal/purchase/purchase.go:64-68），缺的是 nonconforming 与 trace 两个查询端点
- * （孪生缺口同批待补），后端就绪前页面呈统一错误态（SfTable error 兜底），属预期行为，
- * 禁止 mock（requirements.md §10）。
- * 处理结果与去向（退供应商/报废/返工/降级/转不良品仓/特批放行）对齐 business-flow.md §4.3；
+ * GET /api/quality/nonconforming 后端 2026-10-04 已交付（internal/purchase/service_quality_trace.go，
+ * 原「端点未立项呈统一错误态」披露废止）。
+ * 处理结果六值（退供应商/报废/返工/降级/转不良品仓/特批放行）对齐 business-flow.md §4.3，
+ * 经 SfStatusTag 呈现；去向（destination）与不合格原因（reason）无后端字段，检索与列已摘除。
  * 单据锚点为关联质检单号 QC-（§13.1），转不良品仓须产生库存变动与流水（inventory-rules）。
  */
 export default function NonconformingListPage() {
@@ -129,7 +111,6 @@ export default function NonconformingListPage() {
           fields={[
             { name: 'keyword', label: '关键词', control: 'input', placeholder: '质检单号 / SKU / 来源单据' },
             { name: 'disposition', label: '处理结果', control: 'select', options: DISPOSITION_OPTIONS },
-            { name: 'destination', label: '去向', control: 'select', options: DESTINATION_OPTIONS },
           ]}
           initialValues={list.params}
           onSearch={list.applyFilters}
@@ -147,7 +128,7 @@ export default function NonconformingListPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前筛选条件下没有不合格品记录"
-          scrollX={1690}
+          scrollX={1420}
         />
       </Card>
     </div>

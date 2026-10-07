@@ -272,6 +272,13 @@ export interface PackResult {
 /** 发货单状态（models.go:325-331；库存正式扣减仅发生在 PENDING→SHIPPED，后续为纯记录流转） */
 export type ShipmentStatus = 'PENDING' | 'SHIPPED' | 'IN_TRANSIT' | 'SIGNED' | 'ABNORMAL'
 
+/**
+ * 物流态流转目标态（PUT /api/shipments/{id}/status 后端仅接受三值，service_ship.go:679-691
+ * ShipStatusInput switch 白名单——PENDING→SHIPPED 由发货确认完成，传 PENDING/SHIPPED 恒 400，
+ * 类型收窄防越界调用）。
+ */
+export type ShipmentTransitStatus = Extract<ShipmentStatus, 'IN_TRANSIT' | 'SIGNED' | 'ABNORMAL'>
+
 /** 发货单列表筛选（handler.go:548-566：status/outbound_no/warehouse_id） */
 export interface ShipmentQuery extends PageQuery {
   status?: ShipmentStatus
@@ -461,7 +468,7 @@ export const outboundTaskApi = {
     /** 发货确认（POST /api/shipments，PENDING→SHIPPED 触发库存正式扣减） */
     ship: (payload: ShipPayload) => http.post<ShipResult>('/api/shipments', payload),
     /** 物流态流转（PUT /api/shipments/{id}/status，SHIPPED 后续：IN_TRANSIT/SIGNED/ABNORMAL） */
-    updateStatus: (id: SalesId, payload: { status: ShipmentStatus; remark?: string }) =>
+    updateStatus: (id: SalesId, payload: { status: ShipmentTransitStatus; remark?: string }) =>
       http.put<Shipment>(`/api/shipments/${id}/status`, payload),
   },
 }

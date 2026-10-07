@@ -14,7 +14,7 @@ import {
 } from '@/api/sales'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -72,7 +72,7 @@ export default function SalesReturnListPage() {
 
   // 仓库 id → 名称映射（options 端点一次取全；失败降级为 ID 显示，不阻塞列表）
   const warehousesQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(

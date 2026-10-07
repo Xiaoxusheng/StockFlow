@@ -29,7 +29,7 @@ import {
   resolveFileDownloadPath,
   type FileItem,
 } from '@/api/file'
-import { buildIdItemMap, buildSkuMaps, fetchSkuOptions } from '@/api/options'
+import { buildIdItemMap, buildSkuMaps, fetchSkuOptions, SKU_OPTIONS_KEY } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
 import type { SalesId } from '@/api/sales'
 import { SfAttachment, type AttachmentItem } from '@/components/common/SfAttachment'
@@ -257,7 +257,7 @@ export default function PadQualityPage() {
   })
 
   // SKU 编码/名称映射（options 一次取全；失败降级为 ID 展示，不阻塞列表）
-  const skuOptions = useQuery({ queryKey: ['pad', 'options', 'sku'], queryFn: fetchSkuOptions })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
   const skuItemMap = useMemo(
     () => buildIdItemMap(skuOptions.data ?? [], (s) => s.id),
     [skuOptions.data],

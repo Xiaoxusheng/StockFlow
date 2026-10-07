@@ -11,7 +11,7 @@ import {
   type InboundOrderStatus,
   type InboundSourceType,
 } from '@/api/inbound'
-import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { SfDetailHeader } from '@/components/common/SfDetailHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfRelationNav } from '@/components/common/SfRelationNav'
@@ -121,11 +121,11 @@ export default function InboundDetailPage() {
   // SKU options（GET /api/skus）：sku_id→编码/商品名称本地映射；仓库 options：warehouse_id→名称。
   // 拉取失败降级为 ID 展示，不阻塞详情（api/options.ts 约定）
   const skuOptions = useQuery({
-    queryKey: ['inbound', 'options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const warehouseOptions = useQuery({
-    queryKey: ['inbound', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])

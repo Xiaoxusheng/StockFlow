@@ -19,7 +19,7 @@ import {
   exceptionApi,
 } from '@/api/exception'
 import { resolveErrorMessage } from '@/api/client'
-import { buildBinCodeMap, buildSkuMaps, fetchBinOptions, fetchSkuOptions } from '@/api/options'
+import { buildBinCodeMap, buildSkuMaps, fetchBinOptions, fetchSkuOptions, SKU_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
@@ -97,9 +97,9 @@ export default function PadExceptionPage() {
   })
 
   // SKU/库位编码映射（基础资料 options 一次取全；失败降级为 ID，不造假数据）
-  const skuOptions = useQuery({ queryKey: ['pad', 'exception', 'sku-options'], queryFn: fetchSkuOptions })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])
-  const binOptions = useQuery({ queryKey: ['pad', 'exception', 'bin-options'], queryFn: fetchBinOptions })
+  const binOptions = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions })
   const binCodeMap = useMemo(() => buildBinCodeMap(binOptions.data ?? []), [binOptions.data])
 
   const selected = list.items.find((item) => String(item.id) === String(selectedId)) ?? null

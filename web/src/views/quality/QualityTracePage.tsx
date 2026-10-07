@@ -58,7 +58,8 @@ const COLUMNS: ColumnsType<QualityTraceItem> = [
     render: (v: string) => <Text style={{ maxWidth: 180 }} ellipsis={{ tooltip: v }}>{v}</Text>,
   },
   { title: '批次号', dataIndex: 'batch_no', width: 110, render: (v?: string) => v ?? '-' },
-  { title: '序列号', dataIndex: 'serial_no', width: 130, render: (v?: string) => v ?? '-' },
+  // 序列号列已摘除：质检链无序列号台账，后端 QualityTraceItem 无 serial_no 字段
+  // （service_quality_trace.go:43-58），恒空列属「拿错数据」，禁止（requirements.md §10）。
   {
     title: '检验方式',
     dataIndex: 'inspection_method',
@@ -95,10 +96,10 @@ const COLUMNS: ColumnsType<QualityTraceItem> = [
 
 /**
  * 质量追溯（frontend.md §9.1 质量中心模块；菜单 /quality/trace，config/menu.tsx:108）。
- * GET /api/quality/trace 端点未立项：质检主链路后端 M2/M3 已交付，缺的是 trace 与
- * nonconforming 两个查询端点（孪生缺口同批待补），后端就绪前页面呈统一错误态
- * （SfTable error 兜底），属预期行为，禁止 mock（requirements.md §10）。
- * 按 SKU / 批次号 / 序列号 / 单据号 四维检索质量记录链（检验 → 处置），走既有列表模式。
+ * GET /api/quality/trace 后端 2026-10-04 已交付（internal/purchase/service_quality_trace.go，
+ * 原「端点未立项呈统一错误态」披露废止）。按 SKU / 批次号 / 单据号 三维检索质量记录链
+ * （检验 → 处置），走既有列表模式；序列号（serial_no）检索维度已摘除——质检链未记录
+ * 序列号，后端对非空 serial_no 显式 400（service_quality_trace.go:107-111）。
  */
 export default function QualityTracePage() {
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
@@ -112,14 +113,13 @@ export default function QualityTracePage() {
     <div className="sf-page">
       <SfPageHeader
         title="质量追溯"
-        subtitle="按 SKU / 批次号 / 序列号 / 单据号检索质量记录链（检验 → 处置）"
+        subtitle="按 SKU / 批次号 / 单据号检索质量记录链（检验 → 处置）"
       />
       <Card size="small">
         <SfSearchForm
           fields={[
             { name: 'sku_code', label: 'SKU', control: 'input', placeholder: 'SKU 编码' },
             { name: 'batch_no', label: '批次号', control: 'input', placeholder: '批次号' },
-            { name: 'serial_no', label: '序列号 SN', control: 'input', placeholder: '序列号' },
             { name: 'biz_no', label: '单据号', control: 'input', placeholder: '质检单号 / 业务单据号' },
           ]}
           initialValues={list.params}
@@ -137,8 +137,8 @@ export default function QualityTracePage() {
           pagination={list.pagination}
           total={list.total}
           onPageChange={list.onPageChange}
-          emptyText="请输入 SKU / 批次号 / 序列号 / 单据号进行质量追溯"
-          scrollX={1800}
+          emptyText="请输入 SKU / 批次号 / 单据号进行质量追溯"
+          scrollX={1670}
         />
       </Card>
     </div>

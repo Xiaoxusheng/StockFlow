@@ -21,8 +21,7 @@ import {
   fetchBinOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAutoRefresh } from '@/hooks/useAutoRefresh'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
@@ -258,15 +257,15 @@ export default function PickingPage() {
 
   // SKU / 仓库 / 库位 ID → 编码/名称（options.ts：一次取全基础资料，失败降级为 ID）
   const skuOptions = useQuery({
-    queryKey: ['outbound', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const binOptions = useQuery({
-    queryKey: ['outbound', 'bin-options'],
+    queryKey: BIN_OPTIONS_KEY,
     queryFn: fetchBinOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])

@@ -13,7 +13,7 @@ import {
   type PackingRecord,
   type PackingRecordQuery,
 } from '@/api/outbound'
-import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildSkuMaps, buildWarehouseMaps, fetchSkuOptions, fetchWarehouseOptions, idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -99,7 +99,7 @@ export default function PackingPage() {
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，失败降级为 ID）
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(
@@ -107,7 +107,7 @@ export default function PackingPage() {
     [warehouseOptions.data],
   )
   const skuOptions = useQuery({
-    queryKey: ['outbound', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const skuMaps = useMemo(() => buildSkuMaps(skuOptions.data ?? []), [skuOptions.data])

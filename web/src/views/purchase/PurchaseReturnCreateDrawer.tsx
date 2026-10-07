@@ -20,8 +20,7 @@ import {
   buildIdItemMap,
   fetchSkuOptions,
   fetchSupplierOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { SfConfirm } from '@/components/common/SfConfirm'
@@ -84,11 +83,11 @@ export function PurchaseReturnCreateDrawer({
     queryFn: fetchSupplierOptions,
   })
   const warehouseOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skuOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const supplierItems = useMemo(

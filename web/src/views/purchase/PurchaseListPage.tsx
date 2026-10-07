@@ -17,8 +17,7 @@ import {
   buildSupplierMaps,
   buildWarehouseMaps,
   fetchSupplierOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -59,7 +58,7 @@ export default function PurchaseListPage() {
     queryFn: fetchSupplierOptions,
   })
   const warehouseOptionsQuery = useQuery({
-    queryKey: ['purchase', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const supplierNames = useMemo(

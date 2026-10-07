@@ -20,8 +20,7 @@ import {
   buildWarehouseMaps,
   fetchBinOptions,
   fetchSkuOptions,
-  fetchWarehouseOptions,
-} from '@/api/options'
+  fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
 import type { BinItem } from '@/api/warehouse'
 import type {
@@ -322,12 +321,12 @@ export default function PadReceivePage() {
   })
 
   // 基础资料 options（PadInventoryPage 同范本）：SKU 管控开关 + 仓库名 + 目标库位下拉
-  const skuOptions = useQuery({ queryKey: ['pad', 'options', 'sku'], queryFn: fetchSkuOptions })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
   const warehouseOptions = useQuery({
-    queryKey: ['pad', 'options', 'warehouse'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
-  const binOptions = useQuery({ queryKey: ['pad', 'options', 'bin'], queryFn: fetchBinOptions })
+  const binOptions = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions })
 
   const skuItemMap = useMemo(
     () => buildIdItemMap(skuOptions.data ?? [], (s) => s.id),

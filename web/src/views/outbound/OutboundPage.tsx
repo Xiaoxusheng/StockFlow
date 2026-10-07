@@ -11,7 +11,7 @@ import {
 } from '@/api/outbound'
 import { DateCell } from '@/components/table/cells'
 import { toStatusKey } from '@/api/masterdata'
-import { buildWarehouseMaps, fetchWarehouseOptions, idKey } from '@/api/options'
+import { buildWarehouseMaps, fetchWarehouseOptions, idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfExportButton } from '@/components/common/SfExportButton'
@@ -80,7 +80,7 @@ export default function OutboundPage() {
 
   // 仓库 ID → 名称（options.ts：一次取全基础资料，映射失败降级为 ID，不造假数据）
   const warehouseOptions = useQuery({
-    queryKey: ['outbound', 'warehouse-options'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const warehouseNames = useMemo(

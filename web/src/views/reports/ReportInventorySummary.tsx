@@ -4,7 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import { reportsApi, type InventorySummaryQuery, type InventorySummaryRow } from '@/api/reports'
-import { fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
+import { fetchSkuOptions, fetchWarehouseOptions, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -60,10 +60,10 @@ export default function ReportInventorySummary() {
   const user = useAuthStore((s) => s.user)
   const canDrillStock = canAccess(user, 'inventory:stock:view')
   const warehouseOptions = useQuery({
-    queryKey: ['reports', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
-  const skuOptions = useQuery({ queryKey: ['reports', 'options', 'skus'], queryFn: fetchSkuOptions })
+  const skuOptions = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
 
   const list = usePagedList<InventorySummaryRow, InventorySummaryQuery>({
     queryKey: ['reports', 'inventory-summary'],

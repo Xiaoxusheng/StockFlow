@@ -178,6 +178,9 @@ export default function ImportWizardPage() {
         title: '操作',
         key: 'operation',
         width: 170,
+        // fixed:right：本表全列显式 width，SfTable 推导 scroll.x 走表内滚动——
+        // 不钉住则窄容器下操作按钮随横滚被表缘裁切（2026-10-07 全站操作列审计唯一缺 fixed 处）
+        fixed: 'right',
         render: (_: unknown, record: DataTask) =>
           record.failed_rows && record.failed_rows > 0 && canRetry ? (
             <Button

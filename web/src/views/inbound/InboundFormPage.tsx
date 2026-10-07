@@ -8,8 +8,7 @@ import {
   fetchSkuOptions,
   fetchSupplierOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
 import { toStatusKey } from '@/api/masterdata'
 import { purchaseApi, type PurchaseOrder, type PurchaseStatus } from '@/api/purchase'
@@ -100,11 +99,11 @@ export default function InboundFormPage() {
     : canAccess(user, INBOUND_CREATE_PERMISSION)
 
   const warehouses = useQuery({
-    queryKey: ['inbound', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const skus = useQuery({
-    queryKey: ['inbound', 'options', 'skus'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   // 供应商名称映射：仅采购来源单下拉选项展示用（缺资料降级 #ID，不造假数据）

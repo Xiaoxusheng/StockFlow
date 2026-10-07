@@ -28,8 +28,7 @@ import {
   buildUserNameMap,
   fetchBinOptions,
   fetchSkuOptions,
-  fetchUserOptions,
-} from '@/api/options'
+  fetchUserOptions, SKU_OPTIONS_KEY, BIN_OPTIONS_KEY } from '@/api/options'
 import type { BinItem } from '@/api/warehouse'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
@@ -55,13 +54,16 @@ import { EMPTY_TEXT, formatDateTime, formatNumber } from '@/utils/format'
 
 /**
  * 上架任务状态 → SfStatusTag 文案/语义（frontend.md §24：颜色统一经 SfStatusTag）。
- * 后端大写枚举 PENDING/IN_PROGRESS/COMPLETED/CANCELLED 未注册于 types/status.ts
- * （不在本单元文件清单内），与 api/quality.ts / PadReceivePage 同口径以 label + semantic
- * 显式指定，文案对齐注册表既有词条（待处理/上架中/已取消；putaway_in_progress=上架中）。
+ * 后端大写枚举 PENDING/IN_PROGRESS/PAUSED/COMPLETED/CANCELLED（迁移 000017 五值）未注册于
+ * types/status.ts（不在本单元文件清单内），与 api/quality.ts / PadReceivePage 同口径以
+ * label + semantic 显式指定，文案对齐注册表既有词条（待处理/上架中/已取消；
+ * putaway_in_progress=上架中）。
  */
 const PUTAWAY_STATUS_TAG_META: Record<PutawayTaskStatus, { label: string; semantic: StatusSemantic }> = {
   PENDING: { label: '待领取', semantic: 'pending' },
   IN_PROGRESS: { label: '上架中', semantic: 'processing' },
+  // 迁移 000017 暂停/恢复：PAUSED 属作业过程状态（可恢复），非终态不取中性灰
+  PAUSED: { label: '已暂停', semantic: 'warning' },
   COMPLETED: { label: '已完成', semantic: 'success' },
   CANCELLED: { label: '已取消', semantic: 'neutral' },
 }
@@ -73,7 +75,7 @@ function PutawayStatusTag({ status }: { status: PutawayTaskStatus }) {
 
 /** 状态 chip（默认筛「待领取」= 可作业任务源；business-flow.md §5.1 待上架→上架中→已完成） */
 const STATUS_OPTIONS: Array<{ label: string; value: PutawayTaskStatus }> = (
-  ['PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] as const
+  ['PENDING', 'IN_PROGRESS', 'PAUSED', 'COMPLETED', 'CANCELLED'] as const
 ).map((value) => ({ value, label: PUTAWAY_STATUS_TAG_META[value].label }))
 
 /** from_state 文案（models.go:60-63 注释：免检直通 / 经检待检） */
@@ -245,11 +247,11 @@ export default function PadPutawayPage() {
 
   // SKU / 库位 / 用户映射（基础资料 options 一次取全；失败降级为 ID 显示，不阻塞任务列表）
   const skuOptions = useQuery({
-    queryKey: ['pad', 'putaway', 'sku-options'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
   })
   const binOptions = useQuery({
-    queryKey: ['pad', 'putaway', 'bin-options'],
+    queryKey: BIN_OPTIONS_KEY,
     queryFn: fetchBinOptions,
   })
   const userOptions = useQuery({

@@ -11,7 +11,7 @@ import {
   type QualityCreatePayload,
   type QualityInspectionItem,
 } from '@/api/quality'
-import { fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { fetchSkuOptions, fetchWarehouseOptions, idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { toStatusKey } from '@/api/masterdata'
 import { SfOrderSelect, type SfOrderSelectOption } from '@/components/common/SfOrderSelect'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
@@ -80,12 +80,12 @@ export default function QualityCreateModal({ open, onClose, onCreated }: Quality
 
   // SKU / 仓库选项（options 一次取全；仅创建弹窗打开时拉取）
   const skuOptionsQuery = useQuery({
-    queryKey: ['options', 'sku'],
+    queryKey: SKU_OPTIONS_KEY,
     queryFn: fetchSkuOptions,
     enabled: open,
   })
   const warehouseOptionsQuery = useQuery({
-    queryKey: ['options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
     enabled: open,
   })

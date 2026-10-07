@@ -30,8 +30,7 @@ import {
   buildWarehouseMaps,
   fetchUserOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, WAREHOUSE_OPTIONS_KEY } from '@/api/options'
 import { toStatusKey } from '@/api/masterdata'
 import { resolveErrorMessage } from '@/api/client'
 import { usePagedList } from '@/hooks/usePagedList'
@@ -237,7 +236,7 @@ export default function DeviceDetailPage() {
   // 仓库/用户 options（GET /api/warehouses、/api/users）：warehouse_id/bound_user_id/activated_by
   // 为裸 ID，本地映射展示，拉取失败降级 #ID（api/options.ts 约定）；用户 options 同时供绑定弹窗
   const warehouses = useQuery({
-    queryKey: ['devices', 'options', 'warehouses'],
+    queryKey: WAREHOUSE_OPTIONS_KEY,
     queryFn: fetchWarehouseOptions,
   })
   const users = useQuery({

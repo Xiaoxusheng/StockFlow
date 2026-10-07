@@ -19,8 +19,7 @@ import {
   fetchBinOptions,
   fetchSkuOptions,
   fetchWarehouseOptions,
-  idKey,
-} from '@/api/options'
+  idKey, SKU_OPTIONS_KEY, WAREHOUSE_OPTIONS_KEY, BIN_OPTIONS_KEY, batchOptionsKey } from '@/api/options'
 import { DateCell } from '@/components/table/cells'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
@@ -223,9 +222,9 @@ export default function TracePage() {
 
   // TraceResult 仅下发裸 ID（warehouse_id/bin_id/batch_id/sku_id），options 一次取全本地映射，
   // 失败降级 ID 展示（api/options.ts 约定，不造假数据）
-  const warehouses = useQuery({ queryKey: ['options', 'warehouses'], queryFn: fetchWarehouseOptions })
-  const skus = useQuery({ queryKey: ['options', 'skus'], queryFn: fetchSkuOptions })
-  const bins = useQuery({ queryKey: ['options', 'bins'], queryFn: fetchBinOptions })
+  const warehouses = useQuery({ queryKey: WAREHOUSE_OPTIONS_KEY, queryFn: fetchWarehouseOptions })
+  const skus = useQuery({ queryKey: SKU_OPTIONS_KEY, queryFn: fetchSkuOptions })
+  const bins = useQuery({ queryKey: BIN_OPTIONS_KEY, queryFn: fetchBinOptions })
 
   // 序列号台账与追溯链依赖 sku 定位，至少提供 SKU 或序列号（service_trace.go:92-94）
   const traceEnabled = Boolean(params.sku_id || params.serial_no?.trim())
@@ -253,7 +252,7 @@ export default function TracePage() {
     return [...ids].sort()
   }, [result])
   const batches = useQuery({
-    queryKey: ['options', 'batches', batchSkuIds],
+    queryKey: batchOptionsKey(batchSkuIds),
     queryFn: () => fetchBatchOptions(batchSkuIds),
     enabled: batchSkuIds.length > 0,
   })
