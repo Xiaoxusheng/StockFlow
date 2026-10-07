@@ -33,6 +33,12 @@ body {
   animation: sf-page-enter var(--sf-motion-normal) var(--sf-motion-ease) backwards;
 }
 
+/* 页面内卡片浮起阴影（2026-10-06：页面背景加深一档后，增强白卡片与背景的层次；
+   极淡双层影，克制不浮夸；Dark 由 rgba 中性色自然适配） */
+.sf-page .ant-card {
+  box-shadow: var(--sf-shadow-card);
+}
+
 @keyframes sf-page-enter {
   from {
     opacity: 0;
