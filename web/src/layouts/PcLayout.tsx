@@ -320,15 +320,24 @@ function PcLayoutShell() {
 
           <Flex align="center" gap="var(--sf-space-2)">
             {/* 全局搜索入口（计划 §2.1/§5.3）：原菜名 AutoComplete 升级为「搜索按钮+输入框」
-                形态——点击/键盘聚焦即打开 GlobalSearchModal 命令面板（菜单名搜索保留为
-                Modal 内『页面』分组）；真实输入在 Modal 内进行，此为命令栏形态的触发器 */}
+                形态——点击或 Enter/Space 打开 GlobalSearchModal 命令面板（菜单名搜索保留为
+                Modal 内『页面』分组）；真实输入在 Modal 内进行，此为命令栏形态的触发器。
+                禁挂 onFocus：antd Modal 关闭后 focusTriggerAfterClose（默认 true）会把焦点
+                还原到本触发器，onFocus 开面板即成「关→焦点还原→重开」死循环——表现为
+                Esc/点遮罩「关不了」，且快速开关把遮罩动效状态机打进 opacity:0 +
+                pointer-events:none 的楔死态（点外部彻底失效）。 */}
             <Input
               readOnly
               role="button"
               tabIndex={0}
               aria-label="打开全局搜索（Ctrl K）"
               onClick={openGlobalSearch}
-              onFocus={openGlobalSearch}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  openGlobalSearch()
+                }
+              }}
               prefix={<SearchOutlined style={{ color: 'var(--sf-text-muted)' }} />}
               suffix={<span className="sf-search-trigger__kbd">Ctrl K</span>}
               placeholder="搜索 SKU / 单据 / 页面"

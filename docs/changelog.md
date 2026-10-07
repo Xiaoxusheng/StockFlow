@@ -14,6 +14,14 @@
 
 ## 文档记录
 
+## [2026-10-07] 修复：全局搜索面板「关不了」（触发器 onFocus × antd focusTriggerAfterClose 死循环）
+
+- **现象**：Ctrl+K/点击呼出的全局搜索命令面板 Esc、点外部均关不掉；且弹层无遮罩变暗（截图中背景全亮）、点外部失效。
+- **根因**：页头触发器（role=button 的 Input）挂了 `onFocus={openGlobalSearch}`，而 antd Modal 关闭时 `focusTriggerAfterClose`（默认 true，@rc-component/dialog/es/Dialog/index.js `doClose()`）会把焦点还原到打开前的触发元素——「关闭 → 焦点还原 → onFocus → 重开」成环，Esc/遮罩关闭在用户视角等于没关。快速开关循环还会把遮罩动效状态机楔死在 fade-leave-start（实测 opacity:0 + pointer-events:none，全屏 wrap 常驻 display:block），遮罩从此不可见且点外部彻底失效。
+- **修复**：触发器移除 onFocus（frontend.md §15.2 契约仅冻结 Ctrl/Cmd+K 呼出，「聚焦即打开」系实现注释非文档契约），补 Enter/Space 键激活保留 role=button 键盘可达；注释写明禁挂 onFocus 的原因防回退。
+- **验证**：eslint PcLayout 零错误、tsc 零错误（项目其余 4 个类型错误均来自并行会话在建文件 SfOrderSelect/PurchaseReturnCreateDrawer）；修复后行为探针——编程聚焦触发器不再弹面板（循环入口已断）、点击仍正常打开且自动聚焦面板输入框。楔死态经刷新自愈（动效状态机随重载重置）。
+- **影响范围**：web/src/layouts/PcLayout.tsx（全局搜索触发器）、docs/changelog.md。
+
 ## [2026-10-07] 功能：跨模块联动批次一（补货→采购建单/预警处置/PO→入库/任务单号预筛，L1/L2/L3/L5/L9 全前端落地）
 
 - **背景**：2026-10-06 联动盘点工作流产出 15 项联动点，用户挑选第一批五项实现；计划见 docs/plans/2026-10-07-linkage-batch1.md，契约固化 frontend.md §33。全部纯前端（零后端改动），铺垫验证：补货建议 sku_id「现网恒 0」注释过时——实测 GET /api/reports/replenishment-suggestions sku_id 全部有值（后端显式 column tag 已修复），本轮同步更正 ReportReplenishment 过时注释。
