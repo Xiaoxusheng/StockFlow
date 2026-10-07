@@ -4,7 +4,9 @@ import { PlusOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
 import {
+  PURCHASE_RETURN_APPROVE_PERMISSION,
   PURCHASE_RETURN_CREATE_PERMISSION,
+  PURCHASE_RETURN_SUBMIT_PERMISSION,
   purchaseApi,
   type PurchaseReturnOrder,
   type PurchaseReturnQuery,
@@ -20,6 +22,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SfReturnAuditActions } from '@/components/common/SfReturnAuditActions'
 import { PurchaseReturnCreateDrawer } from './PurchaseReturnCreateDrawer'
 import type { StatusSemantic } from '@/types/status'
 
@@ -56,12 +59,17 @@ function renderStatus(status: PurchaseReturnStatus) {
  * （service_sales.go:124-136），type 后端固定 PURCHASE。warehouse_id 为裸 ID，
  * 经仓库 options 本地映射补充，映射失败降级为 ID，不造假数据）。
  * 创建入口为 PurchaseReturnCreateDrawer（POST /api/purchase-returns，
- * 仅持 returns:purchasereturn:create 权限可见）。 */
+ * 仅持 returns:purchasereturn:create 权限可见）。操作列接 SfReturnAuditActions
+ * （提交审核/审核通过/驳回，2026-10-07 退货审核 UI 接入），当前用户不持
+ * submit/approve 权限时整列不渲染。 */
 export default function PurchaseReturnListPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, PURCHASE_RETURN_CREATE_PERMISSION)
+  const hasAuditActions =
+    canAccess(user, PURCHASE_RETURN_SUBMIT_PERMISSION) ||
+    canAccess(user, PURCHASE_RETURN_APPROVE_PERMISSION)
 
   // 仓库 options 一次取全（api/options.ts 头注释：映射失败由调用方降级，不阻塞列表）
   const warehouseOptionsQuery = useQuery({
@@ -79,6 +87,11 @@ export default function PurchaseReturnListPage() {
     fetch: (q) => purchaseApi.returns.list(q),
     urlSync: true,
   })
+  // 操作/创建成功后统一失效列表缓存重取（与创建抽屉 onCreated 同构）
+  const refreshAfterAction = () => {
+    queryClient.invalidateQueries({ queryKey: ['purchase', 'returns'] })
+    list.refetch()
+  }
 
   const columns: ColumnsType<PurchaseReturnOrder> = [
     { title: '退货单号', dataIndex: 'return_no', width: 180, fixed: 'left' },
@@ -103,6 +116,26 @@ export default function PurchaseReturnListPage() {
       width: 170,
       render: (v: string) => <DateCell value={v} />,
     },
+    ...(hasAuditActions
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            fixed: 'right' as const,
+            width: 170,
+            render: (_: unknown, record: PurchaseReturnOrder) => (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                <SfReturnAuditActions
+                  type="purchase"
+                  orderId={record.id}
+                  status={record.status}
+                  onChanged={refreshAfterAction}
+                />
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   // 搜索参数对齐 internal/returns/handler.go:315-334：status/source_no/warehouse_id
@@ -160,17 +193,13 @@ export default function PurchaseReturnListPage() {
               </Button>
             ) : undefined
           }
-          scrollX={760}
+          scrollX={930}
         />
       </Card>
       <PurchaseReturnCreateDrawer
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false)
-          queryClient.invalidateQueries({ queryKey: ['purchase', 'returns'] })
-          list.refetch()
-        }}
+        onCreated={refreshAfterAction}
       />
     </div>
   )

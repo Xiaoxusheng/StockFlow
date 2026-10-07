@@ -14,6 +14,16 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：退货单审核 UI 接入（销售/采购退货列表操作列）
+
+- **背景**：后端退货域 submit/approve 接口已交付（internal/returns/handler.go:119-132，`ApproveInput{approved,opinion}`：通过→APPROVED、驳回→退回 DRAFT，service_sales.go:381-430），但前端两个退货列表页只有创建入口，单据停在「待审核」后界面无审核动作可点。计划见 docs/plans/2026-10-07-return-audit-ui.md。
+- **API 层**（web/src/api/sales.ts、api/purchase.ts）：补冻结权限常量 `returns:salesreturn:submit/approve`、`returns:purchasereturn:submit/approve`（internal/auth/permissions.go:252-268 同源）；`salesApi.returns`/`purchaseApi.returns` 增 `submit(id)` 与 `approve(id,{approved,opinion?})`，响应均为 ReturnOrderView；审核入参类型 ReturnApprovePayload 定义于 sales.ts 并被 purchase.ts 复用（api 模块间已有 SalesId 导入先例）。
+- **新共享组件** `web/src/components/common/SfReturnAuditActions.tsx`：销售/采购退货共用的列表行内审核操作——DRAFT 行+submit 权限显「提交审核」（SfConfirm 二次确认）；PENDING_APPROVAL 行+approve 权限显「通过」（SfConfirm）/「驳回」（Modal 填意见，退货域后端 opinion 无必填校验，与采购订单驳回必填不同，按契约可选，落审批/审计记录）；无可用操作渲染「-」；成功 message 提示并回调 onChanged 失效列表。按钮可见性 = canAccess 权限点 × 状态机（internal/returns/service.go:91-109），前端权限仅体验优化，后端终校验。
+- **列表页接入**：SalesReturnListPage/PurchaseReturnListPage 增「操作」列（fixed right，width 170，masterdata 列页同构 nowrap link 按钮）；当前用户不持 submit/approve 任一权限时整列不渲染；scrollX 相应加宽；创建抽屉 onCreated 与审核成功统一走 refreshAfterAction（失效+refetch，行为不变）。
+- **验证**：`npm run build`（tsc strict+vite）通过；eslint 改动文件零告警；浏览器实测（dev 后端+admin）：草稿单「提交审核」→待审核、待审核单「审核通过」→已审核、驳回填意见→退回草稿，列表均自动刷新且按钮随状态切换；采购页操作列渲染正确（种子数据均为已审核后状态，行显「-」）；Light/Dark Mode 与窄屏（390px 固定列+横向滚动）截图核验正常。采购侧 submit/approve 未做端到端点击实测（种子无草稿/待审核采购退货单），其与销售侧共用同一组件逻辑与同构 API 契约。
+- **影响范围**：仅前端 4 个业务文件 + 1 新组件 + 本文档；不动后端，不涉及采购/销售订单既有审核实现。
+- **并行会话备注**：本会话窗口内工作区存在另一会话在途改动（dashboard/charts/各分析页），本提交仅含本任务文件。
+
 ## [2026-10-07] 功能：来源单号手输改系统单据下拉联想（SfOrderSelect 四场景落地，纯前端）
 
 - **背景**：新建采购退货的来源采购单号原为手输 Input（输错单号要等「带出明细」后端报错才暴露）；用户要求改下拉选择系统已有单据，并排查全站同类交互统一处理。全站排查结论：四处同类场景——采购退货抽屉（来源采购单号）、销售退货抽屉（来源销售单号）、质检单创建弹窗（来源入库单号）、入库单表单（PURCHASE 来源单号）；异常中心来源单号为跨单据类型自由引用（来源类型本身手输，后端不校验存在性）维持原样。

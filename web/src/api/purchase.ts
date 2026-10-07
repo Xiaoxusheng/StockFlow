@@ -1,6 +1,6 @@
 import { http } from './client'
 import type { PageQuery, PageResult } from '@/types/api'
-import type { SalesId } from './sales'
+import type { SalesId, ReturnApprovePayload } from './sales'
 
 // ---------- 采购订单（后端 M2 已交付：internal/purchase/purchase.go:40-47，
 // 出参为 PurchaseOrder GORM 模型 snake_case，internal/purchase/models.go:120-135） ----------
@@ -293,6 +293,10 @@ export const PURCHASE_CLOSE_PERMISSION = 'purchase:purchase:close'
 export const RECEIPT_EXECUTE_PERMISSION = 'purchase:receipt:execute'
 /** 采购退货创建（internal/auth/permissions.go:263 三段式冻结） */
 export const PURCHASE_RETURN_CREATE_PERMISSION = 'returns:purchasereturn:create'
+/** 采购退货提交审核（internal/auth/permissions.go:267，DRAFT→PENDING_APPROVAL） */
+export const PURCHASE_RETURN_SUBMIT_PERMISSION = 'returns:purchasereturn:submit'
+/** 采购退货审核（internal/auth/permissions.go:268，通过→APPROVED / 驳回→退回 DRAFT） */
+export const PURCHASE_RETURN_APPROVE_PERMISSION = 'returns:purchasereturn:approve'
 
 export const purchaseApi = {
   list: (query: PurchaseQuery) =>
@@ -326,5 +330,10 @@ export const purchaseApi = {
     /** 创建采购退货（POST /api/purchase-returns，returns:purchasereturn:create；返回 ReturnOrderView） */
     create: (payload: PurchaseReturnCreatePayload) =>
       http.post<PurchaseReturnOrder>('/api/purchase-returns', payload),
+    /** 提交审核（POST /api/purchase-returns/{id}/submit，DRAFT→PENDING_APPROVAL） */
+    submit: (id: SalesId) => http.post<PurchaseReturnOrder>(`/api/purchase-returns/${id}/submit`),
+    /** 审核（POST /api/purchase-returns/{id}/approve，approved=false 驳回退回 DRAFT） */
+    approve: (id: SalesId, payload: ReturnApprovePayload) =>
+      http.post<PurchaseReturnOrder>(`/api/purchase-returns/${id}/approve`, payload),
   },
 }

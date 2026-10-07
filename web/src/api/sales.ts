@@ -136,6 +136,10 @@ export const SALES_ORDER_CANCEL_PERMISSION = 'sales:sales:cancel'
 export const SALES_ORDER_CLOSE_PERMISSION = 'sales:sales:close'
 /** 销售退货创建（internal/auth/permissions.go:252 三段式冻结） */
 export const SALES_RETURN_CREATE_PERMISSION = 'returns:salesreturn:create'
+/** 销售退货提交审核（internal/auth/permissions.go:256，DRAFT→PENDING_APPROVAL） */
+export const SALES_RETURN_SUBMIT_PERMISSION = 'returns:salesreturn:submit'
+/** 销售退货审核（internal/auth/permissions.go:257，通过→APPROVED / 驳回→退回 DRAFT） */
+export const SALES_RETURN_APPROVE_PERMISSION = 'returns:salesreturn:approve'
 
 // ---------- 销售退货（GET /api/returns，后端退货域：internal/returns/handler.go:115-124） ----------
 //
@@ -219,6 +223,13 @@ export interface SalesReturnCreatePayload {
   lines: SalesReturnLineInput[]
 }
 
+/** 退货审核入参（ApproveInput，service_sales.go:97-101；approved=false 驳回退回草稿，
+ * opinion 落审批记录与审计——退货域后端无必填校验，与采购订单驳回必填不同） */
+export interface ReturnApprovePayload {
+  approved: boolean
+  opinion?: string
+}
+
 export const salesApi = {
   orders: {
     list: (query: SalesOrderQuery) =>
@@ -250,5 +261,10 @@ export const salesApi = {
     /** 创建销售退货（POST /api/returns，returns:salesreturn:create；返回 ReturnOrderView） */
     create: (payload: SalesReturnCreatePayload) =>
       http.post<SalesReturnOrder>('/api/returns', payload),
+    /** 提交审核（POST /api/returns/{id}/submit，DRAFT→PENDING_APPROVAL） */
+    submit: (id: SalesId) => http.post<SalesReturnOrder>(`/api/returns/${id}/submit`),
+    /** 审核（POST /api/returns/{id}/approve，approved=false 驳回退回 DRAFT） */
+    approve: (id: SalesId, payload: ReturnApprovePayload) =>
+      http.post<SalesReturnOrder>(`/api/returns/${id}/approve`, payload),
   },
 }

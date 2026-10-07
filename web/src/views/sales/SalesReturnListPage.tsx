@@ -4,7 +4,9 @@ import { PlusOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  SALES_RETURN_APPROVE_PERMISSION,
   SALES_RETURN_CREATE_PERMISSION,
+  SALES_RETURN_SUBMIT_PERMISSION,
   salesApi,
   type SalesReturnOrder,
   type SalesReturnQuery,
@@ -21,6 +23,7 @@ import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { SfReturnAuditActions } from '@/components/common/SfReturnAuditActions'
 import { SalesReturnCreateDrawer } from './SalesReturnCreateDrawer'
 import { SALES_RETURN_STATUS_TAG } from './salesStatusMeta'
 
@@ -43,18 +46,26 @@ function SalesReturnStatusTag({ status }: { status: SalesReturnStatus }) {
  * 实测入参）。后端列表视图 ReturnOrderView（service_sales.go:124-136）无客户名称/数量汇总列，
  * 原骨架 customerName/totalQty 列如实删除，不造假。
  * 创建入口为 SalesReturnCreateDrawer（POST /api/returns，仅持 returns:salesreturn:create
- * 权限可见）。 */
+ * 权限可见）。操作列接 SfReturnAuditActions（提交审核/审核通过/驳回，2026-10-07
+ * 退货审核 UI 接入），当前用户不持 submit/approve 权限时整列不渲染。 */
 export default function SalesReturnListPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const canCreate = canAccess(user, SALES_RETURN_CREATE_PERMISSION)
+  const hasAuditActions =
+    canAccess(user, SALES_RETURN_SUBMIT_PERMISSION) || canAccess(user, SALES_RETURN_APPROVE_PERMISSION)
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const list = usePagedList<SalesReturnOrder, SalesReturnQuery>({
     queryKey: ['sales', 'returns'],
     fetch: (q) => salesApi.returns.list(q),
     urlSync: true,
   })
+  // 操作/创建成功后统一失效列表缓存重取（与创建抽屉 onCreated 同构）
+  const refreshAfterAction = () => {
+    queryClient.invalidateQueries({ queryKey: ['sales', 'returns'] })
+    list.refetch()
+  }
 
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
@@ -96,6 +107,26 @@ export default function SalesReturnListPage() {
       width: 170,
       render: (v: string) => <DateCell value={v} />,
     },
+    ...(hasAuditActions
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            fixed: 'right' as const,
+            width: 170,
+            render: (_: unknown, record: SalesReturnOrder) => (
+              <span style={{ whiteSpace: 'nowrap' }}>
+                <SfReturnAuditActions
+                  type="sales"
+                  orderId={record.id}
+                  status={record.status}
+                  onChanged={refreshAfterAction}
+                />
+              </span>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -169,17 +200,13 @@ export default function SalesReturnListPage() {
               </Button>
             ) : undefined
           }
-          scrollX={740}
+          scrollX={910}
         />
       </Card>
       <SalesReturnCreateDrawer
         open={createOpen}
         onClose={() => setCreateOpen(false)}
-        onCreated={() => {
-          setCreateOpen(false)
-          queryClient.invalidateQueries({ queryKey: ['sales', 'returns'] })
-          list.refetch()
-        }}
+        onCreated={refreshAfterAction}
       />
     </div>
   )
