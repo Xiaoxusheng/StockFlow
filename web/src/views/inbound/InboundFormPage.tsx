@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { Button, Col, Descriptions, Flex, Form, Input, InputNumber, Row, Select, Typography, message } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   buildIdItemMap,
   fetchSkuOptions,
@@ -118,6 +118,23 @@ export default function InboundFormPage() {
       })),
     })
   }, [form, order, detailQuery.data])
+
+  // 新建模式 URL 预填（frontend.md §33 契约 2，跨模块联动 L5）：
+  // /inbound/new?source_type=PURCHASE&source_no=<单号>&warehouse_id=<id>
+  // 来源类型值域校验后预填；非法/空参数忽略，回退空白表单。
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    if (isEdit) return
+    const sourceType = searchParams.get('source_type')
+    const sourceNo = searchParams.get('source_no')
+    const warehouseId = Number(searchParams.get('warehouse_id'))
+    const prefill: Partial<InboundFormValues> = {}
+    if (sourceType === 'PURCHASE' || sourceType === 'OTHER') prefill.source_type = sourceType
+    if (sourceNo) prefill.source_no = sourceNo
+    if (Number.isInteger(warehouseId) && warehouseId > 0) prefill.warehouse_id = warehouseId
+    if (Object.keys(prefill).length === 0) return
+    form.setFieldsValue(prefill)
+  }, [isEdit, form, searchParams])
 
   const submitMutation = useMutation({
     mutationFn: (payload: InboundCreatePayload) => {

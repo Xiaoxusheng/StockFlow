@@ -1,7 +1,11 @@
-import { Card, Typography } from 'antd'
+import { Button, Card, Typography } from 'antd'
+import { useNavigate } from 'react-router'
 import type { ColumnsType } from 'antd/es/table'
-import { DateCell } from '@/components/table/cells'
+import { DateCell, SfRowActions } from '@/components/table/cells'
 import { inventoryApi, type StockAlertItem, type StockAlertLevel, type StockAlertQuery } from '@/api/inventory'
+import { PURCHASE_CREATE_PERMISSION } from '@/api/purchase'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
@@ -106,14 +110,70 @@ function alertRowKey(record: StockAlertItem): string {
  * GET /api/inventory/alerts 为 reports 实现、inventory 前缀挂载
  * （internal/reports/routes.go:48；权限点 reports:report:read），响应为 snake_case
  * AlertItem（repository.go:407-421）；筛选参数 level/keyword（handler.go:191-204）。
+ * 联动（2026-10-07 批次一 L3）：行「查看库存」（/inventory/stock?sku_id=&warehouse_id=，
+ * 筛选参数与 inventory:stock:view 权限码同 relations.tsx stock 实体项 :281）+
+ * 「去补货」（仅低库存行；仅带 sku_id/warehouse_id，数量留空人工填——禁止前端算库存）。
  */
 export default function AlertsPage() {
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原（不再需要 persistKey）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canViewStock = canAccess(user, 'inventory:stock:view')
+  const canCreatePurchase = canAccess(user, PURCHASE_CREATE_PERMISSION)
   const list = usePagedList<StockAlertItem, StockAlertQuery>({
     queryKey: ['inventory', 'alerts'],
     fetch: (q) => inventoryApi.alerts(q),
     urlSync: true,
   })
+
+  const columns: ColumnsType<StockAlertItem> = [
+    ...COLUMNS,
+    ...(canViewStock || canCreatePurchase
+      ? ([
+          {
+            title: '操作',
+            key: 'actions',
+            fixed: 'right',
+            width: 150,
+            render: (_, record) => {
+              const stockQuery = record.warehouse_id
+                ? `sku_id=${record.sku_id}&warehouse_id=${record.warehouse_id}`
+                : `sku_id=${record.sku_id}`
+              return (
+                <SfRowActions>
+                  {canViewStock && (
+                    <Button
+                      key="stock"
+                      type="link"
+                      size="small"
+                      onClick={() => navigate(`/inventory/stock?${stockQuery}`)}
+                    >
+                      查看库存
+                    </Button>
+                  )}
+                  {canCreatePurchase && record.level === 'low_stock' && (
+                    <Button
+                      key="replenish"
+                      type="link"
+                      size="small"
+                      onClick={() =>
+                        navigate(
+                          record.warehouse_id
+                            ? `/purchases/new?warehouse_id=${record.warehouse_id}&items=${record.sku_id}`
+                            : `/purchases/new?items=${record.sku_id}`,
+                        )
+                      }
+                    >
+                      去补货
+                    </Button>
+                  )}
+                </SfRowActions>
+              )
+            },
+          },
+        ] as ColumnsType<StockAlertItem>)
+      : []),
+  ]
 
   return (
     <div className="sf-page">
@@ -133,7 +193,7 @@ export default function AlertsPage() {
         <SfTable<StockAlertItem>
           storageKey="inventory-alerts"
           rowKey={alertRowKey}
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}
@@ -143,7 +203,7 @@ export default function AlertsPage() {
           total={list.total}
           onPageChange={list.onPageChange}
           emptyText="当前没有库存预警"
-          scrollX={1240}
+          scrollX={1390}
         />
       </Card>
     </div>

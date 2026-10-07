@@ -1113,3 +1113,48 @@ G 系跳转前经 canAccess 校验，无权限 message 提示不跳转。
 
 `ShortcutHelpDrawer` 按 ? 打开：分组展示全部已启用快捷键（combo + description + 作用域），
 数据源=注册表；未注册或被禁用（enabled=false）的键位不展示，保证面板与实际行为一致。
+
+---
+
+## 33. 跨模块联动规范（2026-10-07 批次一）
+
+「分析/监控 → 行动」的跨模块跳转统一遵循以下原则（盘点结论固化，后续批次新增联动必须
+复用同一契约）：
+
+- **URL 为唯一事实源**：带参跳转一律走 URL query（预填/预筛），刷新、分享、前进后退均可
+  还原；禁止 sessionStorage/localStorage 中转传递上下文。
+- **预填 ≠ 提交**：预填只落表单初值，提交仍走人工确认与既有校验，不改变目标表单的任何
+  权限与状态机语义。
+- **非法参数静默降级**：query 逐段解析，非法/越界段忽略；合法段为空则整体回退空白表单，
+  不弹错不阻断。
+- **禁止前端推算库存量**（requirements.md §10）：预填数量必须有后端契约来源（如补货建议的
+  suggested_qty）；无来源（如库存预警行）时数量留空人工填写。
+- **权限即入口**：发起方按钮/链接按 canAccess（目标页菜单权限码）决定渲染与否，无权限不
+  渲染入口；目标页面自身仍有最终校验（permission.md §5）。
+
+### 33.1 采购新建预填（/purchases/new）
+
+```text
+?warehouse_id=<id>&items=<sku_id>:<qty>[,<sku_id>:<qty>…]    qty 可省略 → 行数量留空
+```
+
+发起方：补货建议行「去补货」/勾选批量「生成采购单」（同批行必须同仓库——采购单表头单仓，
+跨仓 message 拦截提示分仓勾选；仅带 suggested_qty>0 的行）、库存预警低库存行「去补货」
+（不带 qty）。入口权限 purchase:purchase:create。
+
+### 33.2 入库新建预填（/inbound/new）
+
+```text
+?source_type=PURCHASE|OTHER&source_no=<单号>&warehouse_id=<id>
+```
+
+发起方：采购单详情「新建入库单」（状态 APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL ×
+purchase:inbound:create；后端 CreateInbound 强校验来源单号与仓库一致）。
+
+### 33.3 列表预筛跳转
+
+- 任务行关联单号（我的任务页）：putaway→`/inbound?keyword=<单号>`、picking/checking→
+  `/outbound?outbound_no=<单号>`。**参数语义勿混用**：入库列表 `source_no` 参数筛的是
+  「来源单号」（PO 号），单号本身必须走 `keyword`（匹配 inbound_no/source_no，
+  internal/purchase/repository.go:133）；出库列表 `outbound_no` 即出库单号本身。
+- 预警行「查看库存」：`/inventory/stock?sku_id=<id>&warehouse_id=<id>`（inventory:stock:view）。

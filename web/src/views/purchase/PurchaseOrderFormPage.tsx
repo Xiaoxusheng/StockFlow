@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { Button, Col, Flex, Form, Input, InputNumber, Row, Select, Typography, message } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   fetchSkuOptions,
   fetchSupplierOptions,
@@ -118,6 +118,35 @@ export default function PurchaseOrderFormPage() {
       })),
     })
   }, [form, order, detailQuery.data])
+
+  // 新建模式 URL 预填（frontend.md §33 契约 1，跨模块联动 L1/L2）：
+  // /purchases/new?warehouse_id=<id>&items=<sku_id>:<qty>[,<sku_id>:<qty>…]
+  // qty 可省略 → 行数量留空待人工填（禁止前端推算库存量）。仅 create 模式消费；
+  // 非法/空参数逐段忽略，合法段为空则整体回退空白表单；预填 ≠ 提交，仍走人工确认。
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    if (isEdit) return
+    const warehouseId = Number(searchParams.get('warehouse_id'))
+    const rawItems = searchParams.get('items')
+    if (!Number.isInteger(warehouseId) || warehouseId <= 0 || !rawItems) return
+    const lines: PurchaseLineFormValues[] = []
+    for (const pair of rawItems.split(',')) {
+      const sep = pair.indexOf(':')
+      const skuRaw = sep === -1 ? pair : pair.slice(0, sep)
+      const qtyRaw = sep === -1 ? '' : pair.slice(sep + 1)
+      const skuId = Number(skuRaw)
+      if (!Number.isInteger(skuId) || skuId <= 0) continue
+      const qty = qtyRaw === '' ? undefined : Number(qtyRaw)
+      lines.push({
+        sku_id: skuId,
+        qty: qty != null && Number.isFinite(qty) && qty > 0 ? qty : undefined,
+      })
+    }
+    if (lines.length === 0) return
+    form.setFieldsValue({ warehouse_id: warehouseId, lines })
+    messageApi.info(`已带入 ${lines.length} 行补货建议，请选择供应商后提交`)
+    // searchParams 随导航变化，但本页无站内再导航；依赖全量声明，重复执行 setFieldsValue 幂等
+  }, [isEdit, form, messageApi, searchParams])
 
   const submitMutation = useMutation({
     mutationFn: (payload: PurchaseCreatePayload) => {

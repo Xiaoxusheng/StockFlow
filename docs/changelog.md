@@ -14,6 +14,31 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：跨模块联动批次一（补货→采购建单/预警处置/PO→入库/任务单号预筛，L1/L2/L3/L5/L9 全前端落地）
+
+- **背景**：2026-10-06 联动盘点工作流产出 15 项联动点，用户挑选第一批五项实现；计划见 docs/plans/2026-10-07-linkage-batch1.md，契约固化 frontend.md §33。全部纯前端（零后端改动），铺垫验证：补货建议 sku_id「现网恒 0」注释过时——实测 GET /api/reports/replenishment-suggestions sku_id 全部有值（后端显式 column tag 已修复），本轮同步更正 ReportReplenishment 过时注释。
+- **L1 补货建议行「去补货」**：ReportReplenishment 加操作列（仅 suggested_qty>0 行显示）+ `/purchases/new?warehouse_id=&items=sku_id:qty` 预填跳转；PurchaseOrderFormPage create 模式解析 query 预填仓库与明细行（非法段忽略、合法段空回退空白表单、message 告知带入行数）。
+- **L2 补货建议批量「生成采购单」**：rowSelection + SfSearchForm extraActions 批量按钮（MyTasksPage 同款模式）；同批行必须同仓库（表头单仓）——跨仓 message 拦截提示分仓勾选；仅携带 suggested_qty>0 行。
+- **L3 库存预警行处置**：AlertsPage 加操作列——「查看库存」全级别（/inventory/stock?sku_id=&warehouse_id=，inventory:stock:view）+「去补货」仅低库存行（不带 qty，数量留空人工填，禁止前端算库存）；purchase:purchase:create 门控。
+- **L5 采购单详情「新建入库单」**：PurchaseOrderActions 加导航按钮（APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL × purchase:inbound:create，进早退链）；InboundFormPage create 模式解析 `?source_type=PURCHASE&source_no=&warehouse_id=` 预填（后端 CreateInbound 强校验来源与仓库一致）。
+- **L9 任务行关联单号预筛**：MyTasksPage source_no 列链接化——putaway→`/inbound?keyword=`、picking/checking→`/outbound?outbound_no=`（无 source_id，列表预筛精确命中；语义注意：入库列表 source_no 参数筛来源单号，单号本身走 keyword——repository.go:133）；无权限回退纯文本。
+- **验证**：npx tsc -b 全绿；浏览器全链路实测——L1 预填（仓库+SKU+50 截图）、L2 两行预填+跨仓拦截文案、L3 双动作+级别区分（超储仅查看库存）+查看库存预筛、L5 三字段预填（截图）、L9 双向各 1 条精确命中。
+- **不做什么**：L4/L6/L7/L12/L13/L14/L15 留待后续批次；不新增后端端点；不引入 sessionStorage 中转（frontend.md §33：URL 为唯一事实源）。
+
+## [2026-10-07] 修复：工作台优先处理接口 500（临期明细 SQL 引用派生表不存在列）
+
+- **现象与根因**：`GET /api/workbench/priorities` 真库请求 500——`nearExpiryListBase` 外层引用派生表 `b`（批次子查询仅透出 id/batch_no/sku_id/days_left）不存在的 `b.expiry_date` 列（SQLSTATE 42703）；fakedb 单测按 SQL 子串回放不执行真实 SQL，故门禁绿而真库炸。另注：该端点 2026-10-06 21:40 才落库（f40c89b），此前页面报「资源不存在」系本地 server.exe 为 17:36 启动的旧二进制，重建重启即消除 404。
+- **修复**（345b38e）：改用子查询内已计算的 `days_left` 透出（到期日 ASC 排序口径不变）；聚合明细行补 `MIN(i.id) AS id`（每条 inventory 行恰属一个 (仓,SKU,批次) 组，MIN 组间唯一），修复临期项 id 恒 0 的前端 key 潜在碰撞。
+- **验证**：psql 真库验证四组查询；端点实测四组 count/items 正常（超时收货 1、库位异常 6/明细 5、临期 0、待复核 0）、limit 0/21/abc→400、20→200；`go build/vet/test ./...` 全绿。
+- **影响范围**：internal/reports/workbench_priority.go（6+/4-，纯 SQL 与注释，契约零变化）。
+
+## [2026-10-06] 样式：Light 页面背景改白并保留底/卡分层（--sf-bg #f9fafb / colorBgLayout 同步）
+
+- **变更**：用户要求整个背景换成白色，随后补充「背景与其他面要有层次分层」——两轮反馈定型为近白底 + 纯白卡片：tokens.css Light 块 `--sf-bg` #f6f7f9 → #f9fafb，App.tsx `colorBgLayout` Light 分支同步（两处同 commit 同步纪律）；Dark 块 #101418 不动。
+- **分层方式**：底色 #f9fafb 与卡片/面板 #ffffff 保留一级微色阶（比原 #f6f7f9 亮、比纯白低半档），叠加既有边框（SfTable 默认 bordered、antd Card 默认边框、侧栏 borderRight / 顶栏 borderBottom）；行 hover / 表头 #f8fafc、选中行主色低透明均不受影响。
+- **影响范围**：Light 模式全站页面背景（PC Content、Pad 布局、登录页、错误页、打印预览底均引用 --sf-bg 自动跟随）；Dark 模式零变化。
+- **备注**：2026-10-05 曾以「页面与卡片无色阶分层」为由从 #ffffff 回退 #f6f7f9；#f9fafb 即「整体白」与「底/卡分层」两个诉求的折中，后续深浅只动 --sf-bg 一枚 token（App.tsx 同步）。
+
 ## [2026-10-06] 功能：作业效率提升层一期收尾（十项能力+六项附加全栈落地，八验收场景全过）
 
 - **背景**：docs/plans/2026-10-06-efficiency-layer-phase1.md 专项批次的收尾条目——十项能力与六项附加要求 Frontend+API+Service+Database 全栈真实落地并经独立验收 8 场景全部通过。本条为汇总概览，各波次过程细节见同日既有条目（后端 B1–B4 交付、集成收口、前端 F1–F3 交付、清偿轮、导出全链路收口、页面接入三域、工作台改版收口、扫码作业优化、前端测试加固）。

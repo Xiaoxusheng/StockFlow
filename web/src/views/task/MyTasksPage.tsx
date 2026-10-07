@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button, Card, message } from 'antd'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router'
 import { DateCell } from '@/components/table/cells'
 import { taskApi, type TaskItem, type TaskQuery, type TaskStatus, type TaskType } from '@/api/task'
 import type { BatchResult } from '@/api/printing'
@@ -53,7 +54,8 @@ const COLUMNS: ColumnsType<TaskItem> = [
     width: 110,
     render: (v: string) => TYPE_LABEL[v] ?? v,
   },
-  { title: '关联单号', dataIndex: 'source_no', width: 150, render: (v?: string) => v ?? '-' },
+  // 关联单号列的交互渲染由组件注入（需 navigate/权限上下文），模块层仅保留静态列骨架
+  { title: '关联单号', dataIndex: 'source_no', width: 150 },
   { title: '仓库', dataIndex: 'warehouse_name', width: 100, render: (v?: string) => v ?? '-' },
   {
     title: '计划数量',
@@ -96,6 +98,7 @@ const COLUMNS: ColumnsType<TaskItem> = [
 export default function MyTasksPage() {
   // 筛选与分页同步到 URL：刷新 / 分享链接 / 前进后退均可还原
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
   /** 任务页自动刷新（§2.11）：档位 关/10/30/60 秒；页签隐藏暂停；连续失败 ≥2 次退避停轮 */
   const autoRefresh = useAutoRefresh()
@@ -106,6 +109,35 @@ export default function MyTasksPage() {
     urlSync: true,
     refetchInterval: autoRefresh.refetchInterval,
   })
+
+  // 联动批次一 L9（2026-10-07）：关联单号按任务类型映射列表预筛——source_no 语义经
+  // workbench.go:746/760/771 实证（putaway=入库单号、picking/checking=出库单号）。
+  // 入库列表 source_no 参数筛的是「来源单号」（PO 号，repository.go:133 注释），单号本身
+  // 走 keyword（匹配 inbound_no/source_no）；出库列表 outbound_no 即出库单号本身。
+  // 无权限回退纯文本（canAccess 仅体验优化，目标列表仍有最终校验）。
+  const columns = useMemo<ColumnsType<TaskItem>>(
+    () =>
+      COLUMNS.map((column) => {
+        if (!('dataIndex' in column) || column.dataIndex !== 'source_no') return column
+        return {
+          ...column,
+          render: (v: string | undefined, record: TaskItem) => {
+            if (!v) return '-'
+            const target =
+              record.task_type === 'putaway'
+                ? { path: `/inbound?keyword=${encodeURIComponent(v)}`, permission: 'inbound:view' }
+                : { path: `/outbound?outbound_no=${encodeURIComponent(v)}`, permission: 'outbound:view' }
+            if (!canAccess(user, target.permission)) return v
+            return (
+              <Button type="link" size="small" onClick={() => navigate(target.path)}>
+                {v}
+              </Button>
+            )
+          },
+        }
+      }),
+    [navigate, user],
+  )
 
   /** 保存视图的列应用（受控列 API，§2.2 B6）：undefined=非受控（沿用 localStorage 列偏好） */
   const [hiddenColumns, setHiddenColumns] = useState<string[] | undefined>(undefined)
@@ -207,7 +239,7 @@ export default function MyTasksPage() {
             selectedRowKeys,
             onChange: (keys) => setSelectedRowKeys(keys as Array<string | number>),
           }}
-          columns={COLUMNS}
+          columns={columns}
           dataSource={list.items}
           loading={list.isFetching}
           error={list.error}

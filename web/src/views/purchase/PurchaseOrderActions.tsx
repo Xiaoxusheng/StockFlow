@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Flex, Form, Input, Modal, message } from 'antd'
-import { CheckOutlined, CloseOutlined, EditOutlined, SendOutlined, StopOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined, EditOutlined, PlusOutlined, SendOutlined, StopOutlined } from '@ant-design/icons'
 import { useMutation } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
 import {
@@ -12,6 +12,7 @@ import {
   purchaseApi,
   type PurchaseOrder,
 } from '@/api/purchase'
+import { INBOUND_CREATE_PERMISSION } from '@/api/inbound'
 import { resolveErrorMessage } from '@/api/client'
 import { useAuthStore } from '@/stores/auth'
 import { canAccess } from '@/types/permission'
@@ -84,7 +85,10 @@ function ReasonModal({
  * - 提交审核（DRAFT→PENDING_APPROVAL，purchase:purchase:submit）；
  * - 审核通过 / 驳回（PENDING_APPROVAL，purchase:purchase:approve，驳回意见必填）；
  * - 取消（DRAFT/PENDING_APPROVAL/APPROVED 且无收货，purchase:purchase:cancel）；
- * - 差额关闭（PARTIAL_RECEIVED/RECEIVED_ALL→COMPLETED，purchase:purchase:close）。
+ * - 差额关闭（PARTIAL_RECEIVED/RECEIVED_ALL→COMPLETED，purchase:purchase:close）；
+ * - 新建入库单（APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL，purchase:inbound:create，
+ *   2026-10-07 联动批次一 L5）：跳 /inbound/new 带 source_type/source_no/仓库预填
+ *   （frontend.md §33 契约 2；后端 CreateInbound 强校验来源与仓库一致）。
  * 操作成功统一回调 onChanged（详情页 refetch + 列表缓存失效）；
  * 前端权限仅是体验优化，后端仍做状态与权限最终校验（permission.md §5）。
  */
@@ -140,8 +144,13 @@ export function PurchaseOrderActions({ order, onChanged }: { order: PurchaseOrde
   const canClose =
     canAccess(user, PURCHASE_CLOSE_PERMISSION) &&
     ['PARTIAL_RECEIVED', 'RECEIVED_ALL'].includes(order.status)
+  // L5：入库单由人工从已审核 PO 派生（后端无 create-from 端点，POST /api/inbounds
+  // 校验 source_no 须 APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL 且仓库一致）
+  const canCreateInbound =
+    canAccess(user, INBOUND_CREATE_PERMISSION) &&
+    ['APPROVED', 'PARTIAL_RECEIVED', 'RECEIVED_ALL'].includes(order.status)
 
-  if (!canEdit && !canSubmit && !canApprove && !canCancel && !canClose) {
+  if (!canEdit && !canSubmit && !canApprove && !canCancel && !canClose && !canCreateInbound) {
     return <>{contextHolder}</>
   }
 
@@ -198,6 +207,18 @@ export function PurchaseOrderActions({ order, onChanged }: { order: PurchaseOrde
         </SfConfirm>
       )}
       {canClose && <Button onClick={() => setCloseOpen(true)}>差额关闭</Button>}
+      {canCreateInbound && (
+        <Button
+          icon={<PlusOutlined />}
+          onClick={() =>
+            navigate(
+              `/inbound/new?source_type=PURCHASE&source_no=${encodeURIComponent(order.po_no)}&warehouse_id=${order.warehouse_id}`,
+            )
+          }
+        >
+          新建入库单
+        </Button>
+      )}
 
       <ReasonModal
         open={rejectOpen}
