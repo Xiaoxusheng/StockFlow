@@ -24,26 +24,11 @@ import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
 import { SfTimeline, type SfTimelineStep } from '@/components/common/SfTimeline'
 import { PurchaseOrderActions } from './PurchaseOrderActions'
+import { PO_STATUS_TAG } from './purchaseStatusMeta'
 import type { StatusSemantic } from '@/types/status'
 import { formatDateTime, formatMoney, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
-
-/**
- * 采购订单状态 → SfStatusTag（internal/purchase/models.go:17-23 七态）。
- * types/status.ts 注册表已收录 draft/pending_approval/approved/completed/cancelled；
- * PARTIAL_RECEIVED/RECEIVED_ALL 为采购语境专有键未注册，经 SfStatusTag 的
- * label/semantic 兜底；后端返回未知值时中性灰 + 原始文案。
- */
-const PO_STATUS_TAG: Record<PurchaseStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  PARTIAL_RECEIVED: { label: '部分到货', semantic: 'processing' },
-  RECEIVED_ALL: { label: '到货完成', semantic: 'success' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
 
 /**
  * 单据状态 → 当前所处环节的展示（business-flow.md §2.2 状态机）。

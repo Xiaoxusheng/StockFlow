@@ -28,27 +28,10 @@ import { SfSearchForm, type SearchField } from '@/components/table/SfSearchForm'
 import { SfViewBar } from '@/components/table/SfViewBar'
 import { SfTable } from '@/components/table/SfTable'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import type { StatusSemantic } from '@/types/status'
+import { PO_STATUS_TAG } from './purchaseStatusMeta'
 import { formatMoney } from '@/utils/format'
 
 const { Text } = Typography
-
-/**
- * 采购订单状态 → SfStatusTag（internal/purchase/models.go:17-23 七态）。
- * types/status.ts 注册表已收录 draft/pending_approval/approved/completed/cancelled
- * （文案/语义一致，SfStatusTag 以注册表优先）；PARTIAL_RECEIVED/RECEIVED_ALL 为
- * 采购语境专有键未注册，经 SfStatusTag 的 label/semantic 兜底；后端返回未知值时
- * 映射缺失，SfStatusTag 兜底中性灰 + 原始文案，不崩溃。
- */
-const PO_STATUS_TAG: Record<PurchaseStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  PARTIAL_RECEIVED: { label: '部分到货', semantic: 'processing' },
-  RECEIVED_ALL: { label: '到货完成', semantic: 'success' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
 
 const STATUS_OPTIONS = Object.entries(PO_STATUS_TAG).map(([value, tag]) => ({
   label: tag.label,

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Typography, message } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { SfTable } from '@/components/table/SfTable'
+import { SfOrderSelect, type SfOrderSelectOption } from '@/components/common/SfOrderSelect'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   PURCHASE_RETURN_CREATE_PERMISSION,
@@ -28,27 +28,10 @@ import { SfConfirm } from '@/components/common/SfConfirm'
 import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
-import type { StatusSemantic } from '@/types/status'
-import { formatNumber } from '@/utils/format'
+import { PO_STATUS_TAG } from './purchaseStatusMeta'
+import { formatDate, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
-
-/**
- * 采购订单状态 → SfStatusTag（internal/purchase/models.go:17-23 七态）。
- * types/status.ts 注册表已收录 draft/pending_approval/approved/completed/cancelled；
- * PARTIAL_RECEIVED/RECEIVED_ALL 为采购语境专有键未注册，经 SfStatusTag 的
- * label/semantic 兜底——与 PurchaseListPage/PurchaseOrderDetailPage 同一本地映射惯例，
- * 禁止在抽屉里显示英文裸枚举（AGENTS.md 规则 5：业务状态一律经 SfStatusTag）。
- */
-const PO_STATUS_TAG: Record<PurchaseStatus, { label: string; semantic: StatusSemantic }> = {
-  DRAFT: { label: '草稿', semantic: 'neutral' },
-  PENDING_APPROVAL: { label: '待审核', semantic: 'pending' },
-  APPROVED: { label: '已审核', semantic: 'success' },
-  PARTIAL_RECEIVED: { label: '部分到货', semantic: 'processing' },
-  RECEIVED_ALL: { label: '到货完成', semantic: 'success' },
-  COMPLETED: { label: '已完成', semantic: 'success' },
-  CANCELLED: { label: '已取消', semantic: 'neutral' },
-}
 
 /** 行编辑态：qty_return 为 numeric(18,4) 文本契约的数值输入，提交时转字符串 */
 interface LineEditState {
@@ -58,12 +41,21 @@ interface LineEditState {
 }
 
 /**
+ * 可退采购单状态（后端契约：FindReturnable 仅校验「存在且 qty_received>0」，
+ * m2_bridges.go:292-319；有收货即禁止取消——service_purchase.go:336-364，故 CANCELLED
+ * 必无收货、DRAFT/PENDING_APPROVAL 未到收货环节；差额关闭落 COMPLETED 且收货量保留
+ * ——service_purchase.go:404-406，仍可退）。
+ */
+const RETURNABLE_PO_STATUSES: PurchaseStatus[] = ['PARTIAL_RECEIVED', 'RECEIVED_ALL', 'COMPLETED']
+
+/**
  * 新建采购退货抽屉（POST /api/purchase-returns，returns:purchasereturn:create）。
- * 交互：输入来源采购单号查询（purchaseApi.list({keyword})，keyword 按 po_no ILIKE 模糊
- * repository.go:292-294，命中后前端按 po_no 精确过滤）→ 带出采购单与已收货明细
- * （qty_received>0 的行可退）→ 填退货数量 + 原因（必填）→ 提交 PurchaseReturnCreateInput
- * （service_purchase.go:44-50：po_no/supplier_id/warehouse_id 由来源单带出，退货仓必须
- * 与原单仓库一致、退量 ≤ 已收货量 − 已退量均由后端强校验）。
+ * 交互：来源采购单号下拉选择（SfOrderSelect 远程联想：初始=三个可退状态各取最近一页，
+ * 输入防抖按 po_no ILIKE 模糊搜索单请求，repository.go:292-294；不可退状态禁用并给原因）
+ * → 选中即带出采购单与已收货明细（qty_received>0 的行可退）→ 填退货数量 + 原因（必填）
+ * → 提交 PurchaseReturnCreateInput（service_purchase.go:44-50：po_no/supplier_id/
+ * warehouse_id 由来源单带出，退货仓必须与原单仓库一致、退量 ≤ 已收货量 − 已退量均由
+ * 后端强校验）。
  * 整单一次出库（frozen DDL 无逐行已出量列），部分退货在创建期以退量 < 已收量表达
  * （service_purchase.go:20-23）。不支持的行如实显示为不可退，不造假数据。
  */
@@ -121,12 +113,75 @@ export function PurchaseReturnCreateDrawer({
     }
   }, [form, open])
 
-  const loadSource = async () => {
-    const poNo = (form.getFieldValue('po_no') as string | undefined)?.trim()
-    if (!poNo) {
-      messageApi.warning('请先输入来源采购单号')
-      return
-    }
+  /** 单号 → 下拉选项（供应商/仓库经 options 本地映射，缺资料降级 #ID，不造假数据） */
+  const toPoOption = useCallback(
+    (order: PurchaseOrder): SfOrderSelectOption<PurchaseOrder> => {
+      const supplier = supplierItems.get(String(order.supplier_id))
+      const warehouse = warehouseItems.get(String(order.warehouse_id))
+      const statusMeta = PO_STATUS_TAG[order.status]
+      return {
+        value: order.po_no,
+        label: order.po_no,
+        description: (
+          <Flex gap={8} align="center" wrap="nowrap">
+            <span>
+              {supplier ? `${supplier.name}（${supplier.code}）` : `供应商 #${order.supplier_id}`}
+              {' · '}
+              {warehouse ? `${warehouse.name}（${warehouse.code}）` : `仓库 #${order.warehouse_id}`}
+              {' · '}
+              {formatDate(order.created_at)}
+            </span>
+            <SfStatusTag
+              status={toStatusKey(order.status)}
+              label={statusMeta?.label}
+              semantic={statusMeta?.semantic}
+            />
+          </Flex>
+        ),
+        raw: order,
+      }
+    },
+    [supplierItems, warehouseItems],
+  )
+
+  /**
+   * 单号下拉禁用规则：白名单判定（与 RETURNABLE_PO_STATUSES 同源，防新增状态漏拦）；
+   * 可退性最终由后端按收货量强校验。
+   */
+  const poDisabledReason = (status: PurchaseStatus): string | undefined => {
+    if (RETURNABLE_PO_STATUSES.includes(status)) return undefined
+    return status === 'CANCELLED' ? '该采购单已取消，不可退货' : '该采购单未收货，不可退货'
+  }
+
+  /**
+   * SfOrderSelect 数据源：空关键词=三个可退状态各取最近一页合并（采购列表按 id ASC
+   * 分页——repository.go:195-203，合并后倒序）；有关键词=单请求 po_no ILIKE 模糊搜索，
+   * 命中的不可退单据不禁用下拉展示而是标禁用 + 原因（比隐藏更有信息量）。
+   */
+  const loadPoOptions = useCallback(
+    async (keyword: string): Promise<Array<SfOrderSelectOption<PurchaseOrder>>> => {
+      const trimmed = keyword.trim()
+      if (!trimmed) {
+        const pages = await Promise.all(
+          RETURNABLE_PO_STATUSES.map((status) =>
+            purchaseApi.list({ status, page: 1, pageSize: 20 }),
+          ),
+        )
+        return pages
+          .flatMap((page) => page.items)
+          .sort((a, b) => Number(b.id) - Number(a.id))
+          .map(toPoOption)
+      }
+      const page = await purchaseApi.list({ keyword: trimmed, page: 1, pageSize: 50 })
+      return page.items.map((order) => ({
+        ...toPoOption(order),
+        disabledReason: poDisabledReason(order.status),
+      }))
+    },
+    [toPoOption],
+  )
+
+  const loadSource = async (poNo: string) => {
     setSourceError(null)
     setSourceLoading(true)
     try {
@@ -326,15 +381,26 @@ export function PurchaseReturnCreateDrawer({
       {contextHolder}
       <Flex vertical gap={16}>
         <Form form={form} layout="vertical">
-          <Form.Item label="来源采购单号" required style={{ marginBottom: 8 }}>
-            <Flex gap={8}>
-              <Form.Item name="po_no" noStyle rules={[{ required: true, message: '请输入来源采购单号' }]}>
-                <Input placeholder="如 PO-20261004-0001" maxLength={64} onPressEnter={loadSource} />
-              </Form.Item>
-              <Button icon={<ReloadOutlined />} loading={sourceLoading} onClick={loadSource}>
-                带出明细
-              </Button>
-            </Flex>
+          <Form.Item
+            name="po_no"
+            label="来源采购单号"
+            required
+            rules={[{ required: true, message: '请选择来源采购单号' }]}
+            style={{ marginBottom: 8 }}
+          >
+            <SfOrderSelect<PurchaseOrder>
+              placeholder="选择采购单（可输入单号搜索）"
+              loadOptions={loadPoOptions}
+              emptyText="没有可退货的采购单"
+              onChange={(poNo, option) => {
+                if (!poNo) {
+                  setSource(null)
+                  setLineEdits({})
+                  return
+                }
+                void loadSource(option?.raw?.po_no ?? poNo)
+              }}
+            />
           </Form.Item>
           <Form.Item name="remark" label="整单备注" style={{ marginBottom: 0 }}>
             <Input.TextArea rows={2} placeholder="选填" maxLength={255} />
@@ -375,6 +441,7 @@ export function PurchaseReturnCreateDrawer({
               rowKey="id"
               columns={columns}
               dataSource={returnableItems}
+              loading={sourceLoading}
               scroll={{ x: 760 }}
               emptyText="该采购单没有已收货明细，无可退行"
             />
@@ -384,7 +451,7 @@ export function PurchaseReturnCreateDrawer({
             </Text>
           </>
         ) : (
-          <SfEmpty description="输入来源采购单号后带出可退明细" />
+          <SfEmpty description="选择来源采购单后带出可退明细" />
         )}
       </Flex>
     </Drawer>

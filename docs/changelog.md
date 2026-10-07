@@ -14,6 +14,20 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：来源单号手输改系统单据下拉联想（SfOrderSelect 四场景落地，纯前端）
+
+- **背景**：新建采购退货的来源采购单号原为手输 Input（输错单号要等「带出明细」后端报错才暴露）；用户要求改下拉选择系统已有单据，并排查全站同类交互统一处理。全站排查结论：四处同类场景——采购退货抽屉（来源采购单号）、销售退货抽屉（来源销售单号）、质检单创建弹窗（来源入库单号）、入库单表单（PURCHASE 来源单号）；异常中心来源单号为跨单据类型自由引用（来源类型本身手输，后端不校验存在性）维持原样。
+- **新组件** `web/src/components/common/SfOrderSelect.tsx`（frontend.md §23 登记）：远程单据联想 Select——展开即按关键词重拉、输入防抖 300ms 远程搜索（filterOption=false，过滤全由服务端 ILIKE 承担）、竞态序号守卫丢慢响应、不可选状态禁用并随行展示原因、拉取失败如实空列表提示、value=单号字符串（URL 预填直显原值不造选项，frontend.md §33 契约兼容）。选项富行展示：单号 + 供应商/客户 · 仓库 · 创建日期 + SfStatusTag 状态。
+- **四场景接入口径**（可选项状态均与后端强校验契约同源）：
+  - 采购退货（可退=存在且已收货，m2_bridges.go:292-319）：PARTIAL_RECEIVED/RECEIVED_ALL/COMPLETED；有收货即禁止取消（service_purchase.go:336-364）故 CANCELLED 必无收货，APPROVED 未收货禁用；选中即调详情带出可退明细，原「带出明细」按钮删除。
+  - 销售退货（可退=存在且已发货，m2_bridges.go:259-286）：PARTIAL_SHIPPED/SHIPPED_ALL/COMPLETED；APPROVED 未发货禁用。
+  - 质检单创建（入库单须 AWAITING_QC/AWAITING_PUTAWAY，service_quality.go:85-89）：两状态白名单，其余状态禁用并提示「未收齐进入待质检」。
+  - 入库单表单（PURCHASE 来源须 APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL 且仓库一致，service_inbound.go:145-152）：三状态白名单；选中采购单后自动带出收货仓库并 message 提示（后端强校验一致）；OTHER 来源保留手输自由文本（后端不校验存在性）。
+- **附带收敛**：PO_STATUS_TAG 此前 4 处复制（PurchaseListPage/PurchaseOrderDetailPage/PurchaseReturnCreateDrawer 本地各一份、PurchaseAnalyticsPage 注释引用），随第 5 处跨域使用（InboundFormPage）抽取为 `views/purchase/purchaseStatusMeta.ts` 域内唯一来源（销售域 salesStatusMeta.ts 同范式），四处改为导入。
+- **验证**：tsc -b / eslint（0 错误）/ 真库浏览器实测四场景——下拉富选项渲染、选中即带明细（采购退货/销售退货明细表 1 行出齐）、质检单选中回显、入库单选 PO 后仓库自动带出（电子原料仓 WH-E01）；搜索「20261007」（APPROVED 单）命中后禁用并展示「该采购单未收货，不可退货」；pageerror 0。
+- **不做什么**：不新增后端端点（全部复用既有列表/详情分页接口）；不改动异常中心自由引用语义；不做本地伪过滤（filterOption=false）。
+- **并行会话备注**：本会话窗口内工作区存在另一会话在途改动（dashboard/charts/各分析页、PurchaseReturnListPage 审核操作等），提交仅含本任务文件。
+
 ## [2026-10-07] 功能：演示数据补全轮二（§18——效期预警/待复核/超储/流水类型/数据域与单据状态收口）
 
 - **背景**：用户要求「整个系统加上测试数据，还没有数据的都加上」。真库盘点：§0–§17 后主数据与单据状态分布已齐，仍剩页面级空数据点——效期批次为零（临期/过期预警页与工作台临期组全空）、待复核队列空（check_tasks 全 DONE）、超储零候选、流水缺 TRANSFER_*/MOVE/ADJUST 等类型、verify §14/§16 断言的导入/导出/单据状态域有缺口。计划见 docs/plans/2026-10-07-demo-data-round2.md。

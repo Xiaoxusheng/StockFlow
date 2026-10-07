@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Button, Form, Input, InputNumber, Modal, Select, Space, message } from 'antd'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Flex, Form, Input, InputNumber, Modal, Select, Space, message } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { PlusOutlined } from '@ant-design/icons'
 import { resolveErrorMessage } from '@/api/client'
+import { inboundApi, type InboundOrder, type InboundOrderStatus } from '@/api/inbound'
 import {
   INSPECTION_METHOD_LABEL,
   qualityApi,
@@ -10,25 +11,48 @@ import {
   type QualityCreatePayload,
   type QualityInspectionItem,
 } from '@/api/quality'
-import { fetchSkuOptions } from '@/api/options'
+import { fetchSkuOptions, fetchWarehouseOptions, idKey } from '@/api/options'
+import { toStatusKey } from '@/api/masterdata'
+import { SfOrderSelect, type SfOrderSelectOption } from '@/components/common/SfOrderSelect'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import type { StatusSemantic } from '@/types/status'
+import { formatDate } from '@/utils/format'
 
 /**
  * 手动创建质检单（POST /api/quality，internal/purchase/purchase.go:65，权限
  * purchase:quality:create——按钮入口由列表页 canAccess 把关，Modal 内依赖后端强校验）。
  *
  * 入参对齐 QCCreateInput（internal/purchase/service_quality.go:37-45）：
- * - source_no：入库单号——入库单须 AWAITING_QC / AWAITING_PUTAWAY（未收齐不能质检）；
+ * - source_no：入库单号——入库单须 AWAITING_QC / AWAITING_PUTAWAY（未收齐不能质检，
+ *   service_quality.go:85-89）；单号经 SfOrderSelect 远程联想（初始=两个待质检状态各取
+ *   最近一页，输入防抖按 inbound_no/source_no ILIKE 模糊搜索——repository.go:391-393），
+ *   非待质检状态禁用并给原因，数据源为既有入库单列表端点，不造假数据；
  * - inspection_type：免检 / 抽检 / 全检（迁移 chk_quality_orders_inspection_type 三值）；
  * - lines：SKU + 批次（选填）+ 计划检验数量（正数）；同一 SKU 不得重复、数量不得超过
  *   该 SKU 未处理余量（收货 − 已处理），逐条约束由后端强校验，错误信息随信封回显；
  * - remark：备注（选填）。
- * 后端没有「可选入库单号联想」端点，来源单号以手输 + 后端存在性校验为准，不造假数据。
  */
 
 /** 检验方式三值（值即文案，与迁移 chk 同源） */
 const INSPECTION_TYPE_OPTIONS = (Object.keys(INSPECTION_METHOD_LABEL) as InspectionMethod[]).map(
   (value) => ({ value, label: INSPECTION_METHOD_LABEL[value] }),
 )
+
+/**
+ * 可建质检单的入库单状态（后端契约 service_quality.go:85-89 仅放行两待处理态）。
+ */
+const QC_ELIGIBLE_INBOUND_STATUSES: InboundOrderStatus[] = ['AWAITING_QC', 'AWAITING_PUTAWAY']
+
+/** 入库单七态 → SfStatusTag（models.go:27-33 迁移 CHECK 同源，与 InboundPage INBOUND_STATUS_TAG 同值） */
+const INBOUND_STATUS_TAG: Record<InboundOrderStatus, { key: string; label: string; semantic: StatusSemantic }> = {
+  DRAFT: { key: 'draft', label: '草稿', semantic: 'neutral' },
+  RECEIVING: { key: 'receiving', label: '收货中', semantic: 'processing' },
+  AWAITING_QC: { key: 'awaiting_qc', label: '待质检', semantic: 'pending' },
+  AWAITING_PUTAWAY: { key: 'awaiting_putaway', label: '待上架', semantic: 'pending' },
+  COMPLETED: { key: 'completed', label: '已完成', semantic: 'success' },
+  CANCELLED: { key: 'cancelled', label: '已取消', semantic: 'neutral' },
+  CLOSED: { key: 'closed', label: '已关闭', semantic: 'neutral' },
+}
 
 interface QualityCreateFormValues {
   source_no: string
@@ -49,16 +73,88 @@ export default function QualityCreateModal({ open, onClose, onCreated }: Quality
   const [messageApi, contextHolder] = message.useMessage()
   const [submitting, setSubmitting] = useState(false)
 
-  // SKU 选项（options 一次取全；仅创建弹窗打开时拉取）
+  // SKU / 仓库选项（options 一次取全；仅创建弹窗打开时拉取）
   const skuOptionsQuery = useQuery({
     queryKey: ['options', 'sku'],
     queryFn: fetchSkuOptions,
     enabled: open,
   })
+  const warehouseOptionsQuery = useQuery({
+    queryKey: ['options', 'warehouses'],
+    queryFn: fetchWarehouseOptions,
+    enabled: open,
+  })
+  const warehouseNames = useMemo(
+    () => new Map((warehouseOptionsQuery.data ?? []).map((w) => [idKey(w.id), `${w.name}（${w.code}）`])),
+    [warehouseOptionsQuery.data],
+  )
   const skuSelectOptions = (skuOptionsQuery.data ?? []).map((sku) => ({
     value: String(sku.id),
     label: sku.product_name ? `${sku.code} ${sku.product_name}` : sku.code,
   }))
+
+  /** 单号 → 下拉选项（仓库名经 options 本地映射，缺资料降级 #ID，不造假数据） */
+  const toInboundOption = useCallback(
+    (order: InboundOrder): SfOrderSelectOption<InboundOrder> => {
+      const statusMeta = INBOUND_STATUS_TAG[order.status]
+      return {
+        value: order.inbound_no,
+        label: order.inbound_no,
+        description: (
+          <Flex gap={8} align="center" wrap="nowrap">
+            <span>
+              {`来源 ${order.source_no || '-'}`}
+              {' · '}
+              {warehouseNames.get(idKey(order.warehouse_id)) ?? `仓库 #${order.warehouse_id}`}
+              {' · '}
+              {formatDate(order.created_at)}
+            </span>
+            <SfStatusTag
+              status={toStatusKey(order.status)}
+              label={statusMeta?.label}
+              semantic={statusMeta?.semantic}
+            />
+          </Flex>
+        ),
+        raw: order,
+      }
+    },
+    [warehouseNames],
+  )
+
+  /** 单号下拉禁用规则：仅两待处理态可建质检单（后端 service_quality.go:85-89 同口径） */
+  const inboundDisabledReason = (status: InboundOrderStatus): string | undefined =>
+    QC_ELIGIBLE_INBOUND_STATUSES.includes(status)
+      ? undefined
+      : '入库单未收齐进入待质检，不能创建质检单'
+
+  /**
+   * SfOrderSelect 数据源：空关键词=两个待质检状态各取最近一页合并（入库列表按 id ASC
+   * 分页——repository.go:195-203，合并后倒序）；有关键词=单请求 inbound_no/source_no
+   * ILIKE 模糊搜索，命中的非待质检单据标禁用 + 原因。
+   */
+  const loadInboundOptions = useCallback(
+    async (keyword: string): Promise<Array<SfOrderSelectOption<InboundOrder>>> => {
+      const trimmed = keyword.trim()
+      if (!trimmed) {
+        const pages = await Promise.all(
+          QC_ELIGIBLE_INBOUND_STATUSES.map((status) =>
+            inboundApi.list({ status, page: 1, pageSize: 20 }),
+          ),
+        )
+        return pages
+          .flatMap((page) => page.items)
+          .sort((a, b) => Number(b.id) - Number(a.id))
+          .map(toInboundOption)
+      }
+      const page = await inboundApi.list({ keyword: trimmed, page: 1, pageSize: 50 })
+      return page.items.map((order) => ({
+        ...toInboundOption(order),
+        disabledReason: inboundDisabledReason(order.status),
+      }))
+    },
+    [toInboundOption],
+  )
 
   // 每次打开重建表单（不残留上次草稿）
   useEffect(() => {
@@ -117,7 +213,7 @@ export default function QualityCreateModal({ open, onClose, onCreated }: Quality
     >
       {contextHolder}
       <p style={{ marginBottom: 16 }}>
-        面向入库质检补录场景：录入来源入库单号与计划检验明细；入库单须已收齐进入待质检
+        面向入库质检补录场景：下拉选择来源入库单与录入计划检验明细；入库单须已收齐进入待质检
         （AWAITING_QC / AWAITING_PUTAWAY），SKU 与数量约束由后端按收货量强校验。
       </p>
       <Form<QualityCreateFormValues> form={form} layout="vertical" requiredMark="optional">
@@ -125,10 +221,14 @@ export default function QualityCreateModal({ open, onClose, onCreated }: Quality
           <Form.Item
             name="source_no"
             label="来源入库单号"
-            rules={[{ required: true, message: '请输入来源入库单号' }]}
+            rules={[{ required: true, message: '请选择来源入库单号' }]}
             style={{ flex: 1, marginRight: 12 }}
           >
-            <Input placeholder="入库单号（IN-日期-流水）" allowClear />
+            <SfOrderSelect<InboundOrder>
+              placeholder="选择入库单（可输入单号搜索）"
+              loadOptions={loadInboundOptions}
+              emptyText="没有待质检 / 待上架的入库单"
+            />
           </Form.Item>
           <Form.Item
             name="inspection_type"

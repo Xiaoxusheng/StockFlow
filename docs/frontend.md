@@ -827,6 +827,18 @@ useIdempotentMutation / utils/idempotency.ts  幂等提交包装（自动附 Ide
                    isPending 期间按钮 loading+disabled；服务端消费面按 api.md §7 逐端点口径）
 ```
 
+**来源单号远程选择器（2026-10-07）**——单据创建表单的「来源单号」一律用下拉联想替代手输，禁止各页自造第二套远程搜索 Select：
+
+```text
+SfOrderSelect      来源单号远程选择器（components/common/SfOrderSelect.tsx）：展开=按关键词重拉
+                   （保证新开单据可见）、输入防抖 300ms 远程搜索（filterOption=false）、竞态序号守卫、
+                   禁用选项随行展示原因、value=单号字符串（URL 预填直显原值不造选项）。
+                   调用方提供 loadOptions(keyword)（自行合并多状态查询）并按后端校验契约决定
+                   哪些状态可选（白名单判定，防新增状态漏拦）；raw 载荷随 onChange 透传。
+                   已接入：采购/销售退货抽屉（选中即带明细）、质检单创建弹窗、
+                   入库单表单（PURCHASE 来源，选中联动收货仓库；OTHER 来源保留手输自由文本）
+```
+
 ---
 
 ## 24. 视觉状态规范

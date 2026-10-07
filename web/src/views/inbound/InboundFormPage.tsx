@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { Button, Col, Descriptions, Flex, Form, Input, InputNumber, Row, Select, Typography, message } from 'antd'
 import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
@@ -6,10 +6,16 @@ import { useNavigate, useParams, useSearchParams } from 'react-router'
 import {
   buildIdItemMap,
   fetchSkuOptions,
+  fetchSupplierOptions,
   fetchWarehouseOptions,
   idKey,
 } from '@/api/options'
 import type { SkuItem } from '@/api/masterdata'
+import { toStatusKey } from '@/api/masterdata'
+import { purchaseApi, type PurchaseOrder, type PurchaseStatus } from '@/api/purchase'
+import { SfOrderSelect, type SfOrderSelectOption } from '@/components/common/SfOrderSelect'
+import { SfStatusTag } from '@/components/common/SfStatusTag'
+import { PO_STATUS_TAG } from '../purchase/purchaseStatusMeta'
 import {
   INBOUND_CREATE_PERMISSION,
   INBOUND_UPDATE_PERMISSION,
@@ -25,7 +31,7 @@ import { SfPageHeader } from '@/components/common/SfPageHeader'
 import { SfDetailSection, SfSummaryBar } from '@/components/common/SfDetailSection'
 import { SfError } from '@/components/common/SfError'
 import { SfLoading } from '@/components/common/SfLoading'
-import { formatNumber } from '@/utils/format'
+import { formatDate, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -60,9 +66,24 @@ function toIdNumber(id: number | string): number {
 }
 
 /**
+ * 可作采购入库来源的采购单状态（后端 validateInboundSource 契约——
+ * service_inbound.go:145：APPROVED/PARTIAL_RECEIVED/RECEIVED_ALL 且仓库一致；
+ * DRAFT/PENDING_APPROVAL 未审核、COMPLETED/CANCELLED 已终态均拒绝）。
+ */
+const PO_INBOUND_ELIGIBLE_STATUSES: PurchaseStatus[] = [
+  'APPROVED',
+  'PARTIAL_RECEIVED',
+  'RECEIVED_ALL',
+]
+
+/**
  * 新建 / 草稿编辑入库单（/inbound/new、/inbound/:id/edit——路由参数 :id 存在即编辑）。
  * 创建 POST /api/inbounds（InboundCreateInput，internal/purchase/service_inbound.go:32-37：
  * source_type 必填、source_no 可选来源单号、items 必填；同 SKU 后端合并单行）；
+ * PURCHASE 来源单号经 SfOrderSelect 远程联想（初始=三个可入库状态各取最近一页，输入
+ * 防抖按 po_no ILIKE 模糊搜索；选中后按采购单带出收货仓库——service_inbound.go:145-152
+ * 后端强校验一致）；OTHER 来源保留手输（来源号自由文本，后端不校验存在性）；
+ * URL 预填（frontend.md §33 契约 2）的 source_no 以字符串直显，不造选项。
  * 编辑 PUT /api/inbounds/{id}（InboundUpdateInput，service_inbound.go:39-42：仅草稿，
  * 仅 remark + 明细整单替换——来源类型/来源单号/仓库创建后不可改，编辑态只读展示；
  * 后端 Remark 为非指针无条件覆盖，故编辑始终携带原 remark）。
@@ -86,6 +107,11 @@ export default function InboundFormPage() {
     queryKey: ['inbound', 'options', 'skus'],
     queryFn: fetchSkuOptions,
   })
+  // 供应商名称映射：仅采购来源单下拉选项展示用（缺资料降级 #ID，不造假数据）
+  const suppliers = useQuery({
+    queryKey: ['inbound', 'options', 'suppliers'],
+    queryFn: fetchSupplierOptions,
+  })
   const warehouseOptions = (warehouses.data ?? []).map((item) => ({
     label: `${item.name}（${item.code}）`,
     value: toIdNumber(item.id),
@@ -98,7 +124,91 @@ export default function InboundFormPage() {
     () => buildIdItemMap<SkuItem>(skus.data ?? [], (item) => item.id),
     [skus.data],
   )
+  const supplierMap = useMemo(
+    () => buildIdItemMap(suppliers.data ?? [], (item) => item.id),
+    [suppliers.data],
+  )
   const watchedSourceType = Form.useWatch('source_type', form)
+
+  /** 单号 → 下拉选项（供应商/仓库经 options 本地映射，缺资料降级 #ID，不造假数据） */
+  const toPoOption = useCallback(
+    (order: PurchaseOrder): SfOrderSelectOption<PurchaseOrder> => {
+      const supplier = supplierMap.get(String(order.supplier_id))
+      const warehouse = (warehouses.data ?? []).find((w) => toIdNumber(w.id) === order.warehouse_id)
+      const statusMeta = PO_STATUS_TAG[order.status]
+      return {
+        value: order.po_no,
+        label: order.po_no,
+        description: (
+          <Flex gap={8} align="center" wrap="nowrap">
+            <span>
+              {supplier ? `${supplier.name}（${supplier.code}）` : `供应商 #${order.supplier_id}`}
+              {' · '}
+              {warehouse ? `${warehouse.name}（${warehouse.code}）` : `仓库 #${order.warehouse_id}`}
+              {' · '}
+              {formatDate(order.created_at)}
+            </span>
+            <SfStatusTag
+              status={toStatusKey(order.status)}
+              label={statusMeta?.label}
+              semantic={statusMeta?.semantic}
+            />
+          </Flex>
+        ),
+        raw: order,
+      }
+    },
+    [supplierMap, warehouses.data],
+  )
+
+  /** 单号下拉禁用规则：非可入库来源状态给原因（与后端 validateInboundSource 同口径） */
+  const poDisabledReason = (status: PurchaseStatus): string | undefined =>
+    PO_INBOUND_ELIGIBLE_STATUSES.includes(status)
+      ? undefined
+      : status === 'DRAFT' || status === 'PENDING_APPROVAL'
+        ? '该采购单未审核，不能创建入库单'
+        : '该采购单已终态，不能创建入库单'
+
+  /**
+   * 采购来源单号 SfOrderSelect 数据源：空关键词=三个可入库状态各取最近一页合并
+   * （采购列表按 id ASC 分页——repository.go:195-203，合并后倒序）；有关键词=单请求
+   * po_no ILIKE 模糊搜索，命中的不可入库单据标禁用 + 原因。
+   */
+  const loadPoOptions = useCallback(
+    async (keyword: string): Promise<Array<SfOrderSelectOption<PurchaseOrder>>> => {
+      const trimmed = keyword.trim()
+      if (!trimmed) {
+        const pages = await Promise.all(
+          PO_INBOUND_ELIGIBLE_STATUSES.map((status) =>
+            purchaseApi.list({ status, page: 1, pageSize: 20 }),
+          ),
+        )
+        return pages
+          .flatMap((page) => page.items)
+          .sort((a, b) => Number(b.id) - Number(a.id))
+          .map(toPoOption)
+      }
+      const page = await purchaseApi.list({ keyword: trimmed, page: 1, pageSize: 50 })
+      return page.items.map((order) => ({
+        ...toPoOption(order),
+        disabledReason: poDisabledReason(order.status),
+      }))
+    },
+    [toPoOption],
+  )
+
+  /** 选中采购单后带出收货仓库（后端强校验「入库仓必须与采购订单收货仓一致」） */
+  const handleSourcePoChange = (
+    poNo: string | undefined,
+    option: SfOrderSelectOption<PurchaseOrder> | undefined,
+  ) => {
+    if (!poNo) return
+    const poWarehouse = option?.raw?.warehouse_id
+    if (poWarehouse != null && toIdNumber(poWarehouse) !== form.getFieldValue('warehouse_id')) {
+      form.setFieldsValue({ warehouse_id: toIdNumber(poWarehouse) })
+      messageApi.info('已按采购单带出收货仓库（入库仓必须与采购订单收货仓一致）')
+    }
+  }
 
   // 编辑模式：拉取详情预填（仅草稿可编辑，后端 UpdateInbound 状态校验 service_inbound.go:211-214）
   const detailQuery = useQuery({
@@ -316,14 +426,20 @@ export default function InboundFormPage() {
                   label="来源单号"
                   rules={
                     watchedSourceType === 'PURCHASE'
-                      ? [{ required: true, message: '采购入库必须填写来源采购单号' }]
+                      ? [{ required: true, message: '请选择来源采购单号' }]
                       : undefined
                   }
                 >
-                  <Input
-                    placeholder={watchedSourceType === 'PURCHASE' ? '请输入采购单号' : '选填（其他入库可空）'}
-                    maxLength={64}
-                  />
+                  {watchedSourceType === 'PURCHASE' ? (
+                    <SfOrderSelect<PurchaseOrder>
+                      placeholder="选择采购单（可输入单号搜索）"
+                      loadOptions={loadPoOptions}
+                      emptyText="没有可入库的采购单"
+                      onChange={handleSourcePoChange}
+                    />
+                  ) : (
+                    <Input placeholder="选填（其他入库可空）" maxLength={64} />
+                  )}
                 </Form.Item>
               </Col>
             </Row>

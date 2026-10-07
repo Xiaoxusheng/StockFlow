@@ -1,14 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Descriptions, Drawer, Flex, Form, Input, InputNumber, Typography, message } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { SfTable } from '@/components/table/SfTable'
+import { SfOrderSelect, type SfOrderSelectOption } from '@/components/common/SfOrderSelect'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   SALES_RETURN_CREATE_PERMISSION,
   salesApi,
+  type SalesOrder,
   type SalesOrderDetail,
   type SalesOrderItem,
+  type SalesOrderStatus,
   type SalesReturnCreatePayload,
   type SalesReturnLineInput,
 } from '@/api/sales'
@@ -30,7 +32,7 @@ import { SfEmpty } from '@/components/common/SfEmpty'
 import { SfError } from '@/components/common/SfError'
 import { SfStatusTag } from '@/components/common/SfStatusTag'
 import { SALES_ORDER_STATUS_TAG } from './salesStatusMeta'
-import { EMPTY_TEXT, formatNumber } from '@/utils/format'
+import { EMPTY_TEXT, formatDate, formatNumber } from '@/utils/format'
 
 const { Text } = Typography
 
@@ -48,9 +50,17 @@ function shipQtyOf(item: SalesOrderItem): number {
 }
 
 /**
+ * 可退销售单状态（后端契约：FindReturnable 仅校验「存在且 QtyShipped>0」，
+ * m2_bridges.go:259-286；已发货/已完结订单禁止取消——service.go:599-604，故
+ * CANCELLED 必无发货；DRAFT/PENDING_APPROVAL/REJECTED 未到发货环节）。
+ */
+const RETURNABLE_SO_STATUSES: SalesOrderStatus[] = ['PARTIAL_SHIPPED', 'SHIPPED_ALL', 'COMPLETED']
+
+/**
  * 新建销售退货抽屉（POST /api/returns，returns:salesreturn:create）。
- * 交互：输入来源销售单号精确查询（salesApi.orders.list({so_no})，handler.go:114 精确匹配）
- * → 带出订单与已发货明细（qty_shipped>0 的行可退）→ 填退货数量 + 原因（必填）
+ * 交互：来源销售单号下拉选择（SfOrderSelect 远程联想：初始=三个可退状态各取最近一页，
+ * 输入防抖按 so_no ILIKE 模糊搜索——repository.go:348-350；不可退状态禁用并给原因）
+ * → 选中即带出订单与已发货明细（qty_shipped>0 的行可退）→ 填退货数量 + 原因（必填）
  * → 提交 SalesReturnCreateInput（service_sales.go:44-50：so_no/customer_id/warehouse_id
  * 由来源单带出，退货仓必须与原单发货仓一致由后端强校验 service_sales.go:183-187）。
  * 来源单出参为裸 ID（sku_id/customer_id/warehouse_id 无联表名称），经基础资料 options
@@ -108,17 +118,82 @@ export function SalesReturnCreateDrawer({
     }
   }, [form, open])
 
-  const loadSource = async () => {
-    const soNo = (form.getFieldValue('so_no') as string | undefined)?.trim()
-    if (!soNo) {
-      messageApi.warning('请先输入来源销售单号')
-      return
-    }
+  /** 单号 → 下拉选项（客户/仓库经 options 本地映射，缺资料降级 #ID，不造假数据） */
+  const toSoOption = useCallback(
+    (order: SalesOrder): SfOrderSelectOption<SalesOrder> => {
+      const customer = customerNames.get(idKey(order.customer_id))
+      const warehouseName = warehouseMaps.name.get(idKey(order.warehouse_id))
+      const warehouseCode = warehouseMaps.code.get(idKey(order.warehouse_id))
+      const statusMeta = SALES_ORDER_STATUS_TAG[order.status]
+      return {
+        value: order.so_no,
+        label: order.so_no,
+        description: (
+          <Flex gap={8} align="center" wrap="nowrap">
+            <span>
+              {customer ?? `客户 #${order.customer_id}`}
+              {' · '}
+              {warehouseName ? `${warehouseName}（${warehouseCode}）` : `#${String(order.warehouse_id)}`}
+              {' · '}
+              {formatDate(order.created_at)}
+            </span>
+            <SfStatusTag
+              status={toStatusKey(order.status)}
+              label={statusMeta?.label}
+              semantic={statusMeta?.semantic}
+            />
+          </Flex>
+        ),
+        raw: order,
+      }
+    },
+    [customerNames, warehouseMaps],
+  )
+
+  /**
+   * 单号下拉禁用规则：白名单判定（与 RETURNABLE_SO_STATUSES 同源，防新增状态漏拦，
+   * 如 APPROVED=已审核未发货同样不可退）；可退性最终由后端按发货量强校验。
+   */
+  const soDisabledReason = (status: SalesOrderStatus): string | undefined => {
+    if (RETURNABLE_SO_STATUSES.includes(status)) return undefined
+    return status === 'CANCELLED' ? '该销售单已取消，不可退货' : '该销售单未发货，不可退货'
+  }
+
+  /**
+   * SfOrderSelect 数据源：空关键词=三个可退状态各取最近一页合并（销售列表按 id DESC
+   * 分页——repository.go:362，合并后仍倒序）；有关键词=单请求 so_no ILIKE 模糊搜索，
+   * 命中的不可退单据标禁用 + 原因（比隐藏更有信息量）。
+   */
+  const loadSoOptions = useCallback(
+    async (keyword: string): Promise<Array<SfOrderSelectOption<SalesOrder>>> => {
+      const trimmed = keyword.trim()
+      if (!trimmed) {
+        const pages = await Promise.all(
+          RETURNABLE_SO_STATUSES.map((status) =>
+            salesApi.orders.list({ status, page: 1, pageSize: 20 }),
+          ),
+        )
+        return pages
+          .flatMap((page) => page.items)
+          .sort((a, b) => Number(b.id) - Number(a.id))
+          .map(toSoOption)
+      }
+      const page = await salesApi.orders.list({ so_no: trimmed, page: 1, pageSize: 50 })
+      return page.items.map((order) => ({
+        ...toSoOption(order),
+        disabledReason: soDisabledReason(order.status),
+      }))
+    },
+    [toSoOption],
+  )
+
+  const loadSource = async (soNo: string) => {
     setSourceError(null)
     setSourceLoading(true)
     try {
-      const page = await salesApi.orders.list({ so_no: soNo, page: 1, pageSize: 1 })
-      const order = page.items[0]
+      // so_no 为 ILIKE 模糊（repository.go:348-350）；client 端按 so_no 精确归一
+      const page = await salesApi.orders.list({ so_no: soNo, page: 1, pageSize: 20 })
+      const order = page.items.find((item) => item.so_no === soNo)
       if (!order) {
         setSource(null)
         messageApi.error(`未找到销售单号 ${soNo}`)
@@ -309,15 +384,26 @@ export function SalesReturnCreateDrawer({
       {contextHolder}
       <Flex vertical gap={16}>
         <Form form={form} layout="vertical">
-          <Form.Item label="来源销售单号" required style={{ marginBottom: 8 }}>
-            <Flex gap={8}>
-              <Form.Item name="so_no" noStyle rules={[{ required: true, message: '请输入来源销售单号' }]}>
-                <Input placeholder="如 SO-20261004-0001（精确匹配）" maxLength={64} onPressEnter={loadSource} />
-              </Form.Item>
-              <Button icon={<ReloadOutlined />} loading={sourceLoading} onClick={loadSource}>
-                带出明细
-              </Button>
-            </Flex>
+          <Form.Item
+            name="so_no"
+            label="来源销售单号"
+            required
+            rules={[{ required: true, message: '请选择来源销售单号' }]}
+            style={{ marginBottom: 8 }}
+          >
+            <SfOrderSelect<SalesOrder>
+              placeholder="选择销售单（可输入单号搜索）"
+              loadOptions={loadSoOptions}
+              emptyText="没有可退货的销售单"
+              onChange={(soNo, option) => {
+                if (!soNo) {
+                  setSource(null)
+                  setLineEdits({})
+                  return
+                }
+                void loadSource(option?.raw?.so_no ?? soNo)
+              }}
+            />
           </Form.Item>
           <Form.Item name="remark" label="整单备注" style={{ marginBottom: 0 }}>
             <Input.TextArea rows={2} placeholder="选填" maxLength={255} />
@@ -376,7 +462,7 @@ export function SalesReturnCreateDrawer({
             </Text>
           </>
         ) : (
-          <SfEmpty description="输入来源销售单号后带出可退明细" />
+          <SfEmpty description="选择来源销售单后带出可退明细" />
         )}
       </Flex>
     </Drawer>
