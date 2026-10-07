@@ -10,6 +10,7 @@ import {
   Modal,
   Select,
   theme,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -246,19 +247,23 @@ export default function FileCenterPage() {
       key: 'actions',
       fixed: 'right',
       width: 150,
+      /* 右对齐 + 三按钮恒渲染（非图片行预览禁用）：不同行的操作按钮完全对齐——
+         原实现预览按钮按文件类型条件出现，导致「下载/更多」在行间错位 */
+      align: 'right' as const,
       render: (_: unknown, record: FileItem) => (
         <span style={{ whiteSpace: 'nowrap' }}>
-          {isImageFile(record) && (
+          <Tooltip title={isImageFile(record) ? '预览图片' : '仅图片文件可预览'}>
             <Button
               type="link"
               size="small"
               icon={<EyeOutlined />}
+              disabled={!isImageFile(record)}
               loading={previewingId === record.id}
               onClick={() => void handlePreview(record)}
             >
               预览
             </Button>
-          )}
+          </Tooltip>
           <Button
             type="link"
             size="small"

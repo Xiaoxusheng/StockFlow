@@ -45,7 +45,7 @@ tmp/
 .local-env/
 
 # 后端运行时文件存储（storage.root ./data/files 的上传件/冒烟产物，见 config.example.yaml；勿入库）
-data/
+/data/
 
 # Go 后端本地配置（可能含密钥：deployment.md §1 禁止写死密钥，只提交 config.example.yaml）
 config.yaml
