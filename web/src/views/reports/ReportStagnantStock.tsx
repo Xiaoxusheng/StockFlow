@@ -1,7 +1,10 @@
 import { Card, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { DateCell } from '@/components/table/cells'
+import { useNavigate } from 'react-router'
 import { reportsApi, type StagnantRow } from '@/api/reports'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfTable } from '@/components/table/SfTable'
 import { formatQty } from '@/utils/format'
@@ -57,6 +60,11 @@ function qty(v: number) {
  * tier 为该行命中的最大阈值；无筛选参数，仅分页（handler.go:184-196）。
  */
 export default function ReportStagnantStock() {
+  // 联动批次三 L15：行点击 → /inventory/stock?sku_id=&warehouse_id= 预筛
+  // （frontend.md §33.4；inventory:stock:view 门控，无权限不可点）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillStock = canAccess(user, 'inventory:stock:view')
   const list = usePagedList<StagnantRow, { page?: number; pageSize?: number }>({
     queryKey: ['reports', 'stagnant-stock'],
     fetch: (q) => reportsApi.stagnantStock(q),
@@ -67,7 +75,7 @@ export default function ReportStagnantStock() {
     <Card size="small" title="库存积压">
       <SfTable<StagnantRow>
         storageKey="report-stagnant-stock"
-        // 行键用 code 对而非 id：后端 SKUID 扫描列名不匹配（GORM naming），sku_id 现网恒 0
+        // 行键用 code 对组合键（历史遗留写法；sku_id 后端显式 tag 修复后实测有值）
         rowKey={(record) => `${record.warehouse_code}-${record.sku_code}`}
         columns={COLUMNS}
         dataSource={list.items}
@@ -80,6 +88,17 @@ export default function ReportStagnantStock() {
         onPageChange={list.onPageChange}
         emptyText="当前没有达到积压档位阈值的库存"
         scrollX={960}
+        onRow={
+          canDrillStock
+            ? (record) => ({
+                onClick: () =>
+                  navigate(
+                    `/inventory/stock?sku_id=${record.sku_id}&warehouse_id=${record.warehouse_id}`,
+                  ),
+                style: { cursor: 'pointer' },
+              })
+            : undefined
+        }
       />
     </Card>
   )

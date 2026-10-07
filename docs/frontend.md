@@ -1171,6 +1171,12 @@ purchase:inbound:create；后端 CreateInbound 强校验来源单号与仓库一
   「来源单号」（PO 号），单号本身必须走 `keyword`（匹配 inbound_no/source_no，
   internal/purchase/repository.go:133）；出库列表 `outbound_no` 即出库单号本身。
 - 预警行「查看库存」：`/inventory/stock?sku_id=<id>&warehouse_id=<id>`（inventory:stock:view）。
+- 采购详情「收货记录」：`/purchases/receipts?po_no=<单号>`（receipts 列表 po_no 参数经入库单
+  source_no 关联，覆盖一张 PO 1:N 张入库单的全部收货记录；inbound_no 形态保留为回退）。
+- 报表行下钻（库存汇总/库存周转/库存积压）：行点击 → `/inventory/stock?sku_id=&warehouse_id=`
+  （三报表行均携带双 id；入库/出库统计为按日口径且目标列表无日期参数，明确不接）。
+- Pad 任务卡「复制单号」：关联单号一键复制 → PC 端既有全局搜索单号直达详情承接
+  （searchTargets 前缀映射已存在），不自建跨端深链通道。
 
 ### 33.4 图表下钻（2026-10-07 批次二）
 

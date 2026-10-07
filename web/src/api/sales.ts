@@ -78,10 +78,13 @@ export interface SalesOrderItem {
   updated_by: number
 }
 
-/** 订单详情（GET /api/sales/{id}，handler.go:156-167 返回 {order, items}） */
+/** 订单详情（GET /api/sales/{id}，handler.go 返回 {order, items, outbound_no}；
+ * outbound_no 为审核事务 1:1 派生的出库单号，未审核/已取消单为空串——
+ * frontend.md §33.4 销售详情「拣货/复核/打包/发货」关联 chip 的 ctx） */
 export interface SalesOrderDetail {
   order: SalesOrder
   items: SalesOrderItem[]
+  outbound_no?: string
 }
 
 // ---------- 创建 / 编辑入参（CreateOrderInput，internal/sales/service.go:104-121） ----------

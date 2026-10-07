@@ -184,7 +184,14 @@ func (h *handler) getSalesOrder(c *gin.Context) {
 		fail(c, err)
 		return
 	}
-	response.OK(c, gin.H{"order": o, "items": items})
+	// outbound_no：审核事务 1:1 派生的出库单号（frontend.md §33.4 L7——详情页四作业关联
+	// chip 的 ctx；未审核/已取消单为空串，chip 按 fail-closed 不渲染）
+	outboundNo, err := h.svc.OutboundNoBySo(c.Request.Context(), o.SoNo)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	response.OK(c, gin.H{"order": o, "items": items, "outbound_no": outboundNo})
 }
 
 // @Summary PUT /api/sales/:id

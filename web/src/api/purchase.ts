@@ -114,10 +114,12 @@ export interface PurchaseApprovePayload {
 //
 // 收货为事件型一次性生效（幂等键防重），无独立状态机——状态语义由入库单承载。
 
-/** 收货单列表筛选（handler.go:320-340：inbound_no/receipt_no + warehouse_id） */
+/** 收货单列表筛选（handler.go：inbound_no/receipt_no/po_no + warehouse_id；
+ * po_no 经入库单 source_no 关联，覆盖一张 PO 1:N 张入库单的全部收货记录） */
 export interface ReceiptQuery extends PageQuery {
   inbound_no?: string
   receipt_no?: string
+  po_no?: string
   warehouse_id?: SalesId
 }
 

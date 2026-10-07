@@ -142,8 +142,11 @@ type InboundListFilter struct {
 
 // ReceiptListFilter 收货记录列表筛选。
 type ReceiptListFilter struct {
-	InboundNo   string
-	ReceiptNo   string
+	InboundNo string
+	ReceiptNo string
+	// PoNo 来源采购单号：经 inbound_orders.source_no 关联（一张 PO 1:N 张入库单，
+	// 其下全部收货记录——frontend.md §33.4 采购详情「收货记录」chip 承载）。
+	PoNo        string
 	WarehouseID int64
 	Scope       WarehouseScope
 	Page        int
@@ -493,15 +496,22 @@ func (r *repo) FindReceiptByNo(ctx context.Context, no string) (*Receipt, error)
 }
 
 func (r *repo) ListReceipts(ctx context.Context, f ReceiptListFilter) ([]*Receipt, int64, error) {
-	q := applyScope(withCtx(ctx, r.db).Model(&Receipt{}), "warehouse_id", f.Scope)
+	// PoNo 走 JOIN（见下），warehouse_id 条件限定表名防歧义
+	q := applyScope(withCtx(ctx, r.db).Model(&Receipt{}), "receipts.warehouse_id", f.Scope)
 	if f.InboundNo != "" {
 		q = q.Where("inbound_no = ?", f.InboundNo)
+	}
+	if f.PoNo != "" {
+		// 一张 PO 派生 1:N 张入库单：经入库单来源单号关联取其下全部收货记录
+		// （inbound_no 在 inbound_orders 唯一，JOIN 不产生重复行）
+		q = q.Joins("JOIN inbound_orders io ON io.inbound_no = receipts.inbound_no AND io.deleted_at IS NULL").
+			Where("io.source_no = ?", f.PoNo)
 	}
 	if f.ReceiptNo != "" {
 		q = q.Where("receipt_no = ?", f.ReceiptNo)
 	}
 	if f.WarehouseID > 0 {
-		q = q.Where("warehouse_id = ?", f.WarehouseID)
+		q = q.Where("receipts.warehouse_id = ?", f.WarehouseID)
 	}
 	return paginate[Receipt](q, f.Page, f.PageSize)
 }

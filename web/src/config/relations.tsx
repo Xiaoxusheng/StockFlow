@@ -634,12 +634,25 @@ export const RELATIONS: Record<RelationEntity, RelationItem[]> = {
       key: 'receipts',
       label: '收货记录',
       permission: 'purchase:receipt:view',
-      hint: '按入库单号过滤的收货明细（receipts 列表仅支持 inbound_no/receipt_no 过滤）',
+      // po_no 驱动（2026-10-07 联动批次三 L6）：一张 PO 1:N 张入库单，receipts 列表
+      // po_no 参数经入库单 source_no 关联取其下全部收货记录（后端 JOIN）；inbound_no
+      // 保留为回退（上游 ctx 若直接持有入库单号仍可用）
+      hint: '按来源采购单号过滤的收货记录（覆盖该 PO 全部入库单的收货）',
       to: (ctx) => {
+        const poNo = pick(ctx, 'po_no')
+        if (poNo) return target('/purchases/receipts', { po_no: poNo })
         const no = pick(ctx, 'inbound_no')
         return no ? target('/purchases/receipts', { inbound_no: no }) : null
       },
       list: (ctx) => {
+        const poNo = pick(ctx, 'po_no')
+        if (poNo) {
+          return {
+            title: `收货记录（来源 ${poNo}）`,
+            fetch: (q: PageQuery) => purchaseApi.receipts.list({ ...q, po_no: poNo } as ReceiptQuery),
+            columns: RECEIPT_COLUMNS,
+          }
+        }
         const no = pick(ctx, 'inbound_no')
         return no
           ? {

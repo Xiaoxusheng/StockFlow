@@ -325,6 +325,27 @@ func (s *Service) GetSalesOrderDetail(ctx context.Context, id int64, scope Scope
 	return o, items, nil
 }
 
+// OutboundNoBySo 销售单派生的出库单号（审核事务 1:1 自动创建，取最早一张；
+// 未审核/已取消单无出库单返回空串。frontend.md §33.4 销售详情「拣货/复核/打包/发货」
+// 关联 chip 的 ctx 承载——出库单与销售单同仓，订单已过 scope 校验故不再重复过滤）。
+func (s *Service) OutboundNoBySo(ctx context.Context, soNo string) (string, error) {
+	if soNo == "" {
+		return "", nil
+	}
+	var rows []OutboundOrder
+	if err := s.repo.Tx(ctx, func(tx *gorm.DB) error {
+		var err error
+		rows, err = s.repo.ListOutboundOrdersBySO(tx, soNo)
+		return err
+	}); err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].OutboundNo, nil
+}
+
 // ListSalesOrders 订单列表（强制分页 + 仓库数据权限过滤）。
 func (s *Service) ListSalesOrders(ctx context.Context, q SalesOrderQuery) ([]SalesOrder, int64, error) {
 	return s.repo.ListSalesOrders(ctx, q)

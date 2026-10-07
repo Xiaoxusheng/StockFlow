@@ -2,8 +2,11 @@ import { useState } from 'react'
 import { Card, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router'
 import { reportsApi, type InventorySummaryQuery, type InventorySummaryRow } from '@/api/reports'
 import { fetchSkuOptions, fetchWarehouseOptions } from '@/api/options'
+import { useAuthStore } from '@/stores/auth'
+import { canAccess } from '@/types/permission'
 import { usePagedList } from '@/hooks/usePagedList'
 import { SfSearchForm } from '@/components/table/SfSearchForm'
 import { SfTable } from '@/components/table/SfTable'
@@ -51,6 +54,11 @@ function money(v: number) {
  */
 export default function ReportInventorySummary() {
   const [params, setParams] = useState<InventorySummaryQuery>({})
+  // 联动批次三 L15：行点击 → /inventory/stock?sku_id=&warehouse_id= 预筛
+  // （frontend.md §33.4；inventory:stock:view 门控，无权限不可点）
+  const navigate = useNavigate()
+  const user = useAuthStore((s) => s.user)
+  const canDrillStock = canAccess(user, 'inventory:stock:view')
   const warehouseOptions = useQuery({
     queryKey: ['reports', 'options', 'warehouses'],
     queryFn: fetchWarehouseOptions,
@@ -96,7 +104,7 @@ export default function ReportInventorySummary() {
       />
       <SfTable<InventorySummaryRow>
         storageKey="report-inventory-summary"
-        // 行键用 code 对而非 id：后端 SKUID 扫描列名不匹配（GORM naming），sku_id 现网恒 0
+        // 行键用 code 对组合键（历史遗留写法；sku_id 后端显式 tag 修复后实测有值，预筛直接用）
         rowKey={(record) => `${record.warehouse_code}-${record.sku_code}`}
         columns={COLUMNS}
         dataSource={list.items}
@@ -109,6 +117,17 @@ export default function ReportInventorySummary() {
         onPageChange={list.onPageChange}
         emptyText="当前筛选条件下没有库存汇总数据"
         scrollX={1180}
+        onRow={
+          canDrillStock
+            ? (record) => ({
+                onClick: () =>
+                  navigate(
+                    `/inventory/stock?sku_id=${record.sku_id}&warehouse_id=${record.warehouse_id}`,
+                  ),
+                style: { cursor: 'pointer' },
+              })
+            : undefined
+        }
       />
     </Card>
   )

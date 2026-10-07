@@ -445,6 +445,7 @@ func handleReceiptList(c *gin.Context, svc *Service) {
 	items, total, err := svc.ListReceipt(c.Request.Context(), ReceiptListFilter{
 		InboundNo:   strings.TrimSpace(c.Query("inbound_no")),
 		ReceiptNo:   strings.TrimSpace(c.Query("receipt_no")),
+		PoNo:        strings.TrimSpace(c.Query("po_no")),
 		WarehouseID: warehouseID,
 		Scope:       scopeOf(c),
 		Page:        page, PageSize: pageSize,

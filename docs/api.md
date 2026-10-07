@@ -46,11 +46,15 @@ API 按业务领域划分：
                                   权限挂 reports:report:read——与所在入库分析页
                                   既有趋势端点同码，2026-10-05 分析卡片轮）
 /api/inbounds/supplier-rank       供应商入库排行（reports 实现、挂载与权限口径同上）
-/api/receipts      收货
+/api/receipts      收货（列表筛选 inbound_no/receipt_no/warehouse_id；
+                   2026-10-07 增 po_no——经 inbound_orders.source_no 关联，覆盖一张
+                   PO 1:N 张入库单的全部收货记录，frontend.md §33.4 采购详情 chip）
 /api/putaway       上架
 
 —— 销售与出库 ——
-/api/sales         销售
+/api/sales         销售（GET /api/sales/{id} 详情响应 2026-10-07 增 outbound_no——
+                   审核事务 1:1 派生的出库单号，未审核/已取消单为空串；
+                   frontend.md §33.4 销售详情四作业关联 chip 的 ctx）
 /api/sales/analytics/trend      销售订单金额趋势（reports 实现、sales 前缀挂载；
                                 权限挂 sales:sales:list，2026-10-05 分析卡片轮；
                                 订单金额口径，非流水估值）

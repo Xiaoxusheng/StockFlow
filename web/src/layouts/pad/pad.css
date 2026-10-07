@@ -318,6 +318,39 @@
   font-size: var(--sf-pad-font-label);
 }
 
+/* 关联单号行（2026-10-07 联动批次三 L12）：单号 + 复制按钮；复制经 stopPropagation
+   不触发整卡选中，反馈 1.5s 自动回落（PadTaskCard.tsx 组件内定时器） */
+.sf-pad-task-card__src {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sf-space-2);
+  font-size: var(--sf-pad-font-label);
+}
+
+.sf-pad-task-card__src-no {
+  color: var(--sf-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-pad-task-card__copy {
+  flex-shrink: 0;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius-sm);
+  background: var(--sf-surface);
+  color: var(--sf-text-secondary);
+  font-size: var(--sf-pad-font-label);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.sf-pad-task-card__copy--done {
+  color: var(--sf-success);
+  border-color: var(--sf-success);
+}
+
 .sf-pad-task-card__foot {
   display: flex;
   justify-content: space-between;

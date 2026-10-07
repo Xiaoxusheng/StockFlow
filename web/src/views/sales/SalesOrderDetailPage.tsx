@@ -271,11 +271,17 @@ export default function SalesOrderDetailPage() {
             ]}
           />
         </SfDetailSection>
-                {/* §2.6 上下文导航：销售单 → 关联出库单 / 销售退货 / 库存 */}
+        {/* §2.6 上下文导航：销售单 → 关联出库单 / 四作业 chip / 销售退货 / 库存
+            （outbound_no 为审核派生出库单号，frontend.md §33.4 L7——未审核单为空，
+            outbound_no 驱动的四 chip fail-closed 不渲染） */}
         <SfDetailSection title="关联业务">
           <SfRelationNav
             entity="sales_order"
-            context={{ so_no: order.so_no, warehouse_id: order.warehouse_id }}
+            context={{
+              so_no: order.so_no,
+              warehouse_id: order.warehouse_id,
+              outbound_no: query.data?.outbound_no || undefined,
+            }}
           />
         </SfDetailSection>
         <SfDetailSection title="商品明细">

@@ -14,6 +14,16 @@
 
 ## 文档记录
 
+## [2026-10-07] 功能：跨模块联动批次三收官（PO 收货记录 chip 1:N / 销售四作业 chip / 报表行下钻 / Pad 单号复制，L6/L7/L12/L15）
+
+- **背景**：联动盘点 15 项最后一批（前两批 L1-L5/L9、L4/L8/L10/L11/L13/L14 见同日条目），本批后全量收口；计划 docs/plans/2026-10-07-linkage-batch3.md，规范续写 frontend.md §33.3。
+- **L6 采购详情「收货记录」chip（后端+前端）**：receipts 列表增 `po_no` 参数（internal/purchase/repository.go JOIN inbound_orders ON inbound_no WHERE source_no=?——一张 PO 1:N 张入库单取其下全部收货记录；warehouse_id 条件限定表名防 JOIN 歧义）；relations.tsx purchase_order.receipts 项改 po_no 驱动（inbound_no 形态保留回退）——原实现按 1:1 假设绑 ctx.inbound_no，PO 详情 ctx 恒缺该字段故 chip 从不渲染。
+- **L7 销售详情四作业 chip 点亮（后端+前端）**：GET /api/sales/{id} 响应增 `outbound_no`（service.OutboundNoBySo 复用 repo.ListOutboundOrdersBySO 取审核派生的最早出库单，未审核/已取消为空串）；详情页 ctx 透传——relations sales_order 实体 拣货/复核/打包/发货 四 chip 早已注册（ctx.outbound_no 驱动 fail-closed），本批补齐最后一环。
+- **L15 报表行下钻（纯前端）**：库存汇总/库存周转/库存积压三报表行点击 → /inventory/stock?sku_id=&warehouse_id=（行字段核对：三行类型均携带双 id；入库/出库统计为按日口径且目标列表无日期参数，明确不接）；三处过时的「sku_id 恒 0」注释同步更正。
+- **L12 Pad 任务卡单号复制（纯前端）**：PadTaskCard 增关联单号行 + 复制按钮（navigator.clipboard + execCommand 回退；stopPropagation 防误触整卡；复制态 1.5s 反馈）——PC 端经既有全局搜索单号直达详情承接，不自建跨端深链。
+- **文档**：api.md 收货列表（po_no 参数）与销售详情（outbound_no 响应）两节同步；frontend.md §33.3 补四条。
+- **验证**：go build/vet/test（purchase/sales/reports 套件）+ tsc 全绿；后端重建重启；浏览器实测——PARTIAL_RECEIVED PO-16 收货记录 chip → 抽屉「收货记录（来源 PO-20261003-000002）」1 行命中；APPROVED SO-26 四 chip 全亮 → 拣货任务抽屉按 OUT-20261006-000001 过滤 1 行；库存汇总行点击 → stock?sku_id=9401&warehouse_id=9101；Pad 三卡均带复制按钮。
+
 ## [2026-10-07] 修复：库存预警操作列幽灵「…」溢出（td 级 text-overflow 误画省略号）
 
 - **现象**：库存预警列表「操作」列「查看库存/去补货」右侧出现被表缘裁掉半截的「…」，用户误读为「更多」控件溢出；该列 DOM 实际只有两个按钮，无任何更多控件。
