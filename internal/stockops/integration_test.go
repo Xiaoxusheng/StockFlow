@@ -108,6 +108,18 @@ const (
 	itWhDst = int64(2)
 )
 
+// itRunID 本轮运行的唯一标识（毫秒时间戳 + PID），用于派生集成用例的库位号。
+//
+// 为什么需要：同包多个用例原先共用 bin 111（调拨用例种 SKU7001、盘点用例种 SKU7002），
+// 盘点按 `Scope{BIN:[111]}` 冻结会同时捞到两行 → `require.Len(detail.Items, 1)` 恒失败；
+// 且同一 DB 上重复运行会残留旧行（Putaway 累加），断言绝对量（qty 10）随之失真。
+// 按运行派生库位后，用例彼此独立、同一 DB 可重复运行，且不需要清库（不破坏演示数据）。
+// inventory 表无库位外键，任意 bin_id 合法；库位存在性由 fakeBinChecker2 放行。
+var itRunID = int64(time.Now().UnixNano()/int64(time.Millisecond)%1_000_000)*1000 + int64(os.Getpid()%1000)
+
+// itLoc 派生本轮库位号（base 保留可读性：111 → 111000123）。
+func itLoc(base int64) int64 { return base*1_000_000 + itRunID }
+
 // itSeedRow 经库存原语 Putaway 播种源行（免检直达 available）。
 func itSeedRow(t *testing.T, gw *inventory.Service, wh, zone, shelf, bin, sku int64, qty int64) inventory.RowKey {
 	t.Helper()
@@ -140,14 +152,14 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 	ctx := context.Background()
 	actor := testActor("it")
 
-	src := itSeedRow(t, gw, itWhSrc, 1, 11, 111, 7001, 10)
+	src := itSeedRow(t, gw, itWhSrc, 1, 11, itLoc(111), 7001, 10)
 
 	in := TransferInput{
 		Type: TransferTypeWarehouse, FromWarehouseID: itWhSrc, ToWarehouseID: itWhDst,
 		Lines: []TransferLineInput{{
 			SKUID: 7001, Qty: q(6),
-			From: TransferLoc{WarehouseID: itWhSrc, ZoneID: 1, ShelfID: 11, BinID: 111},
-			To:   TransferLoc{WarehouseID: itWhDst, ZoneID: 2, ShelfID: 21, BinID: 211},
+			From: TransferLoc{WarehouseID: itWhSrc, ZoneID: 1, ShelfID: 11, BinID: itLoc(111)},
+			To:   TransferLoc{WarehouseID: itWhDst, ZoneID: 2, ShelfID: 21, BinID: itLoc(211)},
 		}},
 	}
 	d, err := svc.CreateTransfer(ctx, actor, in)
@@ -173,8 +185,9 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 	require.True(t, srcRow.LockedQty.IsZero())
 	require.NoError(t, srcRow.State().ValidateIdentity())
 
-	// 在途聚合 = 6。
-	rows, total, err := svc.ListInTransit(ctx, InTransitFilter{AllWarehouses: true}, 1, 20)
+	// 在途聚合 = 6（按本用例 SKU 收窄：全局口径会被同 DB 其他 TRANSFERRING 单干扰，
+	// 集成测试需在共用库上可重复运行）。
+	rows, total, err := svc.ListInTransit(ctx, InTransitFilter{AllWarehouses: true, SKUID: 7001}, 1, 20)
 	require.NoError(t, err)
 	require.Equal(t, int64(1), total)
 	require.Equal(t, q(6), rows[0].OutTransit)
@@ -184,7 +197,7 @@ func TestIntegrationTransferLifecycle(t *testing.T) {
 	_, _, err = svc.ReceiveTransfer(ctx, actor, id, "")
 	require.NoError(t, err)
 
-	dst := inventory.RowKey{WarehouseID: itWhDst, ZoneID: 2, ShelfID: 21, BinID: 211, SKUID: 7001}
+	dst := inventory.RowKey{WarehouseID: itWhDst, ZoneID: 2, ShelfID: 21, BinID: itLoc(211), SKUID: 7001}
 	dstRow := itLoadRow(t, db, dst)
 	require.Equal(t, q(6), dstRow.TotalQty)
 	require.Equal(t, q(6), dstRow.AvailableQty)
@@ -215,10 +228,10 @@ func TestIntegrationCountFlow(t *testing.T) {
 	ctx := context.Background()
 	actor := testActor("it")
 
-	src := itSeedRow(t, gw, itWhSrc, 1, 11, 111, 7002, 10)
+	src := itSeedRow(t, gw, itWhSrc, 1, 11, itLoc(112), 7002, 10)
 
 	d, err := svc.CreateCount(ctx, actor, CountInput{
-		WarehouseID: itWhSrc, Scope: CountScope{Mode: "BIN", BinIDs: []int64{111}},
+		WarehouseID: itWhSrc, Scope: CountScope{Mode: "BIN", BinIDs: []int64{itLoc(112)}},
 	})
 	require.NoError(t, err)
 	require.Regexp(t, `^CK-\d{8}-\d{6}$`, d.Order.CountNo)

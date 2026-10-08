@@ -46,7 +46,27 @@ type receiptDemand struct {
 }
 
 // ConfirmReceipt 收货确认（事件型，幂等；重放返回既有结果不重复累计）。
+//
+// 并发同键兜底（plan §8.5/§11.4：并发同键恰一条收货、余者重放同一单号）：快路径幂等预检
+// 在事务外，存在竞态窗口——本方预检未命中 → 并发方提交（单据推进 + 收货单落库）→
+// 本方在**任意一步**失败（事务外的入库单/采购单数量校验、事务内的状态守卫/唯一索引冲突）。
+// 此时该键已有收货单，按幂等语义返回既有结果；键无对应单据则原样上抛业务错误，
+// 不掩盖真实失败（详见 confirmReceiptOnce 的事务内兜底注释）。
 func (s *Service) ConfirmReceipt(ctx context.Context, actor Actor, in ReceiptInput, idemHeader string) (*ReceiptResult, error) {
+	key, err := resolveIdempotencyKey(idemHeader, in.IdempotencyKey)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.confirmReceiptOnce(ctx, actor, in, idemHeader)
+	if err != nil && key != "" {
+		if rc, ferr := s.repo.FindReceiptByIdempotencyKey(ctx, key); ferr == nil && rc != nil {
+			return s.replayReceipt(ctx, rc)
+		}
+	}
+	return res, err
+}
+
+func (s *Service) confirmReceiptOnce(ctx context.Context, actor Actor, in ReceiptInput, idemHeader string) (*ReceiptResult, error) {
 	key, err := resolveIdempotencyKey(idemHeader, in.IdempotencyKey)
 	if err != nil {
 		return nil, err
@@ -113,10 +133,14 @@ func (s *Service) ConfirmReceipt(ctx context.Context, actor Actor, in ReceiptInp
 		return s.confirmReceiptTx(ctx, tx, actor, inbound, in, plan, po, poItemPlan, result)
 	})
 	if err != nil {
-		if key != "" && errors.Is(err, errReplayConflict) {
-			// 并发同键：本事务已回滚，返回既有结果（plan §8.5）。
-			rc, ferr := s.repo.FindReceiptByIdempotencyKey(ctx, key)
-			if ferr == nil && rc != nil {
+		// 并发同键收尾（plan §8.5/§11.4：并发同键恰一条收货、余者重放同一单号）：
+		// 快路径在事务外预检，存在竞态窗口——本方预检未命中 → 并发方提交（单据推进 +
+		// 收货单落库）→ 本方事务在入库单/采购单状态守卫或数量守卫处失败。此时该键已有
+		// 收货单，按幂等语义返回既有结果（不重复变更）；键无对应单据时原样上抛业务错误，
+		// 不掩盖真实失败。errReplayConflict（uk_receipts_idempotency 唯一索引兜底）是其中
+		// 一种触发形态，一并由本判定覆盖。
+		if key != "" {
+			if rc, ferr := s.repo.FindReceiptByIdempotencyKey(ctx, key); ferr == nil && rc != nil {
 				return s.replayReceipt(ctx, rc)
 			}
 		}

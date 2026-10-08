@@ -34,6 +34,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -170,8 +171,16 @@ func (b inventoryStockBridge) SerialStates(ctx context.Context, tx *gorm.DB, sku
 // ---- 测试内只读 Reader/替身（生产实现归 sales/purchase 域，plan §3.1）----
 
 type integrationQCCreator struct {
-	t   *testing.T
-	seq int
+	t           *testing.T
+	seq         int
+	mu          sync.Mutex
+	completions []integrationQCCompletion
+}
+
+// integrationQCCompletion 记录一次 CompleteQC 调用（断言退货全量检完时质检单被回写收尾）。
+type integrationQCCompletion struct {
+	QCNo  string
+	Lines []QCResultLine
 }
 
 func (c *integrationQCCreator) CreateQC(_ context.Context, sourceType, sourceNo, qcType string, warehouseID int64, lines []QCLine) (string, error) {
@@ -179,7 +188,33 @@ func (c *integrationQCCreator) CreateQC(_ context.Context, sourceType, sourceNo,
 	require.NotEmpty(c.t, sourceNo)
 	require.NotEmpty(c.t, lines)
 	c.seq++
-	return fmt.Sprintf("QC-TEST-%05d", c.seq), nil
+	// 单号必须跨轮次唯一：inspect:{qc_no}:{line}:{pass} 是 ledger 幂等键，QC 号复用会让
+	// 质检结果应用命中原语重放（不落账）→ 库存断言恒 0（2026-10-08 实测定位）。
+	return fmt.Sprintf("QC-TEST-%d-%05d", itRunID, c.seq), nil
+}
+
+// CompleteQC 质检单回写收尾（QCCreator 契约，2026-10-08 问题 5 修复新增）：真库不落
+// quality_orders（质检单一套实现归 purchase 域，本包不构成第二套），只记录调用供断言。
+func (c *integrationQCCreator) CompleteQC(_ context.Context, _ int64, _ string, qcNo string, lines []QCResultLine) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.completions = append(c.completions, integrationQCCompletion{QCNo: qcNo, Lines: append([]QCResultLine(nil), lines...)})
+	return nil
+}
+
+// completionCount 已回写收尾次数。
+func (c *integrationQCCreator) completionCount() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.completions)
+}
+
+// integrationSKUFlags SKU 开关桩：集成用例种子 SKU（intSkuID）为普通品（非批次/非序列号）。
+// 采购退货出库前置校验需要该 reader，缺则 RETURNS_READER_MISSING（夹具装配缺口）。
+type integrationSKUFlags struct{}
+
+func (integrationSKUFlags) GetFlags(_ context.Context, _ int64) (SKUFlags, error) {
+	return SKUFlags{Enabled: true}, nil
 }
 
 type integrationSOReader struct{ db *gorm.DB }
@@ -192,9 +227,12 @@ func (r integrationSOReader) FindReturnable(_ context.Context, soNo string) (int
 		return 0, 0, nil, false, nil // 未命中 → found=false（业务关系校验失败语义）
 	}
 	var rows []struct {
-		LineNo     int64
-		SKUID      int64
-		QtyShipped string
+		LineNo     int64  `gorm:"column:line_no"`
+		// SKUID 必须显式 tag：GORM 命名策略把 SKUID 推导成 sk_uid（≠表列 sku_id），
+		// 扫描静默落 0 → 来源单明细 sku 全 0 → 退货创建报 RETURNS_LINE_NOT_FOUND
+		// （2026-10-08 实测定位；与生产侧 stockops/sales 同类缺陷）。
+		SKUID      int64  `gorm:"column:sku_id"`
+		QtyShipped string `gorm:"column:qty_shipped"`
 	}
 	if err := r.db.Raw(`SELECT line_no, sku_id, qty_shipped FROM sales_order_items WHERE so_id = ? AND qty_shipped > 0`, soID).
 		Scan(&rows).Error; err != nil {
@@ -217,9 +255,9 @@ func (r integrationPOReader) FindReturnable(_ context.Context, poNo string) (int
 		return 0, 0, nil, false, nil
 	}
 	var rows []struct {
-		LineNo      int64
-		SKUID       int64
-		QtyReceived string
+		LineNo      int64  `gorm:"column:line_no"`
+		SKUID       int64  `gorm:"column:sku_id"` // 显式 tag，理由同上（否则 sku 恒 0）
+		QtyReceived string `gorm:"column:qty_received"`
 	}
 	if err := r.db.Raw(`SELECT line_no, sku_id, qty_received FROM purchase_order_items WHERE po_id = ? AND qty_received > 0`, poID).
 		Scan(&rows).Error; err != nil {
@@ -333,6 +371,7 @@ type integrationFixture struct {
 	repo Repository
 	gw   StockGateway
 	svc  *Service
+	qc   *integrationQCCreator
 }
 
 func newIntegrationFixture(t *testing.T) *integrationFixture {
@@ -345,12 +384,13 @@ func newIntegrationFixture(t *testing.T) *integrationFixture {
 	gw := inventoryStockBridge{svc: inv}
 	qc := &integrationQCCreator{t: t}
 	return &integrationFixture{
-		t: t, db: db, repo: repo, gw: gw,
+		t: t, db: db, repo: repo, gw: gw, qc: qc,
 		svc: NewService(repo,
 			WithStock(gw),
 			WithSalesOrders(integrationSOReader{db: db}),
 			WithPurchaseOrders(integrationPOReader{db: db}),
 			WithQCCreator(qc),
+			WithSKUFlags(integrationSKUFlags{}),
 			WithLedgers(ledgerReaderBridge{svc: inv}),
 			WithStockState(stockStateBridge{svc: inv}),
 		),
@@ -372,6 +412,19 @@ func (f *integrationFixture) seedMaster() {
 		INSERT INTO skus (id, code, product_id, is_enabled, created_at, updated_at, created_by, updated_by)
 		VALUES (?, 'SKU-INT', 990000, true, now(), now(), 0, 0)
 		ON CONFLICT (id) DO NOTHING`, intSkuID).Error)
+}
+
+// itRunID/itBin/itNo 本轮唯一派生：同库重复运行不累加库存、不撞种子单号
+// （returns 集成用例按固定 (wh,bin,sku) 读绝对库存量，固定库位会跨轮次累加失真）。
+var itRunID = int64(time.Now().UnixNano()/int64(time.Millisecond)%1_000_000)*1000 + int64(os.Getpid()%1000)
+
+// itSeq 进程内自增：同一轮运行内多次派生也互不相同（不同用例可能用同一 base）。
+var itSeq atomic.Int64
+
+func itBin(base int64) int64 { return base*1_000_000 + itRunID%1000*1000 + itSeq.Add(1)%1000 }
+
+func itNo(base string) string {
+	return fmt.Sprintf("%s-%d-%d", base, itRunID, itSeq.Add(1))
 }
 
 // seedBin 种子仓库/库位（迁移 000004；唯一编码冲突容忍——多次运行复用）。
@@ -450,13 +503,15 @@ func mustParseQty(t *testing.T, s string) stock.Qty {
 func TestIntegrationSalesReturnReceiveQCFullChain(t *testing.T) {
 	f := newIntegrationFixture(t)
 	ctx := context.Background()
-	const wh, zone, shelf, bin, sku = 901, 9011, 9012, 9013, intSkuID
+	const wh, zone, shelf, sku = 901, 9011, 9012, intSkuID
+	bin := itBin(9013)
+	soNo := itNo("SO-INT")
 	f.seedBin(wh, zone, shelf, bin)
-	f.seedSalesOrder("SO-INT-000001", wh, [3]int64{1, sku, 10})
+	f.seedSalesOrder(soNo, wh, [3]int64{1, sku, 10})
 
 	actor1 := Actor{UserID: 1, Username: "tester", RequestID: "int-1"}
 	order, err := f.svc.CreateSalesReturn(ctx, actor1,
-		SalesReturnCreateInput{SONo: "SO-INT-000001", CustomerID: 7, WarehouseID: wh,
+		SalesReturnCreateInput{SONo: soNo, CustomerID: 7, WarehouseID: wh,
 			Lines: []SalesReturnLineInput{{LineNo: 1, SKUID: sku, QtyReturn: qtyText(10), Reason: "质量问题"}}})
 	require.NoError(t, err)
 	_, err = f.svc.SubmitReturn(ctx, actor1, order.ID.Int64())
@@ -513,13 +568,15 @@ func TestIntegrationSalesReturnReceiveQCFullChain(t *testing.T) {
 func TestIntegrationPurchaseReturnShipLockDeduct(t *testing.T) {
 	f := newIntegrationFixture(t)
 	ctx := context.Background()
-	const wh, zone, shelf, bin, sku = 902, 9021, 9022, 9023, intSkuID
+	const wh, zone, shelf, sku = 902, 9021, 9022, intSkuID
+	bin := itBin(9023)
+	poNo := itNo("PO-INT")
 	f.seedBin(wh, zone, shelf, bin)
 	f.seedStock(wh, zone, shelf, bin, sku, qtyText(5))
-	f.seedPurchaseOrder("PO-INT-000001", wh, [3]int64{1, sku, 5})
+	f.seedPurchaseOrder(poNo, wh, [3]int64{1, sku, 5})
 
 	order, err := f.svc.CreatePurchaseReturn(ctx, Actor{UserID: 1}, PurchaseReturnCreateInput{
-		PONo: "PO-INT-000001", SupplierID: 9, WarehouseID: wh,
+		PONo: poNo, SupplierID: 9, WarehouseID: wh,
 		Lines: []PurchaseReturnLineInput{{LineNo: 1, SKUID: sku, QtyReturn: qtyText(5), Reason: "来料不良"}}})
 	require.NoError(t, err)
 	_, err = f.svc.SubmitReturn(ctx, Actor{UserID: 1}, order.ID.Int64())
@@ -548,12 +605,14 @@ func TestIntegrationPurchaseReturnShipLockDeduct(t *testing.T) {
 func TestIntegrationExceptionFreezeRelease(t *testing.T) {
 	f := newIntegrationFixture(t)
 	ctx := context.Background()
-	const wh, zone, shelf, bin, sku = 903, 9031, 9032, 9033, intSkuID
+	const wh, zone, shelf, sku = 903, 9031, 9032, intSkuID
+	bin := itBin(9033)
+	srcNo := itNo("MANUAL-INT") // 本轮唯一：按来源单号过滤的断言不被上一轮异常单污染
 	f.seedBin(wh, zone, shelf, bin)
 	f.seedStock(wh, zone, shelf, bin, sku, qtyText(20))
 
 	_, err := f.svc.CreateException(ctx, nil, CreateExceptionOp{
-		Type: "库存异常", SourceType: "manual", SourceNo: "MANUAL-INT-1", Detail: "差异",
+		Type: "库存异常", SourceType: "manual", SourceNo: srcNo, Detail: "差异",
 		SKUID: sku, BinID: bin, Freeze: true, FreezeWarehouseID: wh, FreezeQty: qtyText(5),
 		Actor: Actor{UserID: 1},
 	})
@@ -563,7 +622,7 @@ func TestIntegrationExceptionFreezeRelease(t *testing.T) {
 		Row().Scan(&frozen))
 	require.Equal(t, qtyText(5), frozen)
 
-	exs, _, err := f.svc.ListExceptions(ctx, ExceptionFilter{SourceNo: "MANUAL-INT-1", Page: 1, PageSize: 10})
+	exs, _, err := f.svc.ListExceptions(ctx, ExceptionFilter{SourceNo: srcNo, Page: 1, PageSize: 10})
 	require.NoError(t, err)
 	require.Len(t, exs, 1)
 	id := exs[0].IDInt.Int64()
@@ -591,15 +650,18 @@ func TestIntegrationExceptionFreezeRelease(t *testing.T) {
 }
 
 // TestIntegrationConcurrentReceiveNoOverReceive 并发收货不超量（plan §11.3）：
-// 6 路并发各收 3，qty_return=10 → 恰 3 路成功，库存=9=累计收货（恒等式由 CHECK 兜底）。
+// 6 路并发各收 3（每路不同幂等键），qty_return=10 → 恰 3 路成功、其余因数量守卫被拒，
+// 库存=9=累计收货（恒等式由 CHECK 兜底）。
 func TestIntegrationConcurrentReceiveNoOverReceive(t *testing.T) {
 	f := newIntegrationFixture(t)
 	ctx := context.Background()
-	const wh, zone, shelf, bin, sku = 904, 9041, 9042, 9043, intSkuID
+	const wh, zone, shelf, sku = 904, 9041, 9042, intSkuID
+	bin := itBin(9043)
+	soNo := itNo("SO-INT")
 	f.seedBin(wh, zone, shelf, bin)
-	f.seedSalesOrder("SO-INT-000002", wh, [3]int64{1, sku, 10})
+	f.seedSalesOrder(soNo, wh, [3]int64{1, sku, 10})
 	order, err := f.svc.CreateSalesReturn(ctx, Actor{UserID: 1},
-		SalesReturnCreateInput{SONo: "SO-INT-000002", CustomerID: 7, WarehouseID: wh,
+		SalesReturnCreateInput{SONo: soNo, CustomerID: 7, WarehouseID: wh,
 			Lines: []SalesReturnLineInput{{LineNo: 1, SKUID: sku, QtyReturn: qtyText(10), Reason: "x"}}})
 	require.NoError(t, err)
 	_, err = f.svc.SubmitReturn(ctx, Actor{UserID: 1}, order.ID.Int64())
@@ -613,9 +675,13 @@ func TestIntegrationConcurrentReceiveNoOverReceive(t *testing.T) {
 		wg.Add(1)
 		go func(n int) {
 			defer wg.Done()
+			// 每路显式给不同幂等键：无键时服务按「单号+行+库位+sku+批次+数量」确定性
+			// 合成行级键，6 路同载荷会退化为「1 路真实变更 + 5 路幂等重放」（重放不报错、
+			// 不落账），并发数量守卫根本不会被触发——那不是本用例要验的东西。
 			_, err := f.svc.ReceiveSalesReturn(ctx, Actor{UserID: int64(n + 10), RequestID: fmt.Sprintf("int-cc-%d", n)},
 				order.ID.Int64(), ReceiveInput{
-					Lines: []ReceiveLineInput{{LineNo: 1, ZoneID: zone, ShelfID: shelf, BinID: bin, Qty: qtyText(3)}}})
+					IdempotencyKey: itNo(fmt.Sprintf("cc-%d", n)),
+					Lines:          []ReceiveLineInput{{LineNo: 1, ZoneID: zone, ShelfID: shelf, BinID: bin, Qty: qtyText(3)}}})
 			if err == nil {
 				okc <- 1
 			}

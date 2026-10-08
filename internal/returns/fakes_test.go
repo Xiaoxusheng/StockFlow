@@ -1186,8 +1186,15 @@ func (f *fakePurchaseOrders) FindReturnable(_ context.Context, poNo string) (int
 }
 
 type fakeQC struct {
-	mu    sync.Mutex
-	calls int
+	mu        sync.Mutex
+	calls     int
+	completed []fakeQCCompletion
+}
+
+// fakeQCCompletion 记录一次 CompleteQC 调用（断言回写链路：qc_no + 行结果）。
+type fakeQCCompletion struct {
+	QCNo  string
+	Lines []QCResultLine
 }
 
 func (f *fakeQC) CreateQC(_ context.Context, sourceType, sourceNo, qcType string, warehouseID int64, lines []QCLine) (string, error) {
@@ -1195,6 +1202,20 @@ func (f *fakeQC) CreateQC(_ context.Context, sourceType, sourceNo, qcType string
 	defer f.mu.Unlock()
 	f.calls++
 	return "QC-TEST-" + strconv.Itoa(f.calls), nil
+}
+
+func (f *fakeQC) CompleteQC(_ context.Context, _ int64, _ string, qcNo string, lines []QCResultLine) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.completed = append(f.completed, fakeQCCompletion{QCNo: qcNo, Lines: append([]QCResultLine(nil), lines...)})
+	return nil
+}
+
+// completionCount 已回写收尾次数（断言「全量检完恰回写一次」）。
+func (f *fakeQC) completionCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.completed)
 }
 
 type fakeLedgerReader struct {

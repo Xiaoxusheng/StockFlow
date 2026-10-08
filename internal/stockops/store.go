@@ -156,20 +156,25 @@ type InTransitFilter struct {
 }
 
 // InventoryRowRef 库存行只读引用（SELECT inventory 扫描目标；不含任何写通路）。
+//
+// 列名一律显式 gorm column tag：GORM v1.31 NamingStrategy 的 commonInitialisms 含 ID
+// 不含 SKU，SKUID 会被推导成 sk_uid（≠ 表列 sku_id）；Total/Available/Locked/Frozen/
+// PendingInspect/Defective 亦推导成 total/available/...（≠ 表列 *_qty）。缺 tag 时
+// Raw(...).Scan 对该列静默落零值（无报错）——曾致盘点冻结空转、快照/差异零值与 complete 400。
 type InventoryRowRef struct {
-	ID             int64
-	WarehouseID    int64
-	ZoneID         int64
-	ShelfID        int64
-	BinID          int64
-	SKUID          int64
-	BatchID        int64
-	Total          stock.Qty
-	Available      stock.Qty
-	Locked         stock.Qty
-	Frozen         stock.Qty
-	PendingInspect stock.Qty
-	Defective      stock.Qty
+	ID             int64     `gorm:"column:id"`
+	WarehouseID    int64     `gorm:"column:warehouse_id"`
+	ZoneID         int64     `gorm:"column:zone_id"`
+	ShelfID        int64     `gorm:"column:shelf_id"`
+	BinID          int64     `gorm:"column:bin_id"`
+	SKUID          int64     `gorm:"column:sku_id"`
+	BatchID        int64     `gorm:"column:batch_id"`
+	Total          stock.Qty `gorm:"column:total_qty"`
+	Available      stock.Qty `gorm:"column:available_qty"`
+	Locked         stock.Qty `gorm:"column:locked_qty"`
+	Frozen         stock.Qty `gorm:"column:frozen_qty"`
+	PendingInspect stock.Qty `gorm:"column:pending_inspect_qty"`
+	Defective      stock.Qty `gorm:"column:defective_qty"`
 }
 
 // Key 转换为库存原语五维定位键。
@@ -181,23 +186,25 @@ func (r InventoryRowRef) Key() stock.RowKey {
 }
 
 // ActiveLockRef 活跃锁只读引用（inventory_locks SELECT 扫描目标）。
+// SKUID 必须显式 column tag（同 InventoryRowRef 说明）：否则推导为 sk_uid 落零值，
+// 调拨出库的锁行匹配 l.SKUID == it.SKUID 恒为 0==sku_id 假 → 409 STOCKOPS_LOCK_MISSING。
 type ActiveLockRef struct {
-	ID          int64
-	SourceNo    string
-	SourceType  string
-	Qty         stock.Qty
-	WarehouseID int64
-	BinID       int64
-	SKUID       int64
-	BatchID     int64
+	ID          int64     `gorm:"column:id"`
+	SourceNo    string    `gorm:"column:source_no"`
+	SourceType  string    `gorm:"column:source_type"`
+	Qty         stock.Qty `gorm:"column:qty"`
+	WarehouseID int64     `gorm:"column:warehouse_id"`
+	BinID       int64     `gorm:"column:bin_id"`
+	SKUID       int64     `gorm:"column:sku_id"`
+	BatchID     int64     `gorm:"column:batch_id"`
 }
 
-// SerialRef 序列号只读引用（serial_numbers SELECT 扫描目标）。
+// SerialRef 序列号只读引用（serial_numbers SELECT 扫描目标；SKUID 同上）。
 type SerialRef struct {
-	ID       int64
-	SerialNo string
-	SKUID    int64
-	BatchID  int64
+	ID       int64  `gorm:"column:id"`
+	SerialNo string `gorm:"column:serial_no"`
+	SKUID    int64  `gorm:"column:sku_id"`
+	BatchID  int64  `gorm:"column:batch_id"`
 }
 
 // CountRegistration 实盘登记输入（PUT 幂等：同 (row, serial) 覆盖）。
@@ -208,9 +215,10 @@ type CountRegistration struct {
 }
 
 // InTransitRow 在途聚合行（batch_id 0=非批次）。
+// SKUID 必须显式 column tag（同 SerialRef 说明）——否则在途列表 sku_id 全落 0。
 type InTransitRow struct {
-	SKUID      int64     `json:"sku_id"`
-	BatchID    int64     `json:"batch_id"`
-	OutTransit stock.Qty `json:"out_transit"` // 自源仓已出未收（源仓视角在途）
-	InTransit  stock.Qty `json:"in_transit"`  // 向目标仓在途（目标仓视角在途）
+	SKUID      int64     `gorm:"column:sku_id" json:"sku_id"`
+	BatchID    int64     `gorm:"column:batch_id" json:"batch_id"`
+	OutTransit stock.Qty `gorm:"column:out_transit" json:"out_transit"` // 自源仓已出未收（源仓视角在途）
+	InTransit  stock.Qty `gorm:"column:in_transit" json:"in_transit"`   // 向目标仓在途（目标仓视角在途）
 }

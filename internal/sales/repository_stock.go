@@ -17,6 +17,7 @@ import (
 func (r *gormRepository) InsertPickTasks(tx *gorm.DB, tasks []PickTask) error {
 	for i := range tasks {
 		t := &tasks[i]
+		var st insertStamps
 		err := tx.Raw(`
 			INSERT INTO pick_tasks
 				(pick_no, outbound_no, outbound_line_no, sku_id, batch_id,
@@ -28,10 +29,12 @@ func (r *gormRepository) InsertPickTasks(tx *gorm.DB, tasks []PickTask) error {
 			t.PickNo, t.OutboundNo, t.OutboundLineNo, t.SKUID, t.BatchID,
 			t.SourceWarehouseID, t.SourceZoneID, t.SourceShelfID, t.SourceBinID,
 			t.Qty.String(), t.Status, t.WarehouseID, t.Remark, t.CreatedBy, t.UpdatedBy,
-		).Scan(t).Error
+		).Scan(&st).Error
 		if err != nil {
 			return err
 		}
+		// 只回填 RETURNING 三列（见 insertStamps 说明）：Scan(t) 会把 pick_no/status 等清零。
+		t.ID, t.CreatedAt, t.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	}
 	return nil
 }
@@ -132,6 +135,7 @@ func (r *gormRepository) ListPickTasks(ctx context.Context, q PickQuery) ([]Pick
 func (r *gormRepository) InsertCheckTasks(tx *gorm.DB, tasks []CheckTask) error {
 	for i := range tasks {
 		t := &tasks[i]
+		var st insertStamps
 		err := tx.Raw(`
 			INSERT INTO check_tasks
 				(check_no, outbound_no, outbound_line_no, sku_id, batch_id, serial_no, qty,
@@ -141,10 +145,12 @@ func (r *gormRepository) InsertCheckTasks(tx *gorm.DB, tasks []CheckTask) error 
 			RETURNING id, created_at, updated_at`,
 			t.CheckNo, t.OutboundNo, t.OutboundLineNo, t.SKUID, t.BatchID, t.SerialNo,
 			t.Qty.String(), t.Status, t.WarehouseID, t.Remark, t.CreatedBy, t.UpdatedBy,
-		).Scan(t).Error
+		).Scan(&st).Error
 		if err != nil {
 			return err
 		}
+		// 只回填 RETURNING 三列（见 insertStamps 说明）。
+		t.ID, t.CreatedAt, t.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	}
 	return nil
 }
@@ -230,6 +236,7 @@ func (r *gormRepository) InsertPackage(tx *gorm.DB, p *PackingRecord, items []Pa
 	if p.IdempotencyKey != nil {
 		idem = *p.IdempotencyKey
 	}
+	var st insertStamps
 	err := tx.Raw(`
 		INSERT INTO packing_records
 			(package_no, outbound_no, packing_material, length, width, height, weight, volume,
@@ -239,22 +246,27 @@ func (r *gormRepository) InsertPackage(tx *gorm.DB, p *PackingRecord, items []Pa
 		p.PackageNo, p.OutboundNo, p.PackingMaterial, p.Length.String(), p.Width.String(),
 		p.Height.String(), p.Weight.String(), p.Volume.String(),
 		p.Carrier, p.TrackingNo, p.WarehouseID, idem, p.Remark, p.CreatedBy, p.UpdatedBy,
-	).Scan(p).Error
+	).Scan(&st).Error
 	if err != nil {
 		return err
 	}
+	// 只回填 RETURNING 三列（见 insertStamps 说明）：Scan(p) 会把 package_no/承运商等清零，
+	// 打包响应体的 package_no 空串即由此而来。
+	p.ID, p.CreatedAt, p.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	for i := range items {
 		it := &items[i]
+		var id int64
 		err := tx.Raw(`
 			INSERT INTO packing_items
 				(package_id, outbound_id, line_no, qty, remark, created_at, updated_at, created_by, updated_by)
 			VALUES (?, ?, ?, ?, ?, now(), now(), ?, ?)
 			RETURNING id`,
 			p.ID.Int64(), it.OutboundID, it.LineNo, it.Qty.String(), it.Remark, p.CreatedBy, p.UpdatedBy,
-		).Scan(it).Error
+		).Scan(&id).Error
 		if err != nil {
 			return err
 		}
+		it.ID = database.ID(id)
 		it.PackageID = p.ID.Int64()
 	}
 	return nil
@@ -329,7 +341,8 @@ func (r *gormRepository) InsertShipment(tx *gorm.DB, s *Shipment) error {
 	if s.IdempotencyKey != nil {
 		idem = *s.IdempotencyKey
 	}
-	return tx.Raw(`
+	var st insertStamps
+	err := tx.Raw(`
 		INSERT INTO shipments
 			(shipment_no, outbound_no, carrier, tracking_no, warehouse_id, shipper_id, shipper_name,
 			 package_count, status, idempotency_key, remark, created_at, updated_at, created_by, updated_by)
@@ -337,7 +350,14 @@ func (r *gormRepository) InsertShipment(tx *gorm.DB, s *Shipment) error {
 		RETURNING id, created_at, updated_at`,
 		s.ShipmentNo, s.OutboundNo, s.Carrier, s.TrackingNo, s.WarehouseID,
 		s.ShipperID, s.ShipperName, s.PackageCount, s.Status, idem, s.Remark, s.CreatedBy, s.UpdatedBy,
-	).Scan(s).Error
+	).Scan(&st).Error
+	if err != nil {
+		return err
+	}
+	// 只回填 RETURNING 三列（见 insertStamps 说明）：Scan(s) 会把 shipment_no 等清零，
+	// 发货响应体的 shipment_no 空串即由此而来。
+	s.ID, s.CreatedAt, s.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
+	return nil
 }
 
 func (r *gormRepository) GetShipment(tx *gorm.DB, id int64) (*Shipment, error) {
@@ -418,14 +438,16 @@ func (r *gormRepository) ReadBatchCandidates(tx *gorm.DB, warehouseID, skuID int
 }
 
 // BinStock 库位级库存（自带扫描结构体；只读）。分配锁定量 = 分配量（plan §6.4）。
+// 字段一律显式 gorm column tag：GORM 命名策略把 SKUID 推导成 sk_uid（≠ 表列 sku_id），
+// Raw().Scan 对不上即静默落零值（只读投影无声错值）。
 type BinStock struct {
-	WarehouseID  int64
-	ZoneID       int64
-	ShelfID      int64
-	BinID        int64
-	SKUID        int64
-	BatchID      int64
-	AvailableQty Qty
+	WarehouseID  int64 `gorm:"column:warehouse_id"`
+	ZoneID       int64 `gorm:"column:zone_id"`
+	ShelfID      int64 `gorm:"column:shelf_id"`
+	BinID        int64 `gorm:"column:bin_id"`
+	SKUID        int64 `gorm:"column:sku_id"`
+	BatchID      int64 `gorm:"column:batch_id"`
+	AvailableQty Qty   `gorm:"column:available_qty"`
 }
 
 // ReadBinStock 读取指定仓库 + SKU（+ 批次）有可用量的库位行，按 bin_id 升序
@@ -463,12 +485,12 @@ func (r *gormRepository) ReadBinLocation(tx *gorm.DB, warehouseID, binID, skuID,
 
 // SerialState 序列号当前状态（自带扫描结构体；只读——发货前的可出库校验数据源）。
 type SerialState struct {
-	SerialNo    string
-	SKUID       int64
-	BatchID     int64
-	WarehouseID int64
-	BinID       int64
-	Status      string
+	SerialNo    string `gorm:"column:serial_no"`
+	SKUID       int64  `gorm:"column:sku_id"`
+	BatchID     int64  `gorm:"column:batch_id"`
+	WarehouseID int64  `gorm:"column:warehouse_id"`
+	BinID       int64  `gorm:"column:bin_id"`
+	Status      string `gorm:"column:status"`
 }
 
 // ReadSerialStates 按序列号集合读取台账状态（inventory-rules §8：出库必须逐序列号校验）。

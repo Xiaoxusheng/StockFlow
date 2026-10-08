@@ -253,7 +253,25 @@ func (r *gormRepository) Tx(ctx context.Context, fn func(tx *gorm.DB) error) err
 
 // ---- 销售订单 ----
 
+// insertStamps INSERT ... RETURNING 回填的最小列集。
+//
+// 为什么不能把 RETURNING 结果直接 Scan 进业务模型（2026-10-07 全流程实测缺陷根因）：
+// GORM 的 `Raw(...).Scan(dest)` 走 ScanRows → ScanInitialized 模式，进入结构体分支前
+// 先执行 `ReflectValue.Set(reflect.Zero(...))` 把**整个结构体清零**
+// （gorm@v1.31.2 scan.go:352-353），随后只写入结果行命中的列。因此
+// 「INSERT ... RETURNING id, created_at, updated_at」+「Scan(完整业务结构体)」
+// 会把单号/状态/数量/锁 ID 等业务字段全部抹成零值。实测现象：
+// 写端点响应体回读字段全空（销售单/包裹/发货单）、审核响应 lock_count/locked_qty=0、
+// sales_order_items.qty_allocated 恒 0（分配量连同 rec.Qty/rec.LockID 一起丢失）。
+// 一律改为「扫进本结构体再逐字段回填」，业务字段原样保留。
+type insertStamps struct {
+	ID        database.ID       `gorm:"column:id"`
+	CreatedAt database.JSONTime `gorm:"column:created_at"`
+	UpdatedAt database.JSONTime `gorm:"column:updated_at"`
+}
+
 func (r *gormRepository) InsertSalesOrder(tx *gorm.DB, o *SalesOrder, items []SalesOrderItem) error {
+	var st insertStamps
 	err := tx.Raw(`
 		INSERT INTO sales_orders
 			(so_no, customer_id, warehouse_id, shipping_address, delivery_method,
@@ -262,10 +280,11 @@ func (r *gormRepository) InsertSalesOrder(tx *gorm.DB, o *SalesOrder, items []Sa
 		RETURNING id, created_at, updated_at`,
 		o.SoNo, o.CustomerID, o.WarehouseID, o.ShippingAddress, o.DeliveryMethod,
 		o.TotalAmount.String(), o.Status, o.Remark, o.CreatedBy, o.UpdatedBy,
-	).Scan(o).Error
+	).Scan(&st).Error
 	if err != nil {
 		return err
 	}
+	o.ID, o.CreatedAt, o.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	return insertSOItems(tx, o.ID.Int64(), o.CreatedBy, items)
 }
 
@@ -476,18 +495,21 @@ func (r *gormRepository) InsertApproval(tx *gorm.DB, targetType, targetNo, actio
 // ---- 出库单 ----
 
 func (r *gormRepository) InsertOutboundOrder(tx *gorm.DB, o *OutboundOrder, items []OutboundItem) error {
+	var st insertStamps
 	err := tx.Raw(`
 		INSERT INTO outbound_orders
 			(outbound_no, so_no, type, warehouse_id, status, remark, created_at, updated_at, created_by, updated_by)
 		VALUES (?, ?, ?, ?, ?, ?, now(), now(), ?, ?)
 		RETURNING id, created_at, updated_at`,
 		o.OutboundNo, o.SoNo, o.Type, o.WarehouseID, o.Status, o.Remark, o.CreatedBy, o.UpdatedBy,
-	).Scan(o).Error
+	).Scan(&st).Error
 	if err != nil {
 		return err
 	}
+	o.ID, o.CreatedAt, o.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	for i := range items {
 		it := &items[i]
+		var id int64
 		err := tx.Raw(`
 			INSERT INTO outbound_items
 				(outbound_id, line_no, sku_id, qty, qty_picked, qty_checked, qty_packed, qty_shipped,
@@ -495,10 +517,11 @@ func (r *gormRepository) InsertOutboundOrder(tx *gorm.DB, o *OutboundOrder, item
 			VALUES (?, ?, ?, ?, 0, 0, 0, 0, ?, now(), now(), ?, ?)
 			RETURNING id`,
 			o.ID.Int64(), it.LineNo, it.SKUID, it.Qty.String(), it.Remark, o.CreatedBy, o.UpdatedBy,
-		).Scan(it).Error
+		).Scan(&id).Error
 		if err != nil {
 			return err
 		}
+		it.ID = database.ID(id)
 		it.OutboundID = o.ID.Int64()
 	}
 	return nil
@@ -602,6 +625,7 @@ func (r *gormRepository) InsertAllocations(tx *gorm.DB, recs []AllocationRecord)
 		if err != nil {
 			return err
 		}
+		var st insertStamps
 		err = tx.Raw(`
 			INSERT INTO allocation_records
 				(outbound_no, line_no, sku_id, batch_id, warehouse_id, bin_id, qty, strategy, reason, lock_id,
@@ -610,10 +634,14 @@ func (r *gormRepository) InsertAllocations(tx *gorm.DB, recs []AllocationRecord)
 			RETURNING id, created_at, updated_at`,
 			rec.OutboundNo, rec.LineNo, rec.SKUID, rec.BatchID, rec.WarehouseID, rec.BinID,
 			rec.Qty.String(), rec.Strategy, reason, rec.LockID, rec.CreatedBy, rec.UpdatedBy,
-		).Scan(rec).Error
+		).Scan(&st).Error
 		if err != nil {
 			return err
 		}
+		// 只回填 RETURNING 三列：Qty/LockID/SKUID 等业务字段必须原样保留——调用方
+		// approveOrder 正是据此累计 lineAlloc 与 res.LockCount/LockedQty
+		// （直接 Scan(rec) 会把它们清零，致 qty_allocated 恒 0 与审核回执失真）。
+		rec.ID, rec.CreatedAt, rec.UpdatedAt = st.ID, st.CreatedAt, st.UpdatedAt
 	}
 	return nil
 }

@@ -914,6 +914,26 @@ func (s *Service) ApplySalesQCResult(ctx context.Context, actor Actor, id int64,
 			if err := s.guardReturnStatus(tx, o, ReturnStatusCompleted, "completed_at", actor.UserID); err != nil {
 				return err
 			}
+			// 质检单结果回写（问题 5 修复）：退货侧只负责应用结果，质检模块的 QC 单
+			// 若不回写将永远停在 PENDING——同一业务事实两处记录不一致。全量检完的
+			// 时刻即 QC 单收尾时刻，逐行回写合格/不良量并推进 COMPLETED（幂等）。
+			qcWriter, qerr := s.requireQC()
+			if qerr != nil {
+				return qerr
+			}
+			lines := make([]QCResultLine, 0, len(fresh))
+			for _, it := range fresh {
+				// ReturnItem 只落 qty_inspected/qty_defective，合格量派生
+				// （qty_inspected 为质检处理总量，qty_defective 为其中不良量）。
+				lines = append(lines, QCResultLine{
+					LineNo:       it.LineNo,
+					QtyQualified: it.QtyInspected.Sub(it.QtyDefective).String(),
+					QtyDefective: it.QtyDefective.String(),
+				})
+			}
+			if qerr := qcWriter.CompleteQC(ctx, actor.UserID, actor.Username, in.QCNo, lines); qerr != nil {
+				return qerr
+			}
 		}
 		if err := middleware.Audit(tx, withSnapshots(actor.auditEntry(docTypeReturnOrder, o.ID.Int64(), "apply-qc"),
 			map[string]any{"qc_no": in.QCNo, "lines": in.Lines},

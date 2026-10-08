@@ -42,9 +42,17 @@ func (Key) TableName() string { return "idempotency_keys" }
 // jsonb json.RawMessage 载体：库内 jsonb（userpref/models.go 同款约定，非第二套机制）。
 type jsonb json.RawMessage
 
+// Value 落库值：nil/空切片统一落 '{}'。
+//
+// 000024 response_snapshot 为 NOT NULL DEFAULT '{}'：首次占用的 PROCESSING 行尚未
+// 产生快照，Key.ResponseSnapshot 为 nil——若原样落 NULL 即
+// `null value in column "response_snapshot" violates not-null constraint`（SQLSTATE 23502），
+// 带 Idempotency-Key 的首请求整事务回滚必现 500（2026-10-07 全流程实测命中
+// /api/receipts 与 /api/packing）。此处按列缺省同形落 '{}'（与 masterdata/purchase
+// StringList.Value() len==0 落 '[]' 同一口径），不依赖 GORM 的零值跳过。
 func (j jsonb) Value() (driver.Value, error) {
-	if j == nil {
-		return nil, nil
+	if len(j) == 0 {
+		return "{}", nil
 	}
 	return string(j), nil
 }

@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
+
 	"github.com/stockflow/server/internal/response"
 )
 
@@ -25,6 +28,15 @@ type harness struct {
 	nums  *fakeNumbers
 	svc   *Service
 	ctx   context.Context
+
+	// realDB 非空 = 集成模式（服务走 GORM 仓储 + 真库存表）。单测恒为 nil。
+	// seedStock 据此额外落真 inventory 行——否则分配阶段 ReadBinStock（真 SQL）
+	// 找不到候选库位 → APPROVE 报 INVENTORY_NOT_ENOUGH。
+	realDB *gorm.DB
+	// itRepo 真仓储（集成模式）：集成用例断言读真库（服务写入的目标）。
+	// 恒以 h.realDB 作 tx 传入（真仓储读方法直接 tx.Raw，传 nil 会 panic）。
+	itRepo Repo
+	t      *testing.T
 }
 
 const (
@@ -42,6 +54,7 @@ func qtyOf(v int64) Qty { return Qty(v * 10000) } // 1 单位 = 0.0001
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
+		t:     t,
 		repo:  newFakeRepo(),
 		stock: newFakeStock(),
 		skus: newFakeSKUs(map[int64]SKUFlags{
@@ -68,12 +81,28 @@ func newHarness(t *testing.T) *harness {
 }
 
 // seedStock 同步塞库存：fakeStock（守卫语义）+ fakeRepo.binStock（候选/库位定位读）。
+// 集成模式（realDB 非空）额外 upsert 真 inventory 行——集成 harness 的服务走 GORM
+// 仓储，分配阶段的 ReadBinStock/ReadBinLocation 读真表，不落真行必 INVENTORY_NOT_ENOUGH。
+// upsert 用绝对值改写（非累加）：同一 DB 重复运行可复位到种子量，断言绝对数不随轮次漂移。
 func (h *harness) seedStock(wh, bin, sku, batch int64, avail Qty, zone, shelf int64) {
 	h.stock.Seed(wh, bin, sku, batch, avail)
 	key := binKey(wh, sku, batch)
 	h.repo.binStock[key] = append(h.repo.binStock[key], BinStock{
 		WarehouseID: wh, ZoneID: zone, ShelfID: shelf, BinID: bin, SKUID: sku, BatchID: batch, AvailableQty: avail,
 	})
+	if h.realDB == nil {
+		return
+	}
+	require.NoError(h.t, h.realDB.Exec(`
+		INSERT INTO inventory (warehouse_id, zone_id, shelf_id, bin_id, sku_id, batch_id,
+			total_qty, available_qty, locked_qty, frozen_qty, pending_inspect_qty, defective_qty,
+			created_at, updated_at, created_by, updated_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, now(), now(), 0, 0)
+		ON CONFLICT (warehouse_id, bin_id, sku_id, batch_id) DO UPDATE
+		SET total_qty = EXCLUDED.total_qty, available_qty = EXCLUDED.available_qty,
+		    locked_qty = 0, frozen_qty = 0, pending_inspect_qty = 0, defective_qty = 0,
+		    zone_id = EXCLUDED.zone_id, shelf_id = EXCLUDED.shelf_id, updated_at = now()`,
+		wh, zone, shelf, bin, sku, batch, avail.String(), avail.String()).Error)
 }
 
 // seedBatches 批次候选（FEFO/FIFO 纯函数输入）。

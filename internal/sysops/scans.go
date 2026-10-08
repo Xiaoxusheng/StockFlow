@@ -55,15 +55,16 @@ func (s scanRunner) configValue(ctx context.Context, key, def string) (string, e
 // ---- 低库存扫描（inventory_low_stock_scan，*/10 * * * *）----
 
 // lowStockRow 低库存行（按仓+SKU 聚合 available 与安全库存比较）。
+// SKUID 显式 tag：gorm 默认把 SKUID 映射为 sk_uid（≠ 表列 sku_id），扫描静默落零值。
 type lowStockRow struct {
-	WarehouseID   int64
-	WarehouseCode string
-	WarehouseName string
-	SKUID         int64
-	SKUCode       string
-	SKUName       string
-	Available     float64
-	SafetyStock   float64
+	WarehouseID   int64   `gorm:"column:warehouse_id"`
+	WarehouseCode string  `gorm:"column:warehouse_code"`
+	WarehouseName string  `gorm:"column:warehouse_name"`
+	SKUID         int64   `gorm:"column:sku_id"`
+	SKUCode       string  `gorm:"column:sku_code"`
+	SKUName       string  `gorm:"column:sku_name"`
+	Available     float64 `gorm:"column:available"`
+	SafetyStock   float64 `gorm:"column:safety_stock"`
 }
 
 // lowStockRows 只读聚合：available ≤ safety_stock 的仓+SKU 行
@@ -138,16 +139,16 @@ func (s scanRunner) lowStockScan(ctx context.Context) error {
 
 // expiryBatchRow 临期/过期批次行（批次为 SKU 维度台账，现存量按 inventory 行聚合）。
 type expiryBatchRow struct {
-	SKUID      int64
-	SKUCode    string
-	SKUName    string
-	BatchNo    string
-	ExpiryDate time.Time
-	DaysLeft   int     // 剩余效期天数（≤0 已过期）
-	Threshold  int     // 命中的预警档位（30/15/7/3；已过期记 0）
-	Level      string  // "expired" 或 "30"/"15"/"7"/"3"
-	TotalQty   float64 // 该批次现存量（全仓合计，>0 才预警）
-	Warehouses string  // 现存仓库编码清单（去重，供人读内容）
+	SKUID      int64     `gorm:"column:sku_id"`
+	SKUCode    string    `gorm:"column:sku_code"`
+	SKUName    string    `gorm:"column:sku_name"`
+	BatchNo    string    `gorm:"column:batch_no"`
+	ExpiryDate time.Time `gorm:"column:expiry_date"`
+	DaysLeft   int       // 剩余效期天数（≤0 已过期）
+	Threshold  int       // 命中的预警档位（30/15/7/3；已过期记 0）
+	Level      string    // "expired" 或 "30"/"15"/"7"/"3"
+	TotalQty   float64   `gorm:"column:total_qty"` // 该批次现存量（全仓合计，>0 才预警）
+	Warehouses string    `gorm:"column:warehouses"` // 现存仓库编码清单（去重，供人读内容）
 }
 
 // expiryThresholds 阈值清单（system_configs inventory.alert.expiry_days，降序）。
@@ -266,14 +267,14 @@ func expiryLevelText(level string, daysLeft int) string {
 
 // stagnantScanRow 积压行（与 /api/reports/stagnant-stock 同一末次移动口径）。
 type stagnantScanRow struct {
-	WarehouseID   int64
-	WarehouseCode string
-	WarehouseName string
-	SKUID         int64
-	SKUCode       string
-	SKUName       string
-	TotalQty      float64
-	LastMovedAt   time.Time
+	WarehouseID   int64     `gorm:"column:warehouse_id"`
+	WarehouseCode string    `gorm:"column:warehouse_code"`
+	WarehouseName string    `gorm:"column:warehouse_name"`
+	SKUID         int64     `gorm:"column:sku_id"`
+	SKUCode       string    `gorm:"column:sku_code"`
+	SKUName       string    `gorm:"column:sku_name"`
+	TotalQty      float64   `gorm:"column:total_qty"`
+	LastMovedAt   time.Time `gorm:"column:last_moved_at"`
 	IdleDays      int
 	Tier          string
 }

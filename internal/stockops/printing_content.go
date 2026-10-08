@@ -43,13 +43,14 @@ type countHeadRow struct {
 }
 
 // countLineRow 明细投影行（qty_counted NULL=未登记，投影为空串）。
+// SKUID 必须显式 column tag（同 store.go 只读投影说明）：否则推导为 sk_uid 落零值。
 type countLineRow struct {
-	CountID    int64
-	SeqNo      int64 // ROW_NUMBER 序号（count_items 无 line_no 列——000009 冻结 DDL）
-	SKUID      int64
-	BinID      int64
-	QtySystem  string
-	QtyCounted string
+	CountID    int64  `gorm:"column:count_id"`
+	SeqNo      int64  `gorm:"column:seq_no"` // ROW_NUMBER 序号（count_items 无 line_no 列——000009 冻结 DDL）
+	SKUID      int64  `gorm:"column:sku_id"`
+	BinID      int64  `gorm:"column:bin_id"`
+	QtySystem  string `gorm:"column:qty_system"`
+	QtyCounted string `gorm:"column:qty_counted"`
 }
 
 // Assemble 实现 printing.ContentReader（plan §12.2 冻结签名）。
@@ -180,11 +181,11 @@ func skuDisplayByIDs(ctx context.Context, db *gorm.DB, skuIDs []int64) (map[int6
 		return out, nil
 	}
 	var rows []struct {
-		SKUID       int64
-		Code        string
-		ProductName string
-		Spec        string
-		UnitName    string
+		SKUID       int64  `gorm:"column:sku_id"`
+		Code        string `gorm:"column:code"`
+		ProductName string `gorm:"column:product_name"`
+		Spec        string `gorm:"column:spec"`
+		UnitName    string `gorm:"column:unit_name"`
 	}
 	err := db.WithContext(ctx).Raw(`
 		SELECT s.id AS sku_id, s.code,

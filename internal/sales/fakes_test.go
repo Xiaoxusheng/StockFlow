@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -1159,11 +1161,23 @@ type fakeNumbers struct {
 
 func newFakeNumbers() *fakeNumbers { return &fakeNumbers{counts: map[string]int{}} }
 
+// fakeNumRunToken 本轮运行令牌（三位，100–999）。单号桩原样输出
+// `{prefix}-20261003-%06d`，同库重复运行会与上一轮/种子行（如 dev_seed.sql 的
+// SO-20261003-000001）撞号 → 单据创建 23505 → 409。把令牌放进 6 位序号高位后，
+// 本轮号码恒 ≥100001，既不撞低号段历史数据，也保留 `^[A-Z]{2}-\d{8}-\d{6}$` 形态。
+var fakeNumRunToken = 100 + time.Now().UnixNano()%900
+
+// fakeNumGlobalSeq 进程级单号序号（跨 harness 全局递增）：集成测试每个用例各自
+// newHarness（独立 fakeNumbers），若按用例计数则各用例都从 1 开始 → 同一轮内互相撞号。
+var fakeNumGlobalSeq sync.Map // prefix → *atomic.Int64
+
 func (f *fakeNumbers) next(ctx context.Context, tx *gorm.DB, prefix string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.counts[prefix]++
-	return fmt.Sprintf("%s-20261003-%06d", prefix, f.counts[prefix]), nil
+	f.counts[prefix]++ // 保留按用例计数（单测断言 h.nums.counts[...] 依赖）
+	v, _ := fakeNumGlobalSeq.LoadOrStore(prefix, new(atomic.Int64))
+	n := fakeNumRunToken*1000 + int64(v.(*atomic.Int64).Add(1))
+	return fmt.Sprintf("%s-20261003-%06d", prefix, n), nil
 }
 
 // database_ID 替身文件内的 database.ID 直写（与生产模型同类型）。

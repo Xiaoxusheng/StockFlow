@@ -87,8 +87,23 @@ func testActor() Actor {
 }
 
 func testKey() RowKey {
-	return RowKey{WarehouseID: 1, ZoneID: 1, ShelfID: 1, BinID: 101, SKUID: 5001, BatchID: 0}
+	return RowKey{WarehouseID: 1, ZoneID: 1, ShelfID: 1, BinID: itBin(101), SKUID: 5001, BatchID: 0}
 }
+
+// itRunID 本轮运行唯一标识（毫秒时间戳 + PID），用于派生集成用例的库位号。
+//
+// 为什么需要：原实现所有用例共用固定库位 101–108，同库重复运行会残留上一轮库存行
+// （Putaway 累加）→ 断言绝对量（avail/total）与 `require.Equal(int64(1), total)` 类
+// 计数断言随轮次失真；同包多用例亦会互相看见对方的行。按运行派生库位后，同一 DB
+// 可无限次重复运行且用例彼此隔离（inventory 表无库位外键；库位存在性由
+// fakeBinChecker 放行）。
+var itRunID = int64(time.Now().UnixNano()/int64(time.Millisecond)%1_000_000)*1000 + int64(os.Getpid()%1000)
+
+// itBin 派生本轮库位号（base 保留可读性：101 → 101000123）。
+func itBin(base int64) int64 { return base*1_000_000 + itRunID }
+
+// itToken 本轮唯一令牌（拼进业务单号/幂等键，供同库重跑时 count(*) 类断言保持确定）。
+func itToken() string { return strconv.FormatInt(itRunID, 10) }
 
 // seedRow 经 Putaway 建立指定可用量（免检直达）的库存行。
 func seedRow(t *testing.T, svc *Service, key RowKey, avail int64) {
@@ -173,7 +188,7 @@ func TestConcurrentDeductNoNegativeStock(t *testing.T) {
 	db, svc := integrationEnv(t)
 	ctx := context.Background()
 	key := testKey()
-	key.BinID = 102
+	key.BinID = itBin(102)
 	seedRow(t, svc, key, 15)
 	// 先锁定 10（为并发核销做准备：两路各核销 10，仅一路可成功）。
 	res, err := svc.Lock(ctx, nil, LockOp{
@@ -201,9 +216,13 @@ func TestConcurrentDeductNoNegativeStock(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, int64(1), success.Load(), "锁定 10 两路各核销 10：恰一路成功")
 
+	// 胜出一路的效果：核销 = 锁定转已出（total 与 locked 同减 10），available 不变。
+	// 原断言（total 15 / locked 10，注释「锁定 10 未出库，total 不变」）与 Deduct 语义
+	// 及 success==1 自相矛盾——同文件 TestLockLifecycle 已断言「核销后 total 同减」
+	// （Deduct 经 applyDelta(totalDelta=-qty) + ColLocked 同减），此处对齐。
 	row := loadRow(t, db, key)
-	require.Equal(t, q(15), row.TotalQty)  // 锁定 10 未出库，total 不变
-	require.Equal(t, q(10), row.LockedQty) // 核销失败方不生效
+	require.Equal(t, q(5), row.TotalQty, "核销一路成功：total 同减 10（15→5）")
+	require.Equal(t, Qty(0), row.LockedQty, "锁定被核销清零（失败方不生效）")
 	require.Equal(t, q(5), row.AvailableQty)
 	assertIdentity(t, row)
 }
@@ -214,7 +233,7 @@ func TestIdentityAfterEveryMutation(t *testing.T) {
 	db, svc := integrationEnv(t)
 	ctx := context.Background()
 	key := testKey()
-	key.BinID = 103
+	key.BinID = itBin(103)
 
 	// 免检入库 → 锁定 → 部分释放 → 核销 → 待检入库 → 质检合格/不良 → 盘盈/盘亏 → 移库。
 	_, err := svc.Putaway(ctx, nil, PutawayOp{Key: key, Qty: q(50), Source: Source{Type: "it_in", No: "IN-1"}, Actor: testActor()})
@@ -250,7 +269,7 @@ func TestIdentityAfterEveryMutation(t *testing.T) {
 	assertIdentity(t, loadRow(t, db, key))
 
 	dest := key
-	dest.BinID = 104
+	dest.BinID = itBin(104)
 	_, err = svc.MoveBin(ctx, nil, MoveBinOp{From: key, To: dest, Qty: q(10), Source: Source{Type: "it_move", No: "MV-1"}, Actor: testActor()})
 	require.NoError(t, err)
 	assertIdentity(t, loadRow(t, db, key))
@@ -263,8 +282,8 @@ func TestLedgerPairing(t *testing.T) {
 	db, svc := integrationEnv(t)
 	ctx := context.Background()
 	key := testKey()
-	key.BinID = 105
-	businessNo := "SO-LEDGER-1"
+	key.BinID = itBin(105)
+	businessNo := "SO-LEDGER-1-" + itToken() // 本轮唯一：同库重跑时 count(*) 断言不被上一轮流水污染
 
 	// total 变化型（INBOUND）：total 差 = qty_change；status_from/to=受影响列。
 	_, err := svc.Putaway(ctx, nil, PutawayOp{Key: key, Qty: q(30), Source: Source{Type: "it_in", No: businessNo}, Actor: testActor()})
@@ -293,9 +312,12 @@ func TestLedgerPairing(t *testing.T) {
 	require.Equal(t, q(20), lockLed.QtyAfter)
 
 	// 移库：源/目标各一条 MOVE 流水，幂等键仅在首条（部分唯一索引）。
+	// 移库幂等键由调用方传入（api.md §7 通式表无 move 前缀，stockops 以头键合成后透传），
+	// 故此处显式给键——不给键时两条流水均无键，无法验证「仅首条带键」的配对规则。
 	dest := key
-	dest.BinID = 106
-	_, err = svc.MoveBin(ctx, nil, MoveBinOp{From: key, To: dest, Qty: q(4), Source: Source{Type: "it_move", No: businessNo}, Actor: testActor()})
+	dest.BinID = itBin(106)
+	moveIdem := "move:" + businessNo + ":1"
+	_, err = svc.MoveBin(ctx, nil, MoveBinOp{From: key, To: dest, Qty: q(4), Source: Source{Type: "it_move", No: businessNo}, Actor: testActor(), IdempotencyKey: moveIdem})
 	require.NoError(t, err)
 	var moves []InventoryLedger
 	require.NoError(t, db.Raw(`SELECT * FROM inventory_ledgers WHERE business_no = ? AND change_type = 'MOVE' ORDER BY id`, businessNo).Scan(&moves).Error)
@@ -312,10 +334,10 @@ func TestIdempotencyReplayDoesNotDoubleApply(t *testing.T) {
 	db, svc := integrationEnv(t)
 	ctx := context.Background()
 	key := testKey()
-	key.BinID = 107
+	key.BinID = itBin(107)
 	seedRow(t, svc, key, 100)
 
-	idem := "IDEM-LOCK-001"
+	idem := "IDEM-LOCK-" + itToken()
 	src := Source{Type: "it_order", No: "SO-IDEM-1"}
 	first, err := svc.Lock(ctx, nil, LockOp{Key: key, Qty: q(30), LockType: "ORDER_HOLD", Source: src, Actor: testActor(), IdempotencyKey: idem})
 	require.NoError(t, err)
@@ -335,7 +357,7 @@ func TestIdempotencyReplayDoesNotDoubleApply(t *testing.T) {
 	assertIdentity(t, row)
 
 	// 出库扣减幂等。
-	idemDeduct := "IDEM-DEDUCT-001"
+	idemDeduct := "IDEM-DEDUCT-" + itToken()
 	d1, err := svc.Deduct(ctx, nil, DeductOp{Key: key, Qty: q(10), Source: Source{Type: "it_ship", No: "SH-IDEM-1"}, Actor: testActor(), IdempotencyKey: idemDeduct})
 	require.NoError(t, err)
 	d2, err := svc.Deduct(ctx, nil, DeductOp{Key: key, Qty: q(10), Source: Source{Type: "it_ship", No: "SH-IDEM-1"}, Actor: testActor(), IdempotencyKey: idemDeduct})
@@ -354,7 +376,7 @@ func TestLockLifecycle(t *testing.T) {
 	db, svc := integrationEnv(t)
 	ctx := context.Background()
 	key := testKey()
-	key.BinID = 108
+	key.BinID = itBin(108)
 	seedRow(t, svc, key, 50)
 
 	// QC 冻结类锁定 → frozen 列（inventory-rules §2 冻结状态）。

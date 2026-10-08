@@ -127,6 +127,19 @@ func TestSalesReturnLifecycleAndQuantityConservation(t *testing.T) {
 	if v.Status != ReturnStatusCompleted {
 		t.Fatalf("全部检完期望 COMPLETED，得到 %s", v.Status)
 	}
+	// 质检单回写（问题 5 修复回归）：全量检完必须把质检模块的 QC 单收尾一次且仅一次，
+	// 行结果为「合格 7 / 不良 3」——原先只建单不回写，QC 单会永远停在 PENDING。
+	if got := env.qc.completionCount(); got != 1 {
+		t.Fatalf("全量检完应恰回写质检单 1 次，实际 %d 次", got)
+	}
+	done := env.qc.completed[0]
+	if done.QCNo != subQCNo {
+		t.Fatalf("回写质检单号不符：%q，期望 %q", done.QCNo, subQCNo)
+	}
+	if len(done.Lines) != 1 || done.Lines[0].LineNo != 1 ||
+		done.Lines[0].QtyQualified != qtyText(7) || done.Lines[0].QtyDefective != qtyText(3) {
+		t.Fatalf("回写质检结果行不符: %+v", done.Lines)
+	}
 	row = env.stock.stateOf(t, wh, 2, 3, bin, sku, 0)
 	if row.avail != mustQty(7) || row.defect != mustQty(3) || row.pending != 0 {
 		t.Fatalf("质检后库存去向不符: %+v", row)

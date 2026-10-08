@@ -84,12 +84,29 @@ type QCLine struct {
 	QtyInspected string
 }
 
+// QCResultLine 质检结果回写行（CompleteQC 入参；数量走 numeric(18,4) 文本）。
+type QCResultLine struct {
+	LineNo       int64
+	QtyQualified string
+	QtyDefective string
+}
+
 // QCCreator 质检单创建接口（plan §3.1 冻结：returns.QCCreator，实现由 purchase 域提供——
 // 质检单一套实现，禁止本域另造，plan §3.1 表注）。source_type 固定传 "RETURN"。
 type QCCreator interface {
 	// CreateQC 创建质检单并返回质检单号（qc_no 全局唯一，质检结果应用时以
 	// inspect:{qc_no}:{line_no}:{pass|defect} 幂等键回引——plan §7）。
 	CreateQC(ctx context.Context, sourceType, sourceNo, qcType string, warehouseID int64, lines []QCLine) (qcNo string, err error)
+
+	// CompleteQC 质检单结果回写收尾（完整质检完成后调用）：逐行回写合格/不良量，
+	// 汇总落入 qty_qualified/qty_defective/result，并推进 PENDING|INSPECTING → COMPLETED。
+	//
+	// 为什么必须回写（2026-10-07 全流程实测问题 5）：退货侧只经 CreateQC 建单、
+	// 结果自己应用，质检模块的 QC 单会永远停在 PENDING、qty_qualified=0——同一业务
+	// 事实两处记录不一致（退货单 COMPLETED 且库存已转可用，QC 单却是待检僵尸单）。
+	//
+	// 幂等：qc_no 对应单已是 COMPLETED 时直接返回 nil（不重复写），供退货链重试复用。
+	CompleteQC(ctx context.Context, operatorID int64, operatorName, qcNo string, lines []QCResultLine) error
 }
 
 // TraceLedger 追溯流水行（LedgerReader 返回形态；全部内建类型——库存流水的跨域只读投影，

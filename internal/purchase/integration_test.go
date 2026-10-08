@@ -211,6 +211,13 @@ func newChain(t *testing.T, svc *Service, skuID int64, poQty string) *chainEnv {
 	return &chainEnv{svc: svc, po: po, in: in}
 }
 
+// itRunToken 本轮唯一令牌：拼进集成用例的幂等键，使同一 DB 重复运行不命中上一轮遗留的
+// receipts.idempotency_key（命中会被判为重放，用例断言的真实变更次数随之失真）。
+var itRunToken = strconv.FormatInt(time.Now().UnixNano()/int64(time.Millisecond)%1_000_000*1000+int64(os.Getpid()%1000), 10)
+
+// itKey 本轮唯一幂等键。
+func itKey(base string) string { return base + "-" + itRunToken }
+
 func mustQty(t *testing.T, s string) stock.Qty {
 	t.Helper()
 	q, err := stock.ParseQty(s)
@@ -236,7 +243,7 @@ func TestIntegrationReceiptIdempotencyUniqueIndex(t *testing.T) {
 			res, err := svc.ConfirmReceipt(context.Background(), actor, ReceiptInput{
 				InboundNo: ch.in.InboundNo,
 				Lines:     []ReceiptLineInput{{SKUID: 100, QtyGood: mustQty(t, "10")}},
-			}, "idem-integration-1")
+			}, itKey("idem-integration-1"))
 			results[idx], errs[idx] = res, err
 		}(i)
 	}
@@ -281,7 +288,7 @@ func TestIntegrationOverReceiptGuardRealDB(t *testing.T) {
 			_, err := svc.ConfirmReceipt(context.Background(), actor, ReceiptInput{
 				InboundNo: ch.in.InboundNo,
 				Lines:     []ReceiptLineInput{{SKUID: 100, QtyGood: mustQty(t, "4")}},
-			}, "idem-over-"+strconv.Itoa(idx))
+			}, itKey("idem-over-"+strconv.Itoa(idx)))
 			errs[idx] = err
 		}(i)
 	}
@@ -308,7 +315,7 @@ func TestIntegrationClaimAtomic(t *testing.T) {
 	res, err := svc.ConfirmReceipt(ctx, actor, ReceiptInput{
 		InboundNo: ch.in.InboundNo,
 		Lines:     []ReceiptLineInput{{SKUID: 100, QtyGood: mustQty(t, "4")}},
-	}, "idem-claim")
+	}, itKey("idem-claim"))
 	require.NoError(t, err)
 	require.Len(t, res.PutawayTasks, 1)
 
@@ -348,14 +355,17 @@ func TestIntegrationPutawayAndInspectChain(t *testing.T) {
 	ch := newChain(t, svc, 101, "5")
 	actor := testActor()
 	ctx := context.Background()
+	// 批次号本轮唯一：inventory 行唯一键含 batch_id，固定批次号会让同一 DB 重复运行
+	// 在同一个 (wh,bin,sku,batch) 上累加（total 20≠5 之类），断言随轮次失真。
+	batchNo := itKey("B-INT")
 
 	rc, err := svc.ConfirmReceipt(ctx, actor, ReceiptInput{
 		InboundNo: ch.in.InboundNo,
 		Lines: []ReceiptLineInput{{
 			SKUID: 101, QtyGood: mustQty(t, "5"),
-			BatchNo: "B-INT-01", ExpiryDate: dateOf(t, "2027-12-31"),
+			BatchNo: batchNo, ExpiryDate: dateOf(t, "2027-12-31"),
 		}},
-	}, "idem-chain")
+	}, itKey("idem-chain"))
 	require.NoError(t, err)
 	task, err := svc.repo.FindTaskByNo(ctx, rc.PutawayTasks[0])
 	require.NoError(t, err)
@@ -372,9 +382,10 @@ func TestIntegrationPutawayAndInspectChain(t *testing.T) {
 		Defective      string
 	}
 	require.NoError(t, db.Raw(
-		`SELECT total_qty::text AS total, available_qty::text AS available,
-		        pending_inspect_qty::text AS pending_inspect, defective_qty::text AS defective
-		 FROM inventory WHERE sku_id = ? AND warehouse_id = 1 LIMIT 1`, 101).Scan(&row).Error)
+		`SELECT i.total_qty::text AS total, i.available_qty::text AS available,
+		        i.pending_inspect_qty::text AS pending_inspect, i.defective_qty::text AS defective
+		 FROM inventory i JOIN batches b ON b.id = i.batch_id
+		 WHERE i.sku_id = ? AND i.warehouse_id = 1 AND b.batch_no = ?`, 101, batchNo).Scan(&row).Error)
 	require.Equal(t, "5.0000", row.Total)
 	require.Equal(t, "5.0000", row.PendingInspect)
 	require.Equal(t, "0.0000", row.Available)
@@ -382,7 +393,7 @@ func TestIntegrationPutawayAndInspectChain(t *testing.T) {
 	// 质检：3 合格 / 2 不良。
 	qc, err := svc.CreateQC(ctx, actor, QCCreateInput{
 		SourceNo: ch.in.InboundNo, InspectionType: InspectionFull,
-		Lines: []QCLineInput{{SKUID: 101, BatchNo: "B-INT-01", QtyInspected: mustQty(t, "5")}},
+		Lines: []QCLineInput{{SKUID: 101, BatchNo: batchNo, QtyInspected: mustQty(t, "5")}},
 	})
 	require.NoError(t, err)
 	_, err = svc.StartQC(ctx, actor, qc.ID.Int64())
@@ -394,21 +405,25 @@ func TestIntegrationPutawayAndInspectChain(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, db.Raw(
-		`SELECT total_qty::text AS total, available_qty::text AS available,
-		        pending_inspect_qty::text AS pending_inspect, defective_qty::text AS defective
-		 FROM inventory WHERE sku_id = ? AND warehouse_id = 1 LIMIT 1`, 101).Scan(&row).Error)
+		`SELECT i.total_qty::text AS total, i.available_qty::text AS available,
+		        i.pending_inspect_qty::text AS pending_inspect, i.defective_qty::text AS defective
+		 FROM inventory i JOIN batches b ON b.id = i.batch_id
+		 WHERE i.sku_id = ? AND i.warehouse_id = 1 AND b.batch_no = ?`, 101, batchNo).Scan(&row).Error)
 	require.Equal(t, "5.0000", row.Total)
 	require.Equal(t, "3.0000", row.Available, "质检合格转可用")
 	require.Equal(t, "0.0000", row.PendingInspect)
 	require.Equal(t, "2.0000", row.Defective, "质检不良转不良品库存状态")
 
 	// 流水成对：上架 INBOUND(5) + 质检两向（INSPECT_PASS 3 / INSPECT_DEFECTIVE 2）。
+	// business_no 口径（2026-10-08 修正）：上架流水挂 **上架任务号**（business_type=
+	// putaway_task）、质检流水挂 **质检单号**（business_type=quality_order）——都不是入库单号；
+	// 上架流水与入库单的关联体现在幂等键通式 `putaway:{inbound_no}:{putaway_no}:…` 上。
 	var ledgerCount int64
 	require.NoError(t, db.Raw(`
 		SELECT COUNT(*) FROM inventory_ledgers
-		WHERE change_type IN ('INBOUND', 'INSPECT_PASS', 'INSPECT_DEFECTIVE')
-		  AND (business_no = ? OR business_no = ?)`,
-		ch.in.InboundNo, ch.in.InboundNo).Scan(&ledgerCount).Error)
+		WHERE (change_type = 'INBOUND' AND idempotency_key LIKE 'putaway:' || ? || ':%')
+		   OR (change_type IN ('INSPECT_PASS', 'INSPECT_DEFECTIVE') AND business_no = ?)`,
+		ch.in.InboundNo, qc.QCNo).Scan(&ledgerCount).Error)
 	require.GreaterOrEqual(t, ledgerCount, int64(3), "上架与质检两向流水齐备（inventory-rules §5）")
 }
 

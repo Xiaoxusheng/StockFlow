@@ -35,11 +35,11 @@ func NewSKUBarcodeReader(db *gorm.DB) *SKUBarcodeResolveService {
 // （plan §8.3 条 6"命中类型但对象不存在/停用"）。
 func (s *SKUBarcodeResolveService) FindByBarcode(ctx context.Context, code string) (devices.Hit, bool, error) {
 	var row struct {
-		ID          int64
-		SKUCode     string
-		SKUID       int64
-		ProductName string
-		IsEnabled   bool
+		ID          int64  `gorm:"column:id"`
+		SKUCode     string `gorm:"column:sku_code"`
+		SKUID       int64  `gorm:"column:sku_id"` // 显式 tag：gorm 默认把 SKUID 映射为 sk_uid
+		ProductName string `gorm:"column:product_name"`
+		IsEnabled   bool   `gorm:"column:is_enabled"`
 	}
 	err := s.db.WithContext(ctx).
 		Table("barcodes").

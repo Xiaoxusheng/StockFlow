@@ -103,7 +103,13 @@ func (s *Service) TransferIn(ctx context.Context, tx *gorm.DB, op TransferInOp) 
 		if err := s.checkSKUAndBin(ctx, op.Key); err != nil {
 			return MutationResult{}, err
 		}
-		row, created, err := ensureRow(tx, op.Key, op.Actor, StockState{})
+		// 目标行不存在时以本次入库量为初始状态建行（total/available 同增）——与 Putaway
+		// 同一范式（service.go:395-401 init 预置）。**不得传零值 StockState**：`created`
+		// 分支不再 applyDelta，零值初始化会让新建行停在 0/0 而流水却记 +qty，造成
+		// 「流水账实、库存为零」的静默丢失（2026-10-08 调拨入库实测复现：目标仓行
+		// total=0 而 TRANSFER_IN 流水 qty_change=+20）。
+		init := StockState{Total: op.Qty, Available: op.Qty}
+		row, created, err := ensureRow(tx, op.Key, op.Actor, init)
 		if err != nil {
 			return MutationResult{}, err
 		}

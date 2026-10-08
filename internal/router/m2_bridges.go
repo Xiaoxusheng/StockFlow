@@ -242,6 +242,19 @@ func (b qcCreatorBridge) CreateQC(ctx context.Context, sourceType, sourceNo, qcT
 	return b.qc.CreateQC(ctx, 0, "", sourceType, sourceNo, qcType, ls)
 }
 
+// CompleteQC 实现 returns.QCCreator：退货全量质检完成时把质检单收尾（问题 5 修复——
+// 原先只建单不回写，质检模块留 PENDING 僵尸单）。归因透传操作者，便于质检模块
+// 审计显示是谁做的退货质检。
+func (b qcCreatorBridge) CompleteQC(ctx context.Context, operatorID int64, operatorName, qcNo string, lines []returns.QCResultLine) error {
+	ls := make([]purchase.QCResultLine, 0, len(lines))
+	for _, l := range lines {
+		ls = append(ls, purchase.QCResultLine{
+			LineNo: l.LineNo, QtyQualified: l.QtyQualified, QtyDefective: l.QtyDefective,
+		})
+	}
+	return b.qc.CompleteQC(ctx, operatorID, operatorName, qcNo, ls)
+}
+
 // ---- 来源单可退读取桥接（plan §3.1 SalesOrderReader/PurchaseOrderReader 行）----
 //
 // 退量口径：plan §3.1 冻结签名的行数量为 int64（整数件）；来源单 qty 列为

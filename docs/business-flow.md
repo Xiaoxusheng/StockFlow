@@ -194,6 +194,25 @@ SKU 的批次/效期/序列号开关直接决定该 SKU 在入库、库存、出
 
 审核通过即触发库存预占（锁定库存，见 inventory-rules §4），预占失败则订单无法进入出库流程。
 
+**销售订单状态机（M2 落地口径，代码 `internal/sales/models.go:soTransitions`）**：
+
+```text
+草稿 DRAFT → 待审核 PENDING_APPROVAL → 已审核 APPROVED
+                                          ├─ 部分发货 PARTIAL_SHIPPED ─┬─ 全部发货 SHIPPED_ALL（终态）
+                                          │                            └─ 差额关闭 COMPLETED（终态）
+                                          ├─ 全部发货 SHIPPED_ALL（终态）
+                                          └─ 已取消 CANCELLED（终态）
+```
+
+> **完成时间口径（2026-10-07 全流程实测复核裁决，问题 6）**：**全量发货即出库业务闭环完成，
+> SHIPPED_ALL 为终态，不再自动推进 COMPLETED**——`completed_at` 仅在「差额关闭」
+> （PARTIAL_SHIPPED → COMPLETED，关闭未发差额）时落列。理由：出库侧全部业务事实
+> （拣货/复核/打包/发货/库存正式扣减）在全量发货时已发生完毕，签收/结算不在本期范围；
+> 报表口径亦把 SHIPPED_ALL 计入「完成出库」（`/api/outbounds/completion-rate`
+> 分子=SHIPPED_ALL+CLOSED，见 api.md）。**这不是缺陷**：SHIPPED_ALL 无出边是状态机的
+> 有意设计，`completed_at=null` 表示"未走差额关闭"。后续若引入签收/结算环节，再在此处
+> 追加 SHIPPED_ALL → COMPLETED 迁移并同步本文档。
+
 ---
 
 ## 7. 出库管理
@@ -304,6 +323,14 @@ SKU、条码、数量、批次、序列号、订单
 ```
 
 质检结果决定退货入库去向：合格入正常库存，不合格入不良品库存。
+
+> **质检单回写义务（2026-10-07 全流程实测修复，问题 5）**：销售退货的质检经
+> `returns.QCCreator` 窄接口在采购域建单（`source_type=RETURN`，质检单一套实现）；
+> **退货单全量质检完成时必须同时把该质检单回写收尾**（逐行合格/不良量 + 汇总
+> `qty_qualified`/`qty_defective`/`result` + 检验人，`PENDING|INSPECTING → COMPLETED`，
+> 幂等可重入）——否则同一业务事实在两处记录不一致：退货单已 COMPLETED、库存已转
+> 可用/不良，而质检模块的 QC 单永远停在 PENDING、`qty_qualified=0`（僵尸单）。
+> 实现：`purchase.QCCreatorService.CompleteQC`（`internal/purchase/service_quality.go`）。
 
 ### 9.2 采购退货
 

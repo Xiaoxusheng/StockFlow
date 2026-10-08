@@ -37,12 +37,12 @@ func NewSerialReader(db *gorm.DB) *SerialResolveService {
 // 属业务执行侧（scanner.md §6.7：resolve 只识别，不因状态拒绝识别）。
 func (s *SerialResolveService) FindSerial(ctx context.Context, sn string) (devices.Hit, bool, error) {
 	var row struct {
-		ID          int64
-		SerialNo    string
-		SKUID       int64
-		SKUCode     string
-		WarehouseID int64
-		Status      string
+		ID          int64  `gorm:"column:id"`
+		SerialNo    string `gorm:"column:serial_no"`
+		SKUID       int64  `gorm:"column:sku_id"` // 显式 tag：gorm 默认把 SKUID 映射为 sk_uid
+		SKUCode     string `gorm:"column:sku_code"`
+		WarehouseID int64  `gorm:"column:warehouse_id"`
+		Status      string `gorm:"column:status"`
 	}
 	err := s.db.WithContext(ctx).
 		Table("serial_numbers").
@@ -85,11 +85,11 @@ func NewBatchReader(db *gorm.DB) *BatchResolveService {
 // 批次为 SKU 级数据（无仓库维度），Hit.WarehouseID=0；归属库存分布由业务查询承担。
 func (s *BatchResolveService) FindBatch(ctx context.Context, batchNo string) ([]devices.Hit, error) {
 	var rows []struct {
-		ID          int64
-		BatchNo     string
-		SKUID       int64
-		SKUCode     string
-		ProductName string
+		ID          int64  `gorm:"column:id"`
+		BatchNo     string `gorm:"column:batch_no"`
+		SKUID       int64  `gorm:"column:sku_id"` // 显式 tag：gorm 默认把 SKUID 映射为 sk_uid
+		SKUCode     string `gorm:"column:sku_code"`
+		ProductName string `gorm:"column:product_name"`
 	}
 	err := s.db.WithContext(ctx).
 		Table("batches").

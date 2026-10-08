@@ -507,6 +507,134 @@ type QCCreatorService struct{ svc *Service }
 // NewQCCreator 构造（router：returns.WithQCCreator(purchase.NewQCCreator(svc))）。
 func NewQCCreator(svc *Service) *QCCreatorService { return &QCCreatorService{svc: svc} }
 
+// QCResultLine 退货质检结果回写行（returns.QCCreator.CompleteQC 入参镜像，本域不 import
+// returns——域间契约由 router 桥接适配）。
+type QCResultLine struct {
+	LineNo       int64
+	QtyQualified string
+	QtyDefective string
+}
+
+// CompleteQC 退货质检单收尾回写（returns 域在退货单全量质检完成时经窄接口调用）：
+// 逐行回写合格/不良量 + 汇总落列（qty_qualified/qty_defective/result/检验人）并推进
+// PENDING|INSPECTING → COMPLETED（inspected_at 随守卫迁移落列）。
+//
+// 语义（2026-10-07 全流程实测问题 5）：退货侧只经 CreateQC 建单并自行应用结果，若不回写，
+// 质检模块会留下一张永远 PENDING、qty_qualified=0 的僵尸单——与已 COMPLETED 的退货单
+// 记录互相矛盾。本方法把同一业务事实在两处对齐。
+//
+// 幂等：已是 COMPLETED 直接返回 nil（退货链重试可安全重入）；行数须与质检单明细齐套，
+// 逐行合格+不良须等于该行 qty_inspected（退货质检为全检口径）。
+func (c *QCCreatorService) CompleteQC(ctx context.Context, operatorID int64, operatorName, qcNo string, lines []QCResultLine) error {
+	if strings.TrimSpace(qcNo) == "" {
+		return invalidParam("qc_no", "质检单号必填")
+	}
+	qc, err := c.svc.repo.FindQCByNo(ctx, strings.TrimSpace(qcNo))
+	if err != nil {
+		return err
+	}
+	if qc == nil {
+		return response.NewError(ErrQCNotFound, map[string]any{"qc_no": qcNo})
+	}
+	if qc.Status == QCStatusCompleted {
+		return nil // 幂等：已收尾不重复写
+	}
+	if qc.Status != QCStatusPending && qc.Status != QCStatusInspecting {
+		return response.NewError(ErrQCStatusNotAllowed, map[string]any{
+			"qc_no": qcNo, "status": qc.Status, "to": QCStatusCompleted,
+			"reason": "仅待检/检验中质检单可回写结果",
+		})
+	}
+	items, err := c.svc.repo.ListQCItems(ctx, qc.ID.Int64())
+	if err != nil {
+		return err
+	}
+	if len(items) != len(lines) {
+		return invalidParam("lines", fmt.Sprintf("质检结果行数 %d 与质检单明细 %d 不齐套", len(lines), len(items)))
+	}
+	itemByLine := make(map[int64]*QualityItem, len(items))
+	for _, it := range items {
+		itemByLine[int64(it.LineNo)] = it
+	}
+	byLine := make(map[int64]QCResultLine, len(lines))
+	var totalQualified, totalDefective stock.Qty
+	for _, l := range lines {
+		it, ok := itemByLine[l.LineNo]
+		if !ok {
+			return invalidParam("lines", fmt.Sprintf("质检单明细行 %d 不存在", l.LineNo))
+		}
+		if _, dup := byLine[l.LineNo]; dup {
+			return invalidParam("lines", fmt.Sprintf("质检单明细行 %d 重复", l.LineNo))
+		}
+		q, perr := parseQtyText(l.QtyQualified)
+		if perr != nil {
+			return invalidParam("lines[].qty_qualified", perr.Error())
+		}
+		d, perr := parseQtyText(l.QtyDefective)
+		if perr != nil {
+			return invalidParam("lines[].qty_defective", perr.Error())
+		}
+		if !q.Add(d).Sub(it.QtyInspected).IsZero() {
+			return response.NewError(ErrQCQtyInvalid, map[string]any{
+				"line_no": l.LineNo, "qty_inspected": it.QtyInspected.String(),
+				"qty_qualified": q.String(), "qty_defective": d.String(),
+				"reason": "合格量与不良量之和必须等于该行检验量（退货质检为全检口径）",
+			})
+		}
+		byLine[l.LineNo] = QCResultLine{LineNo: l.LineNo, QtyQualified: q.String(), QtyDefective: d.String()}
+		totalQualified = totalQualified.Add(q)
+		totalDefective = totalDefective.Add(d)
+	}
+	result := "部分合格"
+	switch {
+	case !totalDefective.IsPositive():
+		result = "合格"
+	case !totalQualified.IsPositive():
+		result = "不合格"
+	}
+	return c.svc.tx(ctx, func(tx *gorm.DB) error {
+		for _, it := range items {
+			l := byLine[int64(it.LineNo)]
+			q, perr := parseQtyText(l.QtyQualified)
+			if perr != nil {
+				return invalidParam("lines[].qty_qualified", perr.Error())
+			}
+			d, perr := parseQtyText(l.QtyDefective)
+			if perr != nil {
+				return invalidParam("lines[].qty_defective", perr.Error())
+			}
+			if err := c.svc.repo.UpdateQCItemCols(ctx, tx, it.ID.Int64(), map[string]any{
+				"qty_qualified": q, "qty_defective": d,
+				"updated_at": database.Now(), "updated_by": operatorID,
+			}); err != nil {
+				return err
+			}
+		}
+		n, err := c.svc.repo.UpdateQCStatus(ctx, tx, qc.ID.Int64(), qc.Status, QCStatusCompleted, operatorID)
+		if err := guardRows(n, err); err != nil {
+			return response.NewError(ErrStatusConflict, map[string]any{
+				"qc_no": qcNo, "reason": "质检单状态并发变化",
+			})
+		}
+		if err := c.svc.repo.UpdateQCCols(ctx, tx, qc.ID.Int64(), map[string]any{
+			"qty_qualified": totalQualified, "qty_defective": totalDefective, "result": result,
+			"inspector_id": operatorID, "inspector_name": operatorName,
+			"updated_at": database.Now(), "updated_by": operatorID,
+		}); err != nil {
+			return err
+		}
+		e := Actor{UserID: operatorID, Username: operatorName}.
+			auditEntry("quality_order", qc.ID.Int64(), "complete-by-return")
+		e.Request = map[string]any{"qc_no": qcNo, "lines": byLine}
+		e.Before = map[string]any{"status": qc.Status}
+		e.After = map[string]any{
+			"status": QCStatusCompleted, "result": result,
+			"qty_qualified": totalQualified.String(), "qty_defective": totalDefective.String(),
+		}
+		return middlewareAudit(tx, e)
+	})
+}
+
 // CreateQC 创建来源质检单（sourceType=INBOUND/RETURN；RETURN 跳过入库单状态校验——
 // 退货单据归 returns 域守卫，本入口只校验来源单号非空与数量值域）。
 func (c *QCCreatorService) CreateQC(ctx context.Context, operatorID int64, operatorName, sourceType, sourceNo, qcType string, lines []QCCreateLine) (string, error) {

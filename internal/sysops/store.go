@@ -159,8 +159,12 @@ func (l *sqlLockAcquirer) TryLock(ctx context.Context, key string) (unlock func(
 		return nil, false, err
 	}
 	var acquired bool
+	// 占位符必须是 $n：本路径走 database/sql 原生连接（绕过 GORM 方言器），底层为
+	// pgx/v5 stdlib 驱动——它不认 `?`，写成 `hashtext(?)` 会被原样发给 PG 得到
+	// `syntax error at or near ")"`（SQLSTATE 42601），advisory lock 恒失败、
+	// 全部定时任务按 fail-closed 静默跳过（2026-10-07 实测服务日志复现）。
 	if err := conn.QueryRowContext(lockCtx,
-		`SELECT pg_try_advisory_lock(hashtext(?))`, key).Scan(&acquired); err != nil {
+		`SELECT pg_try_advisory_lock(hashtext($1))`, key).Scan(&acquired); err != nil {
 		_ = conn.Close()
 		return nil, false, err
 	}
@@ -175,7 +179,7 @@ func (l *sqlLockAcquirer) TryLock(ctx context.Context, key string) (unlock func(
 		defer unlockCancel()
 		var released bool
 		_ = conn.QueryRowContext(unlockCtx,
-			`SELECT pg_advisory_unlock(hashtext(?))`, key).Scan(&released)
+			`SELECT pg_advisory_unlock(hashtext($1))`, key).Scan(&released)
 	}
 	return unlock, true, nil
 }

@@ -41,11 +41,11 @@ func skuDisplayByIDs(ctx context.Context, db *gorm.DB, skuIDs []int64) (map[int6
 		return out, nil
 	}
 	var rows []struct {
-		SKUID       int64
-		Code        string
-		ProductName string
-		Spec        string
-		UnitName    string
+		SKUID       int64  `gorm:"column:sku_id"`
+		Code        string `gorm:"column:code"`
+		ProductName string `gorm:"column:product_name"`
+		Spec        string `gorm:"column:spec"`
+		UnitName    string `gorm:"column:unit_name"`
 	}
 	err := db.WithContext(ctx).Raw(`
 		SELECT s.id AS sku_id, s.code,
@@ -119,11 +119,11 @@ type outboundHeadRow struct {
 }
 
 type outboundLineRow struct {
-	OutboundID int64
-	LineNo     int64
-	SKUID      int64
-	Qty        string // CAST(qty AS varchar)
-	QtyPicked  string // CAST(qty_picked AS varchar)
+	OutboundID int64  `gorm:"column:outbound_id"`
+	LineNo     int64  `gorm:"column:line_no"`
+	SKUID      int64  `gorm:"column:sku_id"`
+	Qty        string `gorm:"column:qty"`        // CAST(qty AS varchar)
+	QtyPicked  string `gorm:"column:qty_picked"` // CAST(qty_picked AS varchar)
 }
 
 // Assemble 实现 printing.ContentReader。
@@ -304,16 +304,16 @@ type PickContentReader struct {
 }
 
 type pickRow struct {
-	PickID         int64  // pick_tasks.id
-	PickNo         string // pick_tasks.pick_no
-	PickerName     string // assignee_name
-	WarehouseName  string // warehouses.name（source_warehouse_id）
-	PickAt         string // to_char(picked_at)
-	OutboundLineNo int64
-	SKUID          int64
-	SourceBinID    int64
-	Qty            string
-	QtyPicked      string
+	PickID         int64  `gorm:"column:pick_id"`  // pick_tasks.id
+	PickNo         string `gorm:"column:pick_no"`  // pick_tasks.pick_no
+	PickerName     string `gorm:"column:picker_name"`
+	WarehouseName  string `gorm:"column:warehouse_name"`
+	PickAt         string `gorm:"column:pick_at"`
+	OutboundLineNo int64  `gorm:"column:outbound_line_no"`
+	SKUID          int64  `gorm:"column:sku_id"`
+	SourceBinID    int64  `gorm:"column:source_bin_id"`
+	Qty            string `gorm:"column:qty"`
+	QtyPicked      string `gorm:"column:qty_picked"`
 }
 
 // Assemble 实现 printing.ContentReader。
@@ -587,11 +587,11 @@ func customerNameByOutboundIDs(ctx context.Context, db *gorm.DB, outboundIDs []i
 
 // shippedLineRow 发货明细投影行（outbound_items 本域表，实发 = qty_shipped）。
 type shippedLineRow struct {
-	OutboundID int64
-	LineNo     int64
-	SKUID      int64
-	Qty        string
-	QtyShipped string
+	OutboundID int64  `gorm:"column:outbound_id"`
+	LineNo     int64  `gorm:"column:line_no"`
+	SKUID      int64  `gorm:"column:sku_id"`
+	Qty        string `gorm:"column:qty"`
+	QtyShipped string `gorm:"column:qty_shipped"`
 }
 
 // outboundShippedLines 发货明细（仅已发货行 qty_shipped > 0）。
