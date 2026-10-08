@@ -227,7 +227,7 @@ func (r integrationSOReader) FindReturnable(_ context.Context, soNo string) (int
 		return 0, 0, nil, false, nil // 未命中 → found=false（业务关系校验失败语义）
 	}
 	var rows []struct {
-		LineNo     int64  `gorm:"column:line_no"`
+		LineNo int64 `gorm:"column:line_no"`
 		// SKUID 必须显式 tag：GORM 命名策略把 SKUID 推导成 sk_uid（≠表列 sku_id），
 		// 扫描静默落 0 → 来源单明细 sku 全 0 → 退货创建报 RETURNS_LINE_NOT_FOUND
 		// （2026-10-08 实测定位；与生产侧 stockops/sales 同类缺陷）。

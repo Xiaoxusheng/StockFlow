@@ -147,7 +147,7 @@ type expiryBatchRow struct {
 	DaysLeft   int       // 剩余效期天数（≤0 已过期）
 	Threshold  int       // 命中的预警档位（30/15/7/3；已过期记 0）
 	Level      string    // "expired" 或 "30"/"15"/"7"/"3"
-	TotalQty   float64   `gorm:"column:total_qty"` // 该批次现存量（全仓合计，>0 才预警）
+	TotalQty   float64   `gorm:"column:total_qty"`  // 该批次现存量（全仓合计，>0 才预警）
 	Warehouses string    `gorm:"column:warehouses"` // 现存仓库编码清单（去重，供人读内容）
 }
 

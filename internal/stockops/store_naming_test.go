@@ -39,13 +39,13 @@ func TestScanRefColumnMapping(t *testing.T) {
 			},
 		},
 		{
-			name: "SerialRef→serial_numbers",
-			dest: &SerialRef{},
+			name:    "SerialRef→serial_numbers",
+			dest:    &SerialRef{},
 			columns: []string{"id", "serial_no", "sku_id", "batch_id"},
 		},
 		{
-			name: "InTransitRow→在途聚合投影",
-			dest: &InTransitRow{},
+			name:    "InTransitRow→在途聚合投影",
+			dest:    &InTransitRow{},
 			columns: []string{"sku_id", "batch_id", "out_transit", "in_transit"},
 		},
 	}

@@ -304,8 +304,8 @@ type PickContentReader struct {
 }
 
 type pickRow struct {
-	PickID         int64  `gorm:"column:pick_id"`  // pick_tasks.id
-	PickNo         string `gorm:"column:pick_no"`  // pick_tasks.pick_no
+	PickID         int64  `gorm:"column:pick_id"` // pick_tasks.id
+	PickNo         string `gorm:"column:pick_no"` // pick_tasks.pick_no
 	PickerName     string `gorm:"column:picker_name"`
 	WarehouseName  string `gorm:"column:warehouse_name"`
 	PickAt         string `gorm:"column:pick_at"`
