@@ -62,6 +62,12 @@ web/public/__urlsync-check.html
 # Agent 本地任务状态（TASK_STATE 等，工作状态以 docs/tasks/current.md 为准）
 .agent/
 
+# 本地诊断/取证临时产物（gormscan、ui_check 等截图与浏览器脚本，17M+，勿入库）
+_diag/
+
 # 构建产物输出到非标准路径（并行会话产生，防误提交）
 out/
 web/out/
+
+# 本地诊断产物（gormscan / ui_check 等一次性排查脚本与截图，非交付物）
+_diag/
