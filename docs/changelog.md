@@ -12,6 +12,19 @@
 
 ---
 
+## [2026-10-08] fix(deps)：excelize 依赖漏洞治理——9 条 Dependabot 告警（3 high / 6 medium）全清
+
+- **背景**：推送后 GitHub 在默认分支报告依赖漏洞。查 Dependabot API 实际为 **9 条开放告警**（推送提示只报了 2 条），全部集中在同一包 `github.com/xuri/excelize/v2`（当前 v2.11.0）。
+- **告警明细**：3 high——`ColumnNameToNumber` int64 溢出产生域外坐标致负索引 panic（CVE-2026-107217）、agile 解密 `spinCount` 无界烧 CPU（CVE-2026-107219）、`<col max>` 无上限校验按列展开致挂起/OOM（CVE-2026-107223）；6 medium——补充平面文本 `RIGHT()` 负索引 panic、空 `mergeCell` ref panic、行内列引用乱序 panic、`GetConditionalFormats` 无长度/nil 校验、Zip64 解压尺寸 2^63 panic、`GetStyle` 负 fillId/borderId/fontId panic（CVE-2026-107218/220/221/222/224/225）。
+- **风险可达性**：excelize 在本仓用于 `internal/datax`（Excel 导入/导出）与 `internal/storage/whitelist.go`，导入路径**直接解析用户上传的 xlsx**——上述 panic/OOM 均可由构造文件触发，属真实可达路径，不是纸面告警。
+- **修复**：`github.com/xuri/excelize/v2` v2.11.0 → `v2.11.1-0.20260910071107-696050fbf14e`（9 条告警 first_patched 中最新的一条提交，包含全部 9 项修复）。**注：官方尚无 v2.11.1 tag，该版本是 master 上的补丁提交伪版本（2026-09-10）**；伪版本一经解析即不可变，锁定后可复现。`go mod tidy` 连带升级 `golang.org/x/crypto v0.53.0→v0.55.0`、`richardlehane/mscfb v1.0.7→v1.0.8` 及 `golang.org/x/{mod,net,sync,sys,text,tools}`。
+- **调用面评估**：全仓仅用到 `CoordinatesToCellName`(26 处) / `Cell` / `OpenReader` / `NewFile` / `Style`·`Font`·`Fill`·`Alignment` / `StreamWriter` / `Options` / `ColumnNumberToName` / `CellTypeSharedString`，均为 v2 稳定 API，无跨版本破坏面。
+- **验证**：`go build ./... && go vet ./... && go test ./...` 全绿；`internal/datax`（4.1s）与 `internal/storage`（1.9s）单包亦通过。
+- **遗留观察项**：官方发布 v2.11.1 tag 后应改回正式 tag（`go get github.com/xuri/excelize/v2@v2.11.1`），避免长期停留在伪版本。
+- **影响范围**：go.mod / go.sum。不动业务代码、不动迁移、不动前端。
+
+---
+
 ## [2026-10-08] test(server)+fix(server)：真库集成测试全量修复——12 处红转全绿且可重复运行 + 收货并发同键重放兜底
 
 - **背景**：用户「继续修复，可以在真库上跑」。上一轮把 sales 3 个集成用例列为"已知遗留"（当时判断为测试基建缺口），本轮完整跑一遍真库集成套件发现**问题远不止 3 个**。
