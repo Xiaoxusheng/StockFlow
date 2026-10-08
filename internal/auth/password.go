@@ -13,6 +13,12 @@ import (
 // BcryptCost 与 internal/database.BcryptCost 同值（seed 与本域共用同一强度）。
 const BcryptCost = 12
 
+// bcryptCost 是运行时实际使用的成本：生产路径恒等于 BcryptCost（无人改写）。
+// 测试在 main_test.go 的 TestMain 下调为 bcrypt.MinCost——cost 12 单次哈希在 -race 下约 8s
+// （race 插桩把 blowfish 的 S 盒访问放慢一个量级），auth 包 70+ 次哈希会撑破 go test
+// 默认 10m 包超时（CI test 关卡实测 604s 超时）。
+var bcryptCost = BcryptCost
+
 // 密码策略边界（plan §7.3：长度 ≥ 8 且含字母+数字）。
 // maxPasswordLen 取 bcrypt 72 字节输入上限：超出既会报错也会被静默截断，宁可显式拒绝。
 const (
@@ -25,19 +31,19 @@ const (
 var dummyHash = mustDummyHash()
 
 func mustDummyHash() string {
-	h, err := bcrypt.GenerateFromPassword([]byte("sf-dummy-password"), BcryptCost)
+	h, err := bcrypt.GenerateFromPassword([]byte("sf-dummy-password"), bcryptCost)
 	if err != nil {
 		panic("auth: 生成防枚举假哈希失败: " + err.Error())
 	}
 	return string(h)
 }
 
-// HashPassword 生成 bcrypt 哈希（cost 12）。
+// HashPassword 生成 bcrypt 哈希（生产 cost 12，见 BcryptCost）。
 func HashPassword(plain string) (string, error) {
 	if err := ValidatePassword(plain); err != nil {
 		return "", err
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(plain), BcryptCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(plain), bcryptCost)
 	if err != nil {
 		return "", err
 	}

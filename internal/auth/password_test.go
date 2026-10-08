@@ -19,7 +19,8 @@ func TestBcryptRoundtrip(t *testing.T) {
 
 	cost, err := bcrypt.Cost([]byte(hash))
 	require.NoError(t, err)
-	require.Equal(t, BcryptCost, cost) // plan §7.3：cost 12
+	require.Equal(t, bcryptCost, cost) // 与生效成本一致（生产=BcryptCost，测试=MinCost）
+	require.Equal(t, 12, BcryptCost)   // plan §7.3：生产强度恒为 cost 12
 }
 
 func TestPasswordPolicy(t *testing.T) {

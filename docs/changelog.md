@@ -12,6 +12,20 @@
 
 ---
 
+## [2026-10-08] fix(ci)：CI 两处红转绿——auth 包 `-race` 超时（bcrypt cost 12）+ 4 文件 gofmt
+
+- **背景**：推送后远程 CI 失败。查 Actions：`f827a63`（依赖升级）与 `04a50e0`（75 提交）两次运行**同样两处红**，而更早的 `4b3d9e2a` 全绿——失败**不是依赖升级引入**，是那 75 个提交带进来的既有问题。
+- **红点 1（test job，`go test -race`）**：`internal/auth` **604.316s 超时**，`panic: test timed out after 10m0s`。goroutine dump 显示超时那一刻仍在 `TestGetUsersScopeFiltering → fakeRepo.seedUser → auth.HashPassword → bcrypt.GenerateFromPassword` 内执行——**不是死锁，是 CPU 成本**。
+  - **根因**：`BcryptCost = 12` 在 race 插桩下约 8s/次（race 记录 blowfish 的每一次 S 盒访问，把这段 CPU 密集代码放慢一个量级）。auth 包有 69 处 `seedUser`（每次现算哈希）+ 11 处直接 Hash/Verify + 未知用户登录路径的 `dummyHash` 同代价比较，累计远超 `go test` 默认 10m 包超时。本地无 race 基线实测 **59.06s**，×10~15 倍正好落在 604s。
+  - **修复**：把「生效成本」抽成包级 `var bcryptCost = BcryptCost`（生产路径恒为 12，无人改写），测试在新增的 `internal/auth/main_test.go` `TestMain` 里降为 `bcrypt.MinCost` 并按低成本重建 `dummyHash`。`BcryptCost` 常量仍为 12；`password_test.go` 增加 `require.Equal(t, 12, BcryptCost)` 显式钉住生产强度，哈希成本断言改为比对 `bcryptCost`。
+  - **效果**：auth 包 **59.063s → 3.559s（16.6×）**；全量 `go test ./...` 全绿。
+- **红点 2（lint job，gofmt）**：CI 口径（LF 检出）下 4 个文件未格式化——`internal/returns/integration_test.go`、`internal/sales/printing_content.go`、`internal/stockops/store_naming_test.go`、`internal/sysops/scans.go`，全部是结构体字段/注释对齐问题。修复：`gofmt -w`，共 8 增 8 删。
+  - **踩坑（重要）**：本机 `core.autocrlf=true`，工作区是 CRLF，直接跑 `gofmt -l cmd internal` 会**误报 27 个文件**；`git archive` 导出同样被 eol 转换污染（417 个全报）。**权威判法**是逐文件 `git show HEAD:<path> | gofmt -d`（取已提交的 LF 内容）。
+- **验证**：`go build ./... && go vet ./... && go test ./...` 全绿；gofmt 按 LF 口径复查 0 命中。本机无 gcc（`-race` 需 CGO + gcc），故 `-race` 关卡以 CI 重跑为准。guards job 在两次失败运行里均为 success，本次未触及文档/状态文件。
+- **影响范围**：internal/auth/password.go（生效成本变量化）、internal/auth/password_test.go、internal/auth/main_test.go（新增）；4 个文件的 gofmt 对齐。不动业务语义、不动迁移、不动前端。
+
+---
+
 ## [2026-10-08] fix(deps)：excelize 依赖漏洞治理——9 条 Dependabot 告警（3 high / 6 medium）全清
 
 - **背景**：推送后 GitHub 在默认分支报告依赖漏洞。查 Dependabot API 实际为 **9 条开放告警**（推送提示只报了 2 条），全部集中在同一包 `github.com/xuri/excelize/v2`（当前 v2.11.0）。
